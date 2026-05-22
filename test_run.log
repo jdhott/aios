@@ -1,4 +1,4 @@
-Running AIOS at Fri 22 May 2026 04:45:37 EDT
+Running AIOS at Fri 22 May 2026 05:28:23 EDT
 === AIOS CLEAN CUTOVER v3 ===
 __file__ = /Users/John/LocalProjects/aios/run_aios_PHASE2_FIXED.py
 === EXECUTION ENGINE V2 MODULE LOADED ===
@@ -116,10 +116,6 @@ Project candidate detector: no newly created top-level tasks to review.
 Eligible Quick Wins retrieved: 65
 Current focused tasks: 5
 Desired focused tasks: 5
-Updated Focus: Confirm upcoming lawn services with Green Unlimited these might conflict with work by Behram → False
-Updated Focus: Schedule appointment for car service → False
-Updated Focus: Buy nematodes at Home Hardware → True
-Updated Focus: Text Gaby to request list of participants for pizza workshop Friday → True
 Focused Quick Wins: 5/65
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
@@ -294,13 +290,13 @@ Execution Engine V2 completed successfully. Winners: 5
 Legacy execution reconciliation disabled.
 
 --- Run summary ---
-Started:  2026-05-22 04:45:39
-Finished: 2026-05-22 04:46:14
-Elapsed:  35.4s
+Started:  2026-05-22 05:28:25
+Finished: 2026-05-22 05:28:54
+Elapsed:  29.7s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
-Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0, Focus checkbox: 4, Focus Now added: 0
+Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0, Focus checkbox: 0, Focus Now added: 0
 Archive / review — Archived items: 0, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 0
 AI log — Entries: 0, Metadata entries: 0, Errors: 0
 Task notes added: 0
@@ -311,5 +307,5 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-22 04:46:14 — Run complete — Created: 0, Updated: 4, Archived: 0, Errors: 0
+2026-05-22 05:28:54 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
