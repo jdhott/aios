@@ -49,7 +49,6 @@ def normalize_due_date(dt):
 
 def _extract_relative_due_date(text: str):
     lowered = (text or "").lower()
-
     now = datetime.now()
 
     if "tomorrow" in lowered:

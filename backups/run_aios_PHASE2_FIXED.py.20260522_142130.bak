@@ -1,17 +1,4 @@
 
-# ============================================================
-# EXECUTION AUTHORITY CONSOLIDATION — PHASE 1
-# Legacy execution abstractions deprecated:
-# - Focus Now
-# - Strong Candidate
-# - automatic Do = Today mutation
-#
-# Canonical execution authority:
-# - Execution Score
-# - Execution Rank
-# ============================================================
-
-
 
 def notion_paginated_query(url, headers, payload):
     """Execution Engine V2 paginated Notion query  helper."""
