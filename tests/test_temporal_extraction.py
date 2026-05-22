@@ -1,3 +1,4 @@
+
 from core.metadata.temporal import extract_temporal_metadata
 
 result = extract_temporal_metadata(
@@ -7,4 +8,5 @@ result = extract_temporal_metadata(
 assert result["cleaned_title"] == "Call dentist"
 assert result["due_date"] is not None
 
-print("Temporal extraction smoke test passed")
+print(result)
+print("Temporal authority smoke test passed")

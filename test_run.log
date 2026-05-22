@@ -1,4 +1,4 @@
-Running AIOS at Fri 22 May 2026 06:46:31 EDT
+Running AIOS at Fri 22 May 2026 08:52:07 EDT
 === AIOS CLEAN CUTOVER v3 ===
 __file__ = /Users/John/LocalProjects/aios/run_aios_PHASE2_FIXED.py
 === EXECUTION ENGINE V2 MODULE LOADED ===
@@ -39,10 +39,10 @@ Project candidate detector: no newly created top-level tasks to review.
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 38 results
-[Pagination] Total results: 238
+[Pagination] Page 3: 36 results
+[Pagination] Total results: 236
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 238 total tasks
+[query_tasks_database] Retrieved 236 total tasks
 [Execution Engine V2] scoring: Label storage boxes in office
 [Execution Engine V2] scoring: Schedule furnace maintenance
 [Execution Engine V2] scoring: Check beneficiaries on pensions
@@ -103,38 +103,36 @@ Project candidate detector: no newly created top-level tasks to review.
 [Execution Engine V2] scoring: Check pool heater
 [Execution Engine V2] scoring: Check skimmer basket in pool
 [Execution Engine V2] scoring: Connect garden hose in front yard
-[Execution Engine V2] scoring: Pick prescription at Stafford Pharmacy Saturday
 [Execution Engine V2] scoring: Vacuum bakery
 [Execution Engine V2] scoring: Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
 [Execution Engine V2] scoring: Buy nematodes at Home Hardware
-[Execution Engine V2] scoring: Bulk up starter
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 5 results
 [Pagination] Total results: 5
 === PAGINATION ACTIVE ===
 [query_tasks_database] Retrieved 5 total tasks
-Eligible Quick Wins retrieved: 65
+Eligible Quick Wins retrieved: 63
 Current focused tasks: 5
 Desired focused tasks: 5
-Focused Quick Wins: 5/65
+Focused Quick Wins: 5/63
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 74 results
-[Pagination] Total results: 274
+[Pagination] Page 3: 72 results
+[Pagination] Total results: 272
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 274 total tasks
-[Execution Engine] Full task set for reconciliation: 274
+[query_tasks_database] Retrieved 272 total tasks
+[Execution Engine] Full task set for reconciliation: 272
 === EXECUTION ENGINE V2 ACTIVE ===
-[Execution Engine V2] Tasks received: 274
+[Execution Engine V2] Tasks received: 272
 \n--- Execution Engine V2 Sparse Reset ---
 [Execution Engine V2] Previously persisted tasks: 10
 [Execution Engine V2] Reset tasks: 10
 \n--- Execution Eligibility Scan ---
-Total open tasks: 274
+Total open tasks: 272
 Rejected deferred: 0
 Rejected JDI: 0
-Rejected Quick Win: 78
+Rejected Quick Win: 76
 Rejected non-actionable: 131
 Eligible execution tasks: 65
 [Ranking Shadow V3] title=Fix timezone issue with Bread Basket app | legacy=0 | evaluator=8 | divergence=8 | components=[medium_effort(+3), operational_context(+5)]
@@ -290,9 +288,9 @@ Execution Engine V2 completed successfully. Winners: 5
 Legacy execution reconciliation disabled.
 
 --- Run summary ---
-Started:  2026-05-22 06:46:32
-Finished: 2026-05-22 06:47:19
-Elapsed:  46.9s
+Started:  2026-05-22 08:52:09
+Finished: 2026-05-22 08:52:46
+Elapsed:  37.4s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
@@ -307,5 +305,5 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-22 06:47:19 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-22 08:52:46 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.

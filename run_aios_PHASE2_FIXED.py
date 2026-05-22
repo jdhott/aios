@@ -4861,10 +4861,29 @@ def update_missing_metadata_if_confident(
     # -----------------------------------------------------------------
     # Explicit temporal reinforcement parsing
     # -----------------------------------------------------------------
+    temporal_metadata = extract_temporal_metadata(source_text)
+
     normalized_source = source_text.lower()
 
-    explicit_today = "today" in normalized_source
-    explicit_tomorrow = "tomorrow" in normalized_source
+    explicit_today = bool(
+        temporal_metadata.get("due_date")
+        and "today" in normalized_source
+    )
+
+    explicit_tomorrow = bool(
+        temporal_metadata.get("due_date")
+        and "tomorrow" in normalized_source
+    )
+
+    print(
+        "[TEMPORAL AUTHORITY]",
+        {
+            "input": source_text,
+            "cleaned_title": temporal_metadata.get("cleaned_title"),
+            "due_date": str(temporal_metadata.get("due_date")),
+            "tokens": temporal_metadata.get("temporal_tokens_found"),
+        }
+    )
 
     updates = {}
     changed_metadata = {}
