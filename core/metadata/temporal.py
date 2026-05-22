@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timedelta
 
 TEMPORAL_REGEX = re.compile(
-    r"\btoday\b|\btonight\b|\btomorrow\b|\btomorrow morning\b",
+    r"\btomorrow morning\b|\btomorrow afternoon\b|\btomorrow evening\b|\bthis morning\b|\bthis afternoon\b|\bthis evening\b|\btoday\b|\btonight\b|\btomorrow\b",
     re.IGNORECASE,
 )
 
@@ -32,7 +32,10 @@ def extract_temporal_metadata(text):
         signals.append("today")
 
     return {
+        "raw_text": text,
+        "cleaned_title": cleanup_temporal_tokens(text),
         "due_date": due_date,
+        "signals": signals,
     }
 
 __all__ = [

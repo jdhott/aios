@@ -1,0 +1,60 @@
+*** PATCH FOR run_aios_PHASE2_FIXED.py ***
+
+1. Update import:
+
+OLD:
+from datetime import datetime, timezone
+
+NEW:
+from datetime import datetime, timezone, timedelta
+
+ADD:
+from core.metadata.temporal import extract_temporal_metadata
+
+
+2. Replace duplicated temporal reinforcement block.
+
+REMOVE:
+
+    normalized_source = source_text.lower()
+
+    explicit_today = "today" in normalized_source
+    explicit_tomorrow = "tomorrow" in normalized_source
+
+    ...
+
+    if explicit_today:
+        ...
+    elif explicit_tomorrow:
+        ...
+
+REPLACE WITH:
+
+    temporal = extract_temporal_metadata(source_text)
+
+    if temporal["cleaned_title"]:
+        title = temporal["cleaned_title"]
+
+    if temporal["due_date"]:
+
+        due_date = temporal["due_date"]
+
+        updates["Due Date"] = {
+            "date": {
+                "start": due_date.isoformat()
+            }
+        }
+
+        changed_metadata["Due Date"] = {
+            "value": due_date.isoformat(),
+            "source": "canonical_temporal_authority",
+            "reason": "Canonical temporal extraction",
+        }
+
+        print(
+            "[Temporal Authority Applied]",
+            {
+                "title": title,
+                "due_date": due_date.isoformat(),
+            }
+        )
