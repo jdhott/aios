@@ -1,132 +1,136 @@
 from __future__ import annotations
 
-import logging
+import re
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)
+# -----------------------------------------------------------------------------
+# Canonical Temporal Authority
+# -----------------------------------------------------------------------------
 
-RELATIVE_TEMPORAL_TOKENS = [
-    "today",
-    "tomorrow",
-    "tonight",
-    "tomorrow morning",
-    "tomorrow afternoon",
-    "tomorrow evening",
+TEMPORAL_PATTERNS = [
+    r"\btoday\b",
+    r"\btonight\b",
+    r"\btomorrow\b",
+    r"\btomorrow morning\b",
+    r"\btomorrow afternoon\b",
+    r"\btomorrow evening\b",
+    r"\bthis morning\b",
+    r"\bthis afternoon\b",
+    r"\bthis evening\b",
 ]
 
+MONTH_NAMES = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december"
+)
 
-def cleanup_temporal_tokens(text: str) -> str:
+TEMPORAL_DATE_REGEX = re.compile(
+    r"\b(?:"
+    + "|".join(MONTH_NAMES)
+    + r")\s+\d{1,2}(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+
+TEMPORAL_SIGNAL_REGEX = re.compile(
+    "|".join(TEMPORAL_PATTERNS),
+    re.IGNORECASE,
+)
+
+TEMPORAL_NORMALIZATION_MAP = {
+    "today": "today",
+    "tonight": "today",
+    "this morning": "today",
+    "this afternoon": "today",
+    "this evening": "today",
+    "tomorrow": "tomorrow",
+    "tomorrow morning": "tomorrow",
+    "tomorrow afternoon": "tomorrow",
+    "tomorrow evening": "tomorrow",
+}
+
+def detect_temporal_signals(text):
     if not text:
-        return ""
+        return []
 
-    cleaned = text
+    matches = []
 
-    phrases = sorted(
-        RELATIVE_TEMPORAL_TOKENS,
-        key=len,
-        reverse=True,
-    )
+    for match in TEMPORAL_SIGNAL_REGEX.finditer(text):
+        matches.append(match.group(0).strip().lower())
 
-    for phrase in phrases:
-        cleaned = cleaned.replace(f" {phrase}", "")
-        cleaned = cleaned.replace(f" {phrase.title()}", "")
+    for match in TEMPORAL_DATE_REGEX.finditer(text):
+        matches.append(match.group(0).strip())
 
-    return " ".join(cleaned.split()).strip()
+    return list(dict.fromkeys(matches))
 
+def normalize_temporal_signal(signal):
+    if not signal:
+        return None
 
-def normalize_due_date(dt):
-    return dt
+    lowered = signal.strip().lower()
 
+    if lowered in TEMPORAL_NORMALIZATION_MAP:
+        return TEMPORAL_NORMALIZATION_MAP[lowered]
 
-def extract_defer_until(text: str):
-    return None
+    return lowered
 
+def canonical_due_date_from_signal(signal, today=None):
+    if not signal:
+        return None
 
-def _extract_relative_due_date(text: str):
-    lowered = (text or "").lower()
+    today = today or datetime.now().date()
 
-    now = datetime.now()
+    normalized = normalize_temporal_signal(signal)
 
-    if "tomorrow" in lowered:
-        return now.date() + timedelta(days=1)
+    if normalized == "today":
+        return today
 
-    if "today" in lowered or "tonight" in lowered:
-        return now.date()
+    if normalized == "tomorrow":
+        return today + timedelta(days=1)
 
-    return None
+    try:
+        parsed = datetime.strptime(normalized, "%B %d")
+        return parsed.replace(year=today.year).date()
 
+    except Exception:
+        return None
 
-def extract_temporal_metadata(text: str) -> dict:
-    cleaned_text = cleanup_temporal_tokens(text)
+def strip_temporal_language(text):
+    if not text:
+        return text
 
-    due_date = _extract_relative_due_date(text)
+    cleaned = TEMPORAL_SIGNAL_REGEX.sub("", text)
+    cleaned = TEMPORAL_DATE_REGEX.sub("", cleaned)
 
-    temporal_tokens_found = [
-        token
-        for token in RELATIVE_TEMPORAL_TOKENS
-        if token in (text or "").lower()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+-\s+", " - ", cleaned)
+
+    return cleaned.strip(" -")
+
+def extract_temporal_metadata(text):
+    signals = detect_temporal_signals(text)
+
+    canonical_signals = [
+        normalize_temporal_signal(signal)
+        for signal in signals
     ]
 
-    payload = {
-        "cleaned_text": cleaned_text,
-        "due_date": normalize_due_date(due_date),
-        "defer_until": extract_defer_until(text),
-        "temporal_tokens_found": temporal_tokens_found,
+    due_date = None
+
+    for signal in canonical_signals:
+        due_date = canonical_due_date_from_signal(signal)
+
+        if due_date:
+            break
+
+    cleaned_title = strip_temporal_language(text)
+
+    metadata = {
+        "raw_text": text,
+        "signals": canonical_signals,
+        "due_date": due_date,
+        "cleaned_title": cleaned_title,
     }
 
-    logger.info(
-        "[TEMPORAL] input=%r cleaned=%r due_date=%r tokens=%r",
-        text,
-        cleaned_text,
-        due_date,
-        temporal_tokens_found,
-    )
+    print("[Temporal Authority]", metadata)
 
-    return payload
-
-
-def is_due_today(task) -> bool:
-    due_date = None
-
-    if isinstance(task, dict):
-        due_date = task.get("due_date") or task.get("Due Date")
-
-    if due_date is None:
-        return False
-
-    if hasattr(due_date, "date"):
-        due_date = due_date.date()
-
-    return due_date == datetime.now().date()
-
-
-def is_overdue(task) -> bool:
-    due_date = None
-
-    if isinstance(task, dict):
-        due_date = task.get("due_date") or task.get("Due Date")
-
-    if due_date is None:
-        return False
-
-    if hasattr(due_date, "date"):
-        due_date = due_date.date()
-
-    return due_date < datetime.now().date()
-
-
-def is_due_soon(task, days: int = 3) -> bool:
-    due_date = None
-
-    if isinstance(task, dict):
-        due_date = task.get("due_date") or task.get("Due Date")
-
-    if due_date is None:
-        return False
-
-    if hasattr(due_date, "date"):
-        due_date = due_date.date()
-
-    today = datetime.now().date()
-
-    return today <= due_date <= (today + timedelta(days=days))
+    return metadata
