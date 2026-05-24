@@ -1,5 +1,6 @@
-Running AIOS at Fri 22 May 2026 16:49:21 EDT
+Running AIOS at Fri 22 May 2026 17:02:41 EDT
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 2G: COMBINED QUICK WIN RANKING + QUIET OVERLAY ===
+=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2H2: QUICK WIN OVERLAY AFTER RANKING ===
 === AIOS CLEAN CUTOVER v3 ===
 __file__ = /Users/John/LocalProjects/aios/run_aios_PHASE2_FIXED.py
 === EXECUTION ENGINE V2 MODULE LOADED ===
@@ -38,23 +39,6 @@ Archived 0 processed item(s)
 [PROJECT MODULE LOAD] RUN_PROJECT_CANDIDATE_DETECTOR=False TEST_MODE=False DRY_RUN=True
 [PROJECT DETECTOR RUNTIME FLAGS] TEST_MODE=False DRY_RUN=False RUN_PROJECT_CANDIDATE_DETECTOR=True
 Project candidate detector: no newly created top-level tasks to review.
-[query_tasks_database] Using shared pagination helper
-[Pagination] Page 1: 100 results
-[Pagination] Page 2: 100 results
-[Pagination] Page 3: 37 results
-[Pagination] Total results: 237
-=== PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 237 total tasks
-[Quick Win Overlay] Sorted focused Quick Wins from persisted Execution Rank/Score; no scorer recomputation. Ranked=4/64
-[query_tasks_database] Using shared pagination helper
-[Pagination] Page 1: 5 results
-[Pagination] Total results: 5
-=== PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 5 total tasks
-Eligible Quick Wins retrieved: 64
-Current focused tasks: 5
-Desired focused tasks: 5
-Focused Quick Wins: 5/64
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
@@ -348,12 +332,30 @@ BNA rank=5 score=13 title=Plan another test bake of focaccia for Almanac recipe 
 \n[Execution Engine V2] Tasks updated: 10
 [Execution Engine V2] Reconciliation complete
 Execution Engine V2 completed successfully. Winners: 5
+[Execution Flow] Deriving Quick Wins after Execution Rank/BNA persistence
+[query_tasks_database] Using shared pagination helper
+[Pagination] Page 1: 100 results
+[Pagination] Page 2: 100 results
+[Pagination] Page 3: 37 results
+[Pagination] Total results: 237
+=== PAGINATION ACTIVE ===
+[query_tasks_database] Retrieved 237 total tasks
+[Quick Win Overlay] Sorted focused Quick Wins from persisted Execution Rank/Score; no scorer recomputation. Ranked=4/64
+[query_tasks_database] Using shared pagination helper
+[Pagination] Page 1: 5 results
+[Pagination] Total results: 5
+=== PAGINATION ACTIVE ===
+[query_tasks_database] Retrieved 5 total tasks
+Eligible Quick Wins retrieved: 64
+Current focused tasks: 5
+Desired focused tasks: 5
+Focused Quick Wins: 5/64
 Legacy execution reconciliation disabled.
 
 --- Run summary ---
-Started:  2026-05-22 16:49:23
-Finished: 2026-05-22 16:49:53
-Elapsed:  30.2s
+Started:  2026-05-22 17:02:42
+Finished: 2026-05-22 17:03:09
+Elapsed:  27.2s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
@@ -368,5 +370,5 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-22 16:49:53 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-22 17:03:09 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.

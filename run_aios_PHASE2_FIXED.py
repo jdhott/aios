@@ -1,4 +1,5 @@
 print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2G: COMBINED QUICK WIN RANKING + QUIET OVERLAY ===")
+print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2H2: QUICK WIN OVERLAY AFTER RANKING ===")
 
 # ============================================================
 # EXECUTION AUTHORITY CONSOLIDATION — PHASE 1
@@ -7599,10 +7600,9 @@ if TEST_MODE:
 else:
     if RUN_TASK_CREATION_PIPELINE:
         run_project_candidate_detector_safely()
-        update_quick_win_focus()
-
 
     # New execution engine (authoritative)
+    execution_engine_success = False
     try:
         all_open_tasks = query_tasks_database(
             filter_payload={
@@ -7626,6 +7626,8 @@ else:
             update_fn=update_notion_page,
         )
 
+        execution_engine_success = True
+
         print(
             f"Execution Engine V2 completed successfully. "
             f"Winners: {len(EXECUTION_ENGINE_WINNERS)}"
@@ -7633,6 +7635,12 @@ else:
     except Exception as e:
         print(f"Execution Engine V2 failure: {e}")
 
+    if RUN_TASK_CREATION_PIPELINE:
+        if execution_engine_success:
+            print("[Execution Flow] Deriving Quick Wins after Execution Rank/BNA persistence")
+        else:
+            print("[Execution Flow] Deriving Quick Wins after failed Execution Engine run; using last persisted rank/score")
+        update_quick_win_focus()
 
     # Optional independent Focus Now updater.
     if RUN_FOCUS_NOW_UPDATE:
