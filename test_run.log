@@ -1,4 +1,4 @@
-Running AIOS at Fri 22 May 2026 17:02:41 EDT
+Running AIOS at Sun 24 May 2026 06:26:23 EDT
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 2G: COMBINED QUICK WIN RANKING + QUIET OVERLAY ===
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 2H2: QUICK WIN OVERLAY AFTER RANKING ===
 === AIOS CLEAN CUTOVER v3 ===
@@ -42,28 +42,26 @@ Project candidate detector: no newly created top-level tasks to review.
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 75 results
-[Pagination] Total results: 275
+[Pagination] Page 3: 64 results
+[Pagination] Total results: 264
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 275 total tasks
-[Execution Engine] Full task set for reconciliation: 275
+[query_tasks_database] Retrieved 264 total tasks
+[Execution Engine] Full task set for reconciliation: 264
 === EXECUTION ENGINE V2 ACTIVE ===
-[Execution Engine V2] Tasks received: 275
+[Execution Engine V2] Tasks received: 264
 \n--- Execution Engine V2 Sparse Reset ---
-[Execution Engine V2] Previously persisted tasks: 10
-[Execution Engine V2] Reset tasks: 10
+[Execution Engine V2] Previously persisted tasks: 9
+[Execution Engine V2] Reset tasks: 9
 \n--- Execution Eligibility Scan ---
-Total open tasks: 275
-Rejected deferred: 0
+Total open tasks: 264
+Rejected deferred: 1
 Rejected JDI: 0
-Quick Wins included in ranking: 77
-Rejected non-actionable: 133
-Eligible execution tasks: 142
-[Execution Engine V2] baseline_executable_fallback: Make balsamic onions for focaccia -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Make balsamic onions for focaccia -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Measure and mill flour for Cinnamon Raisin bread | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Measure and mill flour for Cinnamon Raisin bread -> 8 (quick_win, operational_context)
-[Execution Engine V2] scoring: Buy produce at Veggie Trail -> 3 (quick_win)
+Quick Wins included in ranking: 68
+Rejected non-actionable: 130
+Eligible execution tasks: 133
+[Execution Engine V2] scoring: Get San Marzano tomatoes from basement -> 3 (quick_win)
+[Ranking Shadow V3] title=Get raisins from the basement for bakery | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
+[Execution Engine V2] scoring: Get raisins from the basement for bakery -> 8 (quick_win, operational_context)
 [Execution Engine V2] baseline_executable_fallback: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
 [Ranking Shadow V3] title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
@@ -72,23 +70,16 @@ Eligible execution tasks: 142
 [Execution Engine V2] scoring: Fix timezone issue with Bread Basket app -> 8 (medium_effort, operational_context)
 [Ranking Shadow V3] title=Vacuum bakery | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
 [Execution Engine V2] scoring: Vacuum bakery -> 5 (operational_context)
-[Ranking Shadow V3] title=Connect garden hose in front yard | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Connect garden hose in front yard -> 8 (quick_win, operational_context)
 [Execution Engine V2] baseline_executable_fallback: Arrange supplies on tables or stations for easy access during the workshop -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Arrange supplies on tables or stations for easy access during the workshop -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Check quantities of each supply to ensure enough for all participants -> 3 (quick_win)
 [Ranking Shadow V3] title=Organize supplies for pizza workshop | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
 [Execution Engine V2] scoring: Organize supplies for pizza workshop -> 3 (medium_effort)
-[Execution Engine V2] scoring: Get more #10 bags from the basement -> 3 (quick_win)
 [Ranking Shadow V3] title=Check skimmer basket in pool | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
 [Execution Engine V2] scoring: Check skimmer basket in pool -> 8 (quick_win, operational_context)
-[Ranking Shadow V3] title=Check pool heater | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Check pool heater -> 8 (quick_win, operational_context)
 [Execution Engine V2] scoring: Book annual furnace maintenance appointment -> 3 (quick_win)
 [Execution Engine V2] scoring: Schedule time to get blood tests at the lab -> 3 (quick_win)
 [Execution Engine V2] scoring: Get more sparkling water from the basement -> 3 (quick_win)
-[Ranking Shadow V3] title=Test pool water | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Test pool water -> 8 (quick_win, operational_context)
 [Ranking Shadow V3] title=Put vacuum hose for pool in the garage | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
 [Execution Engine V2] scoring: Put vacuum hose for pool in the garage -> 8 (quick_win, operational_context)
 [Execution Engine V2] baseline_executable_fallback: Test Wi - Fi coverage in backyard and garage -> 1 (baseline_executable)
@@ -99,15 +90,11 @@ Eligible execution tasks: 142
 [Execution Engine V2] scoring: Create backup configuration for home router -> 3 (medium_effort)
 [Ranking Shadow V3] title=Confirm the UPS is stable and properly positioned within the rack after installation | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
 [Execution Engine V2] scoring: Confirm the UPS is stable and properly positioned within the rack after installation -> 3 (medium_effort)
-[Ranking Shadow V3] title=Invite Christie Wilson to TestFlight for BreadBasket app | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Invite Christie Wilson to TestFlight for BreadBasket app -> 8 (quick_win, operational_context)
 [Ranking Shadow V3] title=Write speech for Will and Aimee’s wedding | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
 [Execution Engine V2] scoring: Write speech for Will and Aimee’s wedding -> 3 (medium_effort)
 [Execution Engine V2] scoring: Wash jar for Kiefer -> 3 (quick_win)
 [Ranking Shadow V3] title=Move pool vacuum equipment | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
 [Execution Engine V2] scoring: Move pool vacuum equipment -> 5 (operational_context)
-[Ranking Shadow V3] title=Check pool heater operation | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Check pool heater operation -> 8 (quick_win, operational_context)
 [Execution Engine V2] scoring: Buy replacement skimmer basket -> 3 (quick_win)
 [Execution Engine V2] scoring: Label storage containers or shelves for easy identification -> 3 (quick_win)
 [Execution Engine V2] baseline_executable_fallback: Check expiration dates and safety information on each chemical -> 1 (baseline_executable)
@@ -116,8 +103,6 @@ Eligible execution tasks: 142
 [Execution Engine V2] scoring: Sort pool chemicals by type and purpose -> 5 (operational_context)
 [Ranking Shadow V3] title=Review current AIOS architecture and migration requirements | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
 [Execution Engine V2] scoring: Review current AIOS architecture and migration requirements -> 4 (strategic_context)
-[Ranking Shadow V3] title=Prepare soil with proper drainage and nutrients for basil | legacy=55 | evaluator=57 | divergence=2 | components=[high_priority(+25), high_urgency(+25), medium_effort(+3), preparation_work(+4)]
-[Execution Engine V2] scoring: Prepare soil with proper drainage and nutrients for basil -> 57 (high_priority, high_urgency, medium_effort, preparation_work)
 [Ranking Shadow V3] title=Take winter supplies for pool to garage | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
 [Execution Engine V2] scoring: Take winter supplies for pool to garage -> 8 (quick_win, operational_context)
 [Execution Engine V2] scoring: Check mileage on Honda Civic from when I bought the car -> 3 (quick_win)
@@ -172,8 +157,6 @@ Eligible execution tasks: 142
 [Execution Engine V2] scoring: Move lawnmower from shed to garage -> 3 (quick_win)
 [Execution Engine V2] baseline_executable_fallback: Submit health claims for 2026 year to date -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Submit health claims for 2026 year to date -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Ask ChaptGTP to help me improve the performance of the Bread Basket App | legacy=3 | evaluator=12 | divergence=9 | components=[quick_win(+3), operational_context(+5), strategic_context(+4)]
-[Execution Engine V2] scoring: Ask ChaptGTP to help me improve the performance of the Bread Basket App -> 12 (quick_win, operational_context, strategic_context)
 [Ranking Shadow V3] title=Ask ChatGPT to help evolve AIOS into a maintainable system | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
 [Execution Engine V2] scoring: Ask ChatGPT to help evolve AIOS into a maintainable system -> 4 (strategic_context)
 [Execution Engine V2] scoring: Ask ChatGPT to add feature to AIOS for deferring tasks -> 3 (quick_win)
@@ -306,29 +289,29 @@ Eligible execution tasks: 142
 [Ranking Shadow V3] title=Review recurring charges on Mastercard | legacy=10 | evaluator=17 | divergence=7 | components=[medium_urgency(+10), medium_effort(+3), strategic_context(+4)]
 [Execution Engine V2] scoring: Review recurring charges on Mastercard -> 17 (medium_urgency, medium_effort, strategic_context)
 \n--- Execution Engine V2 In-Memory Rankings ---
-rank=1 score=57 title=Prepare soil with proper drainage and nutrients for basil
-rank=2 score=25 title=Send Khorasan recipe to Mary
-rank=3 score=25 title=Submit University of Windsor pension forms
-rank=4 score=17 title=Review recurring charges on Mastercard
-rank=5 score=13 title=Plan another test bake of focaccia for Almanac recipe development
-rank=6 score=12 title=Ask ChaptGTP to help me improve the performance of the Bread Basket App
-rank=7 score=8 title=Measure and mill flour for Cinnamon Raisin bread
-rank=8 score=8 title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-rank=9 score=8 title=Fix timezone issue with Bread Basket app
-rank=10 score=8 title=Connect garden hose in front yard
-rank=11 score=8 title=Check skimmer basket in pool
-rank=12 score=8 title=Check pool heater
-rank=13 score=8 title=Test pool water
-rank=14 score=8 title=Put vacuum hose for pool in the garage
-rank=15 score=8 title=Invite Christie Wilson to TestFlight for BreadBasket app
+rank=1 score=25 title=Send Khorasan recipe to Mary
+rank=2 score=25 title=Submit University of Windsor pension forms
+rank=3 score=17 title=Review recurring charges on Mastercard
+rank=4 score=13 title=Plan another test bake of focaccia for Almanac recipe development
+rank=5 score=8 title=Get raisins from the basement for bakery
+rank=6 score=8 title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+rank=7 score=8 title=Fix timezone issue with Bread Basket app
+rank=8 score=8 title=Check skimmer basket in pool
+rank=9 score=8 title=Put vacuum hose for pool in the garage
+rank=10 score=8 title=Take winter supplies for pool to garage
+rank=11 score=8 title=Buy salt for pool
+rank=12 score=8 title=Print labels for Cranberry Walnut Bread
+rank=13 score=8 title=Send WhatsApp message to bread community about performance of Bread Basket app
+rank=14 score=8 title=Move bannetons to the shelves under the bread oven
+rank=15 score=8 title=Make notes on buttermilk multi-seed bake
 [Execution Engine V2] Winner limit: 5
 [Execution Engine V2] Persisting top 10 execution rankings only
 \n--- Best Next Actions ---
-BNA rank=1 score=57 title=Prepare soil with proper drainage and nutrients for basil
-BNA rank=2 score=25 title=Send Khorasan recipe to Mary
-BNA rank=3 score=25 title=Submit University of Windsor pension forms
-BNA rank=4 score=17 title=Review recurring charges on Mastercard
-BNA rank=5 score=13 title=Plan another test bake of focaccia for Almanac recipe development
+BNA rank=1 score=25 title=Send Khorasan recipe to Mary
+BNA rank=2 score=25 title=Submit University of Windsor pension forms
+BNA rank=3 score=17 title=Review recurring charges on Mastercard
+BNA rank=4 score=13 title=Plan another test bake of focaccia for Almanac recipe development
+BNA rank=5 score=8 title=Get raisins from the basement for bakery
 \n[Execution Engine V2] Tasks updated: 10
 [Execution Engine V2] Reconciliation complete
 Execution Engine V2 completed successfully. Winners: 5
@@ -336,26 +319,26 @@ Execution Engine V2 completed successfully. Winners: 5
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 37 results
-[Pagination] Total results: 237
+[Pagination] Page 3: 29 results
+[Pagination] Total results: 229
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 237 total tasks
-[Quick Win Overlay] Sorted focused Quick Wins from persisted Execution Rank/Score; no scorer recomputation. Ranked=4/64
+[query_tasks_database] Retrieved 229 total tasks
+[Quick Win Overlay] Sorted focused Quick Wins from persisted Execution Rank/Score; no scorer recomputation. Ranked=4/55
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 5 results
 [Pagination] Total results: 5
 === PAGINATION ACTIVE ===
 [query_tasks_database] Retrieved 5 total tasks
-Eligible Quick Wins retrieved: 64
+Eligible Quick Wins retrieved: 55
 Current focused tasks: 5
 Desired focused tasks: 5
-Focused Quick Wins: 5/64
+Focused Quick Wins: 5/55
 Legacy execution reconciliation disabled.
 
 --- Run summary ---
-Started:  2026-05-22 17:02:42
-Finished: 2026-05-22 17:03:09
-Elapsed:  27.2s
+Started:  2026-05-24 06:26:24
+Finished: 2026-05-24 06:26:51
+Elapsed:  26.7s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
@@ -370,5 +353,5 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-22 17:03:09 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-24 06:26:51 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
