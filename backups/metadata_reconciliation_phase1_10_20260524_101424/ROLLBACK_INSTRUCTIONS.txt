@@ -1,0 +1,6 @@
+Rollback created by metadata reconciliation phase 1.10 installer.
+
+To rollback:
+  cd "/Users/John/LocalProjects/aios"
+  cp "/Users/John/LocalProjects/aios/backups/metadata_reconciliation_phase1_10_20260524_101424/run_aios.py.bak" "/Users/John/LocalProjects/aios/run_aios.py"
+  if [ -d "/Users/John/LocalProjects/aios/backups/metadata_reconciliation_phase1_10_20260524_101424/core.bak" ]; then rm -rf "/Users/John/LocalProjects/aios/core" && cp -R "/Users/John/LocalProjects/aios/backups/metadata_reconciliation_phase1_10_20260524_101424/core.bak" "/Users/John/LocalProjects/aios/core"; fi

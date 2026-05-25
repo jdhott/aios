@@ -1,7 +1,4 @@
 #!/bin/bash
-
-echo "Running AIOS at $(date)"
-
-cd /Users/John/LocalProjects/aios || exit 1
-
-/Users/John/LocalProjects/aios/venv/bin/python /Users/John/LocalProjects/aios/run_aios_PHASE2_FIXED.py
+set -e
+cd "$HOME/LocalProjects/aios"
+exec ./venv/bin/python tools/aios_runtime_lock.py /bin/bash run_aios_inner.sh
