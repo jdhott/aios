@@ -40,9 +40,9 @@ def acquire_lock() -> bool:
         pid, started = _read_lock()
         age = now - started if started else 999999
         if _pid_running(pid) and age < STALE_AFTER_SECONDS:
-            print(f"[Runtime Lock] Another AIOS run is active; skipping this run. pid={pid} age_seconds={int(age)}")
+#            print(f"[Runtime Lock] Another AIOS run is active; skipping this run. pid={pid} age_seconds={int(age)}")
             return False
-        print(f"[Runtime Lock] Removing stale lock. pid={pid} age_seconds={int(age)}")
+#        print(f"[Runtime Lock] Removing stale lock. pid={pid} age_seconds={int(age)}")
         try:
             LOCK_PATH.unlink()
         except FileNotFoundError:
@@ -52,7 +52,7 @@ def acquire_lock() -> bool:
     with os.fdopen(fd, "w") as f:
         f.write(f"pid={os.getpid()}\\n")
         f.write(f"time={now}\\n")
-    print(f"[Runtime Lock] Acquired lock: {LOCK_PATH}")
+#    print(f"[Runtime Lock] Acquired lock: {LOCK_PATH}")
     return True
 
 def release_lock() -> None:
@@ -60,7 +60,7 @@ def release_lock() -> None:
         pid, _ = _read_lock()
         if pid == os.getpid():
             LOCK_PATH.unlink()
-            print(f"[Runtime Lock] Released lock: {LOCK_PATH}")
+#            print(f"[Runtime Lock] Released lock: {LOCK_PATH}")
     except FileNotFoundError:
         pass
 

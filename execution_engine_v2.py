@@ -663,11 +663,11 @@ def rebuild_execution_state(
                 score = orchestration.legacy_score
                 reasons = orchestration.legacy_reasons
 
-            print(
-                f"[Execution Engine V2] scoring: "
-                f"{title} -> {score} "
-                f"({', '.join(reasons)})"
-            )
+#            print(
+#                f"[Execution Engine V2] scoring: "
+#                f"{title} -> {score} "
+#                f"({', '.join(reasons)})"
+#            )
 
             ranked.append({
                 "task": task,
@@ -684,18 +684,21 @@ def rebuild_execution_state(
             print(f"[Execution Engine V2] task scoring failed: {e}")
 
     ranked.sort(
-        key=lambda x: x["score"],
-        reverse=True,
+        key=lambda x: (
+            -x["score"],
+            x["title"].lower(),
+            x.get("page_id", "")
+        )
     )
 
-    print("\\n--- Execution Engine V2 In-Memory Rankings ---")
-
-    for idx, item in enumerate(ranked[:15], start=1):
-        print(
-            f"rank={idx} "
-            f"score={item['score']} "
-            f"title={item['title']}"
-        )
+#    print("\\n--- Execution Engine V2 In-Memory Rankings ---")
+#
+#    for idx, item in enumerate(ranked[:15], start=1):
+#        print(
+#            f"rank={idx} "
+#            f"score={item['score']} "
+#            f"title={item['title']}"
+#        )
 
     try:
         limit = int(max_best_next_actions)

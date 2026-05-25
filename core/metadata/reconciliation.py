@@ -1068,7 +1068,7 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
 
     if rank_actions:
         changed_count = sum(1 for action in rank_actions if action.get("changed"))
-        print(f"[Metadata Reconciliation] Applying true execution rank rewrite: {len(rank_actions)} active rows; changed={changed_count}")
+#        print(f"[Metadata Reconciliation] Applying true execution rank rewrite: {len(rank_actions)} active rows; changed={changed_count}")
         if changed_count == 0:
             print("[Metadata Reconciliation] Execution rank rewrite skipped: canonical ranks already current")
         else:
