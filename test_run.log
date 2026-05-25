@@ -1,4 +1,4 @@
-Running AIOS at Mon 25 May 2026 07:14:17 EDT
+Running AIOS at Mon 25 May 2026 07:22:17 EDT
 [Metadata Persistence Guard] Closed-task execution persistence guard installed — metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 5: QUICK WIN VIEW REBALANCE ===
 === EXECUTION OVERLAY DERIVED FROM EXECUTION RANK / SCORE ===
@@ -11,7 +11,8 @@ __file__ = /Users/John/LocalProjects/aios/run_aios.py
 Test runner ready. Set TEST_MODE = True, then run_tests_from_top() after the notebook has loaded.
 Structural helper order tests passed
 Using synced block: 34c1facc-c5ab-80cc-b68a-fe0229f8749b
-Extracted 1 brain dump item(s)
+Extracted 0 brain dump item(s)
+Inbox empty → no-op.
 Found 100 open unfinished tasks
 === PAGINATION WARNING ===
 100+ tasks detected. Verify all historical tasks are loading.
@@ -27,137 +28,18 @@ Non-task notes routed: 0
 
 Non-task ideas routed: 0
 
-New tasks to create: 1
-+ Unpack bins from workshop today important
-Controlled production limit: processing 1 of 1 new item(s)
-[Metadata PATCH Payload]
+New tasks to create: 0
+Controlled production limit: processing 0 of 0 new item(s)
 
 --- RUN MODE ---
 DRY_RUN: False
 MAX_ITEMS_PER_RUN: 5
 ARCHIVE_PROCESSED_ITEMS: True
-
-PROCESSING: Unpack bins from workshop today important
-AI soft rewriting: Unpack bins from workshop
-→ Unpack bins from the workshop
-Created: Unpack bins from the workshop
-Importance: Unpack bins from the workshop → High Importance
-[Metadata PATCH Result] 200
-Importance AI log written: Unpack bins from the workshop → Importance
-[Metadata Source Text] {'source_text': 'Unpack bins from the workshop'}
-[TEMPORAL AUTHORITY] {'input': 'Unpack bins from the workshop', 'cleaned_title': 'Unpack bins from the workshop', 'due_date': 'None', 'tokens': []}
-[Evaluation] JDI=False | QuickWin=False | Breakdown=False
-Updated metadata: Unpack bins from the workshop → {'Effort': {'select': {'name': 'Small Effort'}}, 'Duration': {'select': {'name': '15 min'}}}
-Updated Quick Win: Unpack bins from the workshop → True
-[Metadata PATCH Result] 200
-Archived item: Unpack bins from workshop today important
-Removed original block: 36b1facc-c5ab-80ef-91ee-da2960dbcf48
-Created 1 task(s)
-Archived 1 processed item(s)
+Created 0 task(s)
+Archived 0 processed item(s)
 [PROJECT MODULE LOAD] RUN_PROJECT_CANDIDATE_DETECTOR=False TEST_MODE=False DRY_RUN=True
 [PROJECT DETECTOR RUNTIME FLAGS] TEST_MODE=False DRY_RUN=False RUN_PROJECT_CANDIDATE_DETECTOR=True
-[query_tasks_database] Using shared pagination helper
-[Pagination] Page 1: 25 results
-[Pagination] Page 2: 25 results
-[Pagination] Page 3: 25 results
-[Pagination] Page 4: 25 results
-[Pagination] Page 5: 25 results
-[Pagination] Page 6: 25 results
-[Pagination] Page 7: 25 results
-[Pagination] Page 8: 25 results
-[Pagination] Page 9: 25 results
-[Pagination] Page 10: 8 results
-[Pagination] Total results: 233
-=== PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 233 total tasks
-[query_tasks_database] Using shared pagination helper
-[Pagination] Page 1: 100 results
-[Pagination] Page 2: 100 results
-[Pagination] Page 3: 100 results
-[Pagination] Page 4: 100 results
-[Pagination] Page 5: 100 results
-[Pagination] Page 6: 100 results
-[Pagination] Page 7: 100 results
-[Pagination] Page 8: 100 results
-[Pagination] Page 9: 100 results
-[Pagination] Page 10: 100 results
-[Pagination] Page 11: 61 results
-[Pagination] Total results: 1061
-=== PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 1061 total tasks
-[Historical Operational Memory] Loaded 1061 completed tasks
-[Operational Context Layer] open=233 historical=1061 combined=1294
-
---- Project candidate detector ---
-[Telemetry Emit Attempt] event_type=telemetry_runtime_test seed=Telemetry Runtime Validation
-[Telemetry] enabled=True db_present=True
-[Telemetry] writing event to Notion telemetry_runtime_test
-[Telemetry] notion_status= 200
-Reviewing 1 newly created top-level task(s).
-Project relation write-back: enabled (RUN_PROJECT_RELATION_WRITEBACK=None)
-Querying Projects database: 0adf0c98…
-Loaded active projects: 12/21
-[TRACE] Seed task: Unpack bins from the workshop
-[TRACE] Final merged candidates: 8
-[TRACE] AI should_group: True
-[Operational Field Dynamics]
-  seed=Unpack bins from the workshop
-  matched_project=None
-  operational_score=0.53
-  field_strength=0.60
-[Operational Reinforcement Advisory] Unpack bins from the workshop → Workshops and Teaching (score=0.53)
-[Ontology-Aware Expansion] 0 operational neighbors
-[Effective Expansion Size] 6
-[Ontology Confidence] 0.75
-[Operational Ontology Detected] True
-[Reinforcement Compatibility] reinforcement=Workshops and Teaching emergent=Workshops and Teaching meaningful_overlap=3 specificity_alignment=True strengthens=True
-[Ontology-Compatible Reinforcement] Workshops and Teaching
-[Operational Specificity] Unpack bins from the workshop -> 0
-[ONTOLOGY VALIDATION OVERRIDE] confidence=0.75
-[Telemetry Emit Attempt] event_type=ontology_override seed=Unpack bins from the workshop
-[Telemetry] enabled=True db_present=True
-[Telemetry] writing event to Notion ontology_override
-[Telemetry] notion_status= 200
-[ONTOLOGY CANDIDATE ACCEPTED] Workshops and Teaching
-[ONTOLOGY CRYSTALLIZATION SUCCESS] Workshops and Teaching
-[Telemetry Emit Attempt] event_type=ontology_crystallized seed=Unpack bins from the workshop
-[Telemetry] enabled=True db_present=True
-[Telemetry] writing event to Notion ontology_crystallized
-[Telemetry] notion_status= 200
-[Ontology Expansion Titles] []
-[ONTOLOGY CRYSTALLIZATION PROMOTED] Workshops and Teaching
-[Governance State] Operational ontology granted primary authority.
-[ONTOLOGY GOVERNANCE SUCCESS] Workshops and Teaching
-[Ontology Confidence Final] 0.75
-
---- PROJECT CANDIDATE ---
-Seed task: Unpack bins from the workshop
-Suggested project: Workshops and Teaching
-Confidence: 0.90
-Reason: Most related tasks involve workshop preparation and follow-up activities such as unpacking bins for the workshop, moving workshop bins, ingredient gathering, mise en place, labeling supplies for workshops, and replying to a workshop follow-up email. These form a coherent operational domain around supporting recurring workshops and teaching events. Operational reinforcement stored as advisory context.
-Related tasks:
- - Move extra workshop bins to the basement
- - Reply to email from Jennifer Coyle about workshop follow up
- - Gather all ingredients needed for the shaping workshop
- - Complete mise en place for shaping workshop
-   - Prepare and portion dough for shaping exercises (subtask of Complete mise en place for shaping workshop)
- - Label bin of supplies for pizza and focaccia workshops
-[Metadata PATCH Result] 200
-[Project Canonicalization] best active match=Workshops and Teaching (1.00)
-[Project Canonicalization] reusing ACTIVE project: Workshops and Teaching
-Set Suggested Project: Unpack bins from the workshop → Workshops and Teaching
-Set Project relation: Unpack bins from the workshop → Workshops and Teaching
-[Metadata PATCH Result] 200
-Project relation preserved: Move extra workshop bins to the basement already has a project relation
-Project relation preserved: Reply to email from Jennifer Coyle about workshop follow up already has a project relation
-Set Suggested Project: Gather all ingredients needed for the shaping workshop → Workshops and Teaching
-Set Project relation: Gather all ingredients needed for the shaping workshop → Workshops and Teaching
-[Metadata PATCH Result] 200
-Project relation preserved: Complete mise en place for shaping workshop already has a project relation
-Set Suggested Project: Prepare and portion dough for shaping exercises → Workshops and Teaching
-Set Project relation: Prepare and portion dough for shaping exercises → Workshops and Teaching
-[Metadata PATCH Result] 200
-Project relation preserved: Label bin of supplies for pizza and focaccia workshops already has a project relation
+Project candidate detector: no newly created top-level tasks to review.
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
@@ -411,8 +293,6 @@ BNA rank=5 score=8 title=Send WhatsApp message to Solara Bread Community about t
 [Execution Engine V2] Reconciliation complete
 Execution Engine V2 completed successfully. Winners: 5
 [Execution Flow] Canonical Execution Authority complete; Quick Win view rebalance active; legacy execution-state automation remains disabled
-Removed original block: 36a1facc-c5ab-818e-947a-f2d3439a246b
-Trimmed 1 old archive run(s)
 === METADATA RECONCILIATION — PHASE 2.5: INLINE PRE-SUMMARY PASS ===
 === METADATA RECONCILIATION — PHASE 2.3: TRUE CANONICAL RANK REWRITE + CLEANUPS ===
 [Metadata Reconciliation] Version: metadata-reconciliation-phase2-true-canonical-rank-rewrite-v0.2.3
@@ -441,66 +321,52 @@ Trimmed 1 old archive run(s)
 [Execution Rank Diagnostics] Rank-order row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard flags=Strong,Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3661facc title=Put vacuum hose for pool in the garage flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3621facc title=Take winter supplies for pool to garage flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=10 current_rank=10 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage flags=Parentish
 [Execution Rank Diagnostics] Deterministic score/title/page-id order preview: 10
 [Execution Rank Diagnostics] Deterministic row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
 [Execution Rank Diagnostics] Deterministic row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
 [Execution Rank Diagnostics] Deterministic row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
 [Execution Rank Diagnostics] Deterministic row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
-[Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=7 score=8 id=3671facc title=Check skimmer basket in pool
+[Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool
 [Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=8 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=10 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=5 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=10 current_rank=9 score=8 id=3621facc title=Take winter supplies for pool to garage
-[Execution Rank Diagnostics] Rank-order vs deterministic-order mismatches: 5 shown
-[Execution Rank Diagnostics] Order mismatch: pos=5; rank_order=5/8/3671facc/Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app deterministic=7/8/3671facc/Check skimmer basket in pool
-[Execution Rank Diagnostics] Order mismatch: pos=7; rank_order=7/8/3671facc/Check skimmer basket in pool deterministic=8/8/3661facc/Put vacuum hose for pool in the garage
-[Execution Rank Diagnostics] Order mismatch: pos=8; rank_order=8/8/3661facc/Put vacuum hose for pool in the garage deterministic=10/8/3591facc/Send WhatsApp message to bread community about performance of Bread Basket app
-[Execution Rank Diagnostics] Order mismatch: pos=9; rank_order=9/8/3621facc/Take winter supplies for pool to garage deterministic=5/8/3671facc/Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-[Execution Rank Diagnostics] Order mismatch: pos=10; rank_order=10/8/3591facc/Send WhatsApp message to bread community about performance of Bread Basket app deterministic=9/8/3621facc/Take winter supplies for pool to garage
+[Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage
+[Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage
+[Execution Rank Diagnostics] Rank-order and deterministic-order previews match for observed rows.
 [Metadata Persistence Guard] Version: metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 [Metadata Persistence Guard] Installed: True
 [Metadata Persistence Guard] Execution-only writes blocked: 0
 [Metadata Persistence Guard] Execution fields stripped: 0
 [Metadata Reconciliation] Quick Win deferred cleanup: 0
 [Metadata Reconciliation] Closed/done execution cleanup: 0
-[Metadata Reconciliation] Applying true execution rank rewrite: 10 active rows; changed=5
-[Metadata Reconciliation] Clearing existing Execution Rank values before canonical rewrite: 10
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=5 current_rank=7 score=8 id=3671facc title=Check skimmer basket in pool
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=7 current_rank=8 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Metadata Reconciliation] Canonical rank assignment preview: new_rank=8 current_rank=10 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
-[Metadata Reconciliation] Execution ranks rewritten canonically: 10
+[Metadata Reconciliation] Applying true execution rank rewrite: 10 active rows; changed=0
+[Metadata Reconciliation] Execution rank rewrite skipped: canonical ranks already current
 
 --- Run summary ---
-Started:  2026-05-25 07:14:18
-Finished: 2026-05-25 07:15:48
-Elapsed:  90.2s
-Inbox — Extracted: 1, New: 1, Processed: 1, Left for later: 0
+Started:  2026-05-25 07:22:18
+Finished: 2026-05-25 07:22:47
+Elapsed:  29.2s
+Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
-Tasks — Created: 1, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
-Updates — Matched items: 0, Metadata: 1, Importance: 1, Quick Win: 1
-Archive / review — Archived items: 1, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 1
-AI log — Entries: 6, Metadata entries: 1, Errors: 0
+Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
+Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0
+Archive / review — Archived items: 0, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 0
+AI log — Entries: 0, Metadata entries: 0, Errors: 0
 Task notes added: 0
 Non-task notes routed: 0
 Non-task ideas routed: 0
-Project candidates detected: 1
-Suggested Project updates: 3
-Project relations updated: 3
+Project candidates detected: 0
+Suggested Project updates: 0
+Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-25 07:15:48 — Run complete — Created: 1, Updated: 2, Archived: 1, Errors: 0
+2026-05-25 07:22:47 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
 [Metadata Reconciliation] Inline reconciliation active; atexit hook disabled
 [Runtime Lock] Removing stale lock. pid=0 age_seconds=999999
