@@ -1,4 +1,4 @@
-Running AIOS at Mon 25 May 2026 06:50:32 EDT
+Running AIOS at Mon 25 May 2026 07:02:21 EDT
 [Metadata Persistence Guard] Closed-task execution persistence guard installed — metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 5: QUICK WIN VIEW REBALANCE ===
 === EXECUTION OVERLAY DERIVED FROM EXECUTION RANK / SCORE ===
@@ -51,8 +51,8 @@ Project candidate detector: no newly created top-level tasks to review.
 === EXECUTION ENGINE V2 ACTIVE ===
 [Execution Engine V2] Tasks received: 248
 \n--- Execution Engine V2 Sparse Reset ---
-[Execution Engine V2] Previously persisted tasks: 25
-[Execution Engine V2] Reset tasks: 25
+[Execution Engine V2] Previously persisted tasks: 10
+[Execution Engine V2] Reset tasks: 10
 \n--- Execution Eligibility Scan ---
 Total open tasks: 248
 Rejected deferred: 1
@@ -311,42 +311,32 @@ Execution Engine V2 completed successfully. Winners: 5
 [Metadata Reconciliation] Deferred future tasks with meaningful Execution Score: 0
 [Metadata Reconciliation] Deferred future tasks with Best Next Action: 0
 [Metadata Reconciliation] Deferred future tasks with Do = Today: 0
-[Execution Rank Diagnostics] Active ranked rows observed: 25
-[Execution Rank Diagnostics] Skipped counts: closed_or_done=16; future_deferred=1; jdi=17; missing_rank_or_score=189; non_positive_score=0; not_open=0
+[Execution Rank Diagnostics] Active ranked rows observed: 10
+[Execution Rank Diagnostics] Skipped counts: closed_or_done=16; future_deferred=1; jdi=17; missing_rank_or_score=204; non_positive_score=0; not_open=0
 [Execution Rank Diagnostics] Missing persisted ranks: none
 [Execution Rank Diagnostics] Duplicate persisted ranks: none
-[Execution Rank Diagnostics] Current persisted-rank order preview: 15
+[Execution Rank Diagnostics] Current persisted-rank order preview: 10
 [Execution Rank Diagnostics] Rank-order row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard flags=Strong,Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment. flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location. flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=10 current_rank=10 score=8 id=e047a92a title=Plan dinner to make for Burlington trip flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=11 current_rank=11 score=8 id=3531facc title=Plan for annual review of wills and POAs flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=12 current_rank=12 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=13 current_rank=13 score=8 id=3661facc title=Put vacuum hose for pool in the garage flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=14 current_rank=14 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=15 current_rank=15 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Deterministic score/title/page-id order preview: 15
+[Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage flags=Parentish
+[Execution Rank Diagnostics] Deterministic score/title/page-id order preview: 10
 [Execution Rank Diagnostics] Deterministic row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
 [Execution Rank Diagnostics] Deterministic row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
 [Execution Rank Diagnostics] Deterministic row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
 [Execution Rank Diagnostics] Deterministic row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
 [Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool
-[Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery
-[Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
-[Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
-[Execution Rank Diagnostics] Deterministic row: pos=10 current_rank=10 score=8 id=e047a92a title=Plan dinner to make for Burlington trip
-[Execution Rank Diagnostics] Deterministic row: pos=11 current_rank=11 score=8 id=3531facc title=Plan for annual review of wills and POAs
-[Execution Rank Diagnostics] Deterministic row: pos=12 current_rank=12 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game
-[Execution Rank Diagnostics] Deterministic row: pos=13 current_rank=13 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Execution Rank Diagnostics] Deterministic row: pos=14 current_rank=14 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=15 current_rank=15 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage
+[Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+[Execution Rank Diagnostics] Deterministic row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage
 [Execution Rank Diagnostics] Rank-order and deterministic-order previews match for observed rows.
 [Metadata Persistence Guard] Version: metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 [Metadata Persistence Guard] Installed: True
@@ -354,13 +344,13 @@ Execution Engine V2 completed successfully. Winners: 5
 [Metadata Persistence Guard] Execution fields stripped: 0
 [Metadata Reconciliation] Quick Win deferred cleanup: 0
 [Metadata Reconciliation] Closed/done execution cleanup: 0
-[Metadata Reconciliation] Applying true execution rank rewrite: 25 active rows; changed=0
+[Metadata Reconciliation] Applying true execution rank rewrite: 10 active rows; changed=0
 [Metadata Reconciliation] Execution rank rewrite skipped: canonical ranks already current
 
 --- Run summary ---
-Started:  2026-05-25 06:50:33
-Finished: 2026-05-25 06:51:09
-Elapsed:  36.7s
+Started:  2026-05-25 07:02:22
+Finished: 2026-05-25 07:02:47
+Elapsed:  24.3s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
@@ -375,7 +365,7 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-25 06:51:09 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-25 07:02:47 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
 [Metadata Reconciliation] Inline reconciliation active; atexit hook disabled
 [Runtime Lock] Removing stale lock. pid=0 age_seconds=999999
