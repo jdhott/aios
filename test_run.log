@@ -1,4 +1,4 @@
-Running AIOS at Mon 25 May 2026 06:07:31 EDT
+Running AIOS at Mon 25 May 2026 06:39:35 EDT
 [Metadata Persistence Guard] Closed-task execution persistence guard installed — metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 === EXECUTION AUTHORITY CONSOLIDATION — PHASE 5: QUICK WIN VIEW REBALANCE ===
 === EXECUTION OVERLAY DERIVED FROM EXECUTION RANK / SCORE ===
@@ -11,8 +11,7 @@ __file__ = /Users/John/LocalProjects/aios/run_aios.py
 Test runner ready. Set TEST_MODE = True, then run_tests_from_top() after the notebook has loaded.
 Structural helper order tests passed
 Using synced block: 34c1facc-c5ab-80cc-b68a-fe0229f8749b
-Extracted 0 brain dump item(s)
-Inbox empty → no-op.
+Extracted 1 brain dump item(s)
 Found 100 open unfinished tasks
 === PAGINATION WARNING ===
 100+ tasks detected. Verify all historical tasks are loading.
@@ -28,41 +27,194 @@ Non-task notes routed: 0
 
 Non-task ideas routed: 0
 
-New tasks to create: 0
-Controlled production limit: processing 0 of 0 new item(s)
+New tasks to create: 1
++ Complete mise en place for shaping workshop tomorrow important
+Controlled production limit: processing 1 of 1 new item(s)
+[Metadata PATCH Payload]
 
 --- RUN MODE ---
 DRY_RUN: False
 MAX_ITEMS_PER_RUN: 5
 ARCHIVE_PROCESSED_ITEMS: True
-Created 0 task(s)
-Archived 0 processed item(s)
+
+PROCESSING: Complete mise en place for shaping workshop tomorrow important
+Breaking down: Complete mise en place for shaping workshop
+
+--- BREAKDOWN ---
+Parent: Complete mise en place for shaping workshop
+ - Gather all ingredients needed for the shaping workshop
+ - Prepare and portion dough for shaping exercises
+ - Arrange shaping tools and equipment for easy access
+ - Label workstations with participant names or groups
+ - Set up proofing areas to place shaped dough during the workshop
+Created: Complete mise en place for shaping workshop
+Importance: Complete mise en place for shaping workshop → High Importance
+[Metadata PATCH Result] 200
+Importance AI log written: Complete mise en place for shaping workshop → Importance
+[Metadata Source Text] {'source_text': 'Complete mise en place for shaping workshop'}
+[TEMPORAL AUTHORITY] {'input': 'Complete mise en place for shaping workshop', 'cleaned_title': 'Complete mise en place for shaping workshop', 'due_date': 'None', 'tokens': []}
+[Evaluation] JDI=False | QuickWin=False | Breakdown=False
+Created: Gather all ingredients needed for the shaping workshop
+Importance: Gather all ingredients needed for the shaping workshop → High Importance
+[Metadata PATCH Result] 200
+Importance AI log written: Gather all ingredients needed for the shaping workshop → Importance
+[Metadata Source Text] {'source_text': 'Gather all ingredients needed for the shaping workshop'}
+[TEMPORAL AUTHORITY] {'input': 'Gather all ingredients needed for the shaping workshop', 'cleaned_title': 'Gather all ingredients needed for the shaping workshop', 'due_date': 'None', 'tokens': []}
+Updated metadata: Gather all ingredients needed for the shaping workshop → {'Effort': {'select': {'name': 'Small Effort'}}, 'Duration': {'select': {'name': '30 min'}}}
+Created: Prepare and portion dough for shaping exercises
+[Metadata Source Text] {'source_text': 'Prepare and portion dough for shaping exercises'}
+[TEMPORAL AUTHORITY] {'input': 'Prepare and portion dough for shaping exercises', 'cleaned_title': 'Prepare and portion dough for shaping exercises', 'due_date': 'None', 'tokens': []}
+Updated metadata: Prepare and portion dough for shaping exercises → {'Effort': {'select': {'name': 'Medium Effort'}}, 'Duration': {'select': {'name': '60 min'}}}
+Created: Arrange shaping tools and equipment for easy access
+[Metadata Source Text] {'source_text': 'Arrange shaping tools and equipment for easy access'}
+[TEMPORAL AUTHORITY] {'input': 'Arrange shaping tools and equipment for easy access', 'cleaned_title': 'Arrange shaping tools and equipment for easy access', 'due_date': 'None', 'tokens': []}
+[Evaluation] JDI=False | QuickWin=False | Breakdown=False
+Updated metadata: Arrange shaping tools and equipment for easy access → {'Effort': {'select': {'name': 'Small Effort'}}, 'Duration': {'select': {'name': '30 min'}}}
+Updated Quick Win: Arrange shaping tools and equipment for easy access → True
+Created: Label workstations with participant names or groups
+[Metadata Source Text] {'source_text': 'Label workstations with participant names or groups'}
+[TEMPORAL AUTHORITY] {'input': 'Label workstations with participant names or groups', 'cleaned_title': 'Label workstations with participant names or groups', 'due_date': 'None', 'tokens': []}
+[Evaluation] JDI=False | QuickWin=False | Breakdown=False
+Updated metadata: Label workstations with participant names or groups → {'Effort': {'select': {'name': 'Small Effort'}}, 'Duration': {'select': {'name': '15 min'}}}
+Updated Quick Win: Label workstations with participant names or groups → True
+Created: Set up proofing areas to place shaped dough during the workshop
+Importance: Set up proofing areas to place shaped dough during the workshop → High Importance
+[Metadata PATCH Result] 200
+Importance AI log written: Set up proofing areas to place shaped dough during the workshop → Importance
+[Metadata Source Text] {'source_text': 'Set up proofing areas to place shaped dough during the workshop'}
+[TEMPORAL AUTHORITY] {'input': 'Set up proofing areas to place shaped dough during the workshop', 'cleaned_title': 'Set up proofing areas to place shaped dough during the workshop', 'due_date': 'None', 'tokens': []}
+Updated metadata: Set up proofing areas to place shaped dough during the workshop → {'Effort': {'select': {'name': 'Medium Effort'}}, 'Duration': {'select': {'name': '60 min'}}}
+[Metadata PATCH Result] 200
+Archived item: Complete mise en place for shaping workshop tomorrow important
+Removed original block: 36b1facc-c5ab-80e0-8d3c-e234b1f2f2dc
+Created 6 task(s)
+Archived 1 processed item(s)
 [PROJECT MODULE LOAD] RUN_PROJECT_CANDIDATE_DETECTOR=False TEST_MODE=False DRY_RUN=True
 [PROJECT DETECTOR RUNTIME FLAGS] TEST_MODE=False DRY_RUN=False RUN_PROJECT_CANDIDATE_DETECTOR=True
-Project candidate detector: no newly created top-level tasks to review.
+[query_tasks_database] Using shared pagination helper
+[Pagination] Page 1: 25 results
+[Pagination] Page 2: 25 results
+[Pagination] Page 3: 25 results
+[Pagination] Page 4: 25 results
+[Pagination] Page 5: 25 results
+[Pagination] Page 6: 25 results
+[Pagination] Page 7: 25 results
+[Pagination] Page 8: 25 results
+[Pagination] Page 9: 25 results
+[Pagination] Page 10: 11 results
+[Pagination] Total results: 236
+=== PAGINATION ACTIVE ===
+[query_tasks_database] Retrieved 236 total tasks
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 47 results
-[Pagination] Total results: 247
+[Pagination] Page 3: 100 results
+[Pagination] Page 4: 100 results
+[Pagination] Page 5: 100 results
+[Pagination] Page 6: 100 results
+[Pagination] Page 7: 100 results
+[Pagination] Page 8: 100 results
+[Pagination] Page 9: 100 results
+[Pagination] Page 10: 100 results
+[Pagination] Page 11: 57 results
+[Pagination] Total results: 1057
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 247 total tasks
-[Execution Engine] Full task set for reconciliation: 247
+[query_tasks_database] Retrieved 1057 total tasks
+[Historical Operational Memory] Loaded 1057 completed tasks
+[Operational Context Layer] open=236 historical=1057 combined=1293
+
+--- Project candidate detector ---
+[Telemetry Emit Attempt] event_type=telemetry_runtime_test seed=Telemetry Runtime Validation
+[Telemetry] enabled=True db_present=True
+[Telemetry] writing event to Notion telemetry_runtime_test
+[Telemetry] notion_status= 200
+Reviewing 1 newly created top-level task(s).
+Project relation write-back: enabled (RUN_PROJECT_RELATION_WRITEBACK=None)
+Querying Projects database: 0adf0c98…
+Loaded active projects: 12/21
+[TRACE] Seed task: Complete mise en place for shaping workshop
+[TRACE] Final merged candidates: 8
+[TRACE] AI should_group: True
+[Operational Field Dynamics]
+  seed=Complete mise en place for shaping workshop
+  matched_project=None
+  operational_score=0.51
+  field_strength=0.60
+[Operational Reinforcement Advisory] Complete mise en place for shaping workshop → Workshops and Teaching (score=0.51)
+[Ontology-Aware Expansion] 0 operational neighbors
+[Effective Expansion Size] 4
+[Ontology Confidence] 0.69
+[Operational Ontology Detected] True
+[Reinforcement Compatibility] reinforcement=Workshops and Teaching emergent=Workshops and Teaching meaningful_overlap=3 specificity_alignment=True strengthens=True
+[Ontology-Compatible Reinforcement] Workshops and Teaching
+[Operational Specificity] Complete mise en place for shaping workshop -> 0
+[ONTOLOGY VALIDATION OVERRIDE] confidence=0.69
+[Telemetry Emit Attempt] event_type=ontology_override seed=Complete mise en place for shaping workshop
+[Telemetry] enabled=True db_present=True
+[Telemetry] writing event to Notion ontology_override
+[Telemetry] notion_status= 200
+[ONTOLOGY CANDIDATE ACCEPTED] Workshops and Teaching
+[ONTOLOGY CRYSTALLIZATION SUCCESS] Workshops and Teaching
+[Telemetry Emit Attempt] event_type=ontology_crystallized seed=Complete mise en place for shaping workshop
+[Telemetry] enabled=True db_present=True
+[Telemetry] writing event to Notion ontology_crystallized
+[Telemetry] notion_status= 200
+[Ontology Expansion Titles] []
+[ONTOLOGY CRYSTALLIZATION PROMOTED] Workshops and Teaching
+[Governance State] Operational ontology granted primary authority.
+[ONTOLOGY GOVERNANCE SUCCESS] Workshops and Teaching
+[Ontology Confidence Final] 0.69
+
+--- PROJECT CANDIDATE ---
+Seed task: Complete mise en place for shaping workshop
+Suggested project: Workshops and Teaching
+Confidence: 0.90
+Reason: All tasks relate to preparation, organization, follow-up, and materials management for workshops focused on baking-related topics, indicating an ongoing responsibility for workshop delivery and coordination. Operational reinforcement stored as advisory context.
+Related tasks:
+ - Organize supplies for pizza workshop
+ - Reply to email from Jennifer Coyle about workshop follow up
+ - Move extra workshop bins to the basement
+ - Label bin of supplies for pizza and focaccia workshops
+[Metadata PATCH Result] 200
+[Project Canonicalization] best active match=Workshops and Teaching (1.00)
+[Project Canonicalization] reusing ACTIVE project: Workshops and Teaching
+Set Suggested Project: Complete mise en place for shaping workshop → Workshops and Teaching
+Set Project relation: Complete mise en place for shaping workshop → Workshops and Teaching
+[Metadata PATCH Result] 200
+Project relation preserved: Organize supplies for pizza workshop already has a project relation
+Project relation preserved: Reply to email from Jennifer Coyle about workshop follow up already has a project relation
+Project relation preserved: Move extra workshop bins to the basement already has a project relation
+Project relation preserved: Label bin of supplies for pizza and focaccia workshops already has a project relation
+[query_tasks_database] Using shared pagination helper
+[Pagination] Page 1: 100 results
+[Pagination] Page 2: 100 results
+[Pagination] Page 3: 52 results
+[Pagination] Total results: 252
+=== PAGINATION ACTIVE ===
+[query_tasks_database] Retrieved 252 total tasks
+[Execution Engine] Full task set for reconciliation: 252
 === EXECUTION ENGINE V2 ACTIVE ===
-[Execution Engine V2] Tasks received: 247
+[Execution Engine V2] Tasks received: 252
 [Execution Engine V2] Closed/done tasks excluded from sparse reset: 0
 \n--- Execution Engine V2 Sparse Reset ---
-[Execution Engine V2] Previously persisted tasks: 24
-[Execution Engine V2] Reset tasks: 24
+[Execution Engine V2] Previously persisted tasks: 25
+[Execution Engine V2] Reset tasks: 25
 \n--- Execution Eligibility Scan ---
-Total open tasks: 247
+Total open tasks: 252
 Rejected closed/done: 1
 [Execution Engine V2] Closed/done tasks excluded before ranking: 1
 Rejected deferred: 1
 Rejected JDI: 17
-Quick Wins included in ranking: 59
-Rejected non-actionable: 109
-Eligible execution tasks: 119
+Quick Wins included in ranking: 60
+Rejected non-actionable: 111
+Eligible execution tasks: 122
+[Evaluator Diagnostics] title=Set up proofing areas to place shaped dough during the workshop | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
+[Execution Engine V2] scoring: Set up proofing areas to place shaped dough during the workshop -> 3 (medium_effort)
+[Execution Engine V2] scoring: Label workstations with participant names or groups -> 3 (quick_win)
+[Execution Engine V2] baseline_executable_fallback: Arrange shaping tools and equipment for easy access -> 1 (baseline_executable)
+[Execution Engine V2] scoring: Arrange shaping tools and equipment for easy access -> 1 (baseline_executable)
+[Evaluator Diagnostics] title=Prepare and portion dough for shaping exercises | legacy=0 | evaluator=7 | divergence=7 | components=[medium_effort(+3), preparation_work(+4)]
+[Execution Engine V2] scoring: Prepare and portion dough for shaping exercises -> 7 (medium_effort, preparation_work)
 [Execution Engine V2] baseline_executable_fallback: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
 [Evaluator Diagnostics] title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
@@ -151,8 +303,6 @@ Eligible execution tasks: 119
 [Execution Engine V2] scoring: Check bank account for tax refund -> 3 (quick_win)
 [Evaluator Diagnostics] title=Slice bread for school breakfast program | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
 [Execution Engine V2] scoring: Slice bread for school breakfast program -> 8 (quick_win, operational_context)
-[Evaluator Diagnostics] title=Email school about bread order | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Email school about bread order -> 8 (quick_win, operational_context)
 [Execution Engine V2] baseline_executable_fallback: Ask ChatGPT to implement “Context extraction” in AIOS -> 1 (baseline_executable)
 [Execution Engine V2] scoring: Ask ChatGPT to implement “Context extraction” in AIOS -> 1 (baseline_executable)
 [Execution Engine V2] baseline_executable_fallback: Ask ChatGPT to implement Incremental append mode in AIOS -> 1 (baseline_executable)
@@ -271,7 +421,7 @@ Eligible execution tasks: 119
 
 --- Execution Component Registry Summary ---
 Registered component types: 16
-Components observed: quick_win:40(friction), baseline_executable:32(fallback), operational_context:26(context), medium_effort:17(effort), strategic_context:15(context), planning_work:4(work_type), high_urgency:2(urgency), preparation_work:2(work_type), large_effort:1(effort), medium_urgency:1(urgency)
+Components observed: quick_win:40(friction), baseline_executable:33(fallback), operational_context:25(context), medium_effort:19(effort), strategic_context:15(context), planning_work:4(work_type), preparation_work:3(work_type), high_urgency:2(urgency), large_effort:1(effort), medium_urgency:1(urgency)
 Unregistered components observed: none
 \n--- Execution Engine V2 In-Memory Rankings ---
 rank=1 score=25 title=Send Khorasan recipe to Mary
@@ -280,15 +430,15 @@ rank=3 score=17 title=Review recurring charges on Mastercard
 rank=4 score=13 title=Plan another test bake of focaccia for Almanac recipe development
 rank=5 score=8 title=Check skimmer basket in pool
 rank=6 score=8 title=Clean work surfaces and floors throughout the bakery
-rank=7 score=8 title=Email school about bread order
-rank=8 score=8 title=Fix timezone issue with Bread Basket app
-rank=9 score=8 title=Organize pool equipment for opening — Clean and sanitize all equipment.
-rank=10 score=8 title=Organize pool equipment for opening — Store equipment in an accessible location.
-rank=11 score=8 title=Plan dinner to make for Burlington trip
-rank=12 score=8 title=Plan for annual review of wills and POAs
-rank=13 score=8 title=Plan to attend an Ottawa Titans baseball game
-rank=14 score=8 title=Put vacuum hose for pool in the garage
-rank=15 score=8 title=Send WhatsApp message to bread community about performance of Bread Basket app
+rank=7 score=8 title=Fix timezone issue with Bread Basket app
+rank=8 score=8 title=Organize pool equipment for opening — Clean and sanitize all equipment.
+rank=9 score=8 title=Organize pool equipment for opening — Store equipment in an accessible location.
+rank=10 score=8 title=Plan dinner to make for Burlington trip
+rank=11 score=8 title=Plan for annual review of wills and POAs
+rank=12 score=8 title=Plan to attend an Ottawa Titans baseball game
+rank=13 score=8 title=Put vacuum hose for pool in the garage
+rank=14 score=8 title=Send WhatsApp message to bread community about performance of Bread Basket app
+rank=15 score=8 title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
 [Execution Engine V2] Winner limit: 5
 [Execution Engine V2] Persisting top 25 execution rankings for dashboard/Quick Win visibility
 \n--- Best Next Actions ---
@@ -305,34 +455,34 @@ BNA rank=5 score=8 title=Check skimmer basket in pool
 [Execution Engine V2] Canonical persistence row: rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
 [Execution Engine V2] Canonical persistence row: rank=5 score=8 id=3671facc title=Check skimmer basket in pool
 [Execution Engine V2] Canonical persistence row: rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery
-[Execution Engine V2] Canonical persistence row: rank=7 score=8 id=3581facc title=Email school about bread order
-[Execution Engine V2] Canonical persistence row: rank=8 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Execution Engine V2] Canonical persistence row: rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
-[Execution Engine V2] Canonical persistence row: rank=10 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
-[Execution Engine V2] Canonical persistence row: rank=11 score=8 id=e047a92a title=Plan dinner to make for Burlington trip
-[Execution Engine V2] Canonical persistence row: rank=12 score=8 id=3531facc title=Plan for annual review of wills and POAs
-[Execution Engine V2] Canonical persistence row: rank=13 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game
-[Execution Engine V2] Canonical persistence row: rank=14 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Execution Engine V2] Canonical persistence row: rank=15 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
+[Execution Engine V2] Canonical persistence row: rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
+[Execution Engine V2] Canonical persistence row: rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
+[Execution Engine V2] Canonical persistence row: rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
+[Execution Engine V2] Canonical persistence row: rank=10 score=8 id=e047a92a title=Plan dinner to make for Burlington trip
+[Execution Engine V2] Canonical persistence row: rank=11 score=8 id=3531facc title=Plan for annual review of wills and POAs
+[Execution Engine V2] Canonical persistence row: rank=12 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game
+[Execution Engine V2] Canonical persistence row: rank=13 score=8 id=3661facc title=Put vacuum hose for pool in the garage
+[Execution Engine V2] Canonical persistence row: rank=14 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
+[Execution Engine V2] Canonical persistence row: rank=15 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
 [Execution Engine V2] Write payload: rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
 [Execution Engine V2] Write payload: rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
 [Execution Engine V2] Write payload: rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
 [Execution Engine V2] Write payload: rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
 [Execution Engine V2] Write payload: rank=5 score=8 id=3671facc title=Check skimmer basket in pool
 [Execution Engine V2] Write payload: rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery
-[Execution Engine V2] Write payload: rank=7 score=8 id=3581facc title=Email school about bread order
-[Execution Engine V2] Write payload: rank=8 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Execution Engine V2] Write payload: rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
-[Execution Engine V2] Write payload: rank=10 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
-[Execution Engine V2] Write payload: rank=11 score=8 id=e047a92a title=Plan dinner to make for Burlington trip
-[Execution Engine V2] Write payload: rank=12 score=8 id=3531facc title=Plan for annual review of wills and POAs
-[Execution Engine V2] Write payload: rank=13 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game
-[Execution Engine V2] Write payload: rank=14 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Execution Engine V2] Write payload: rank=15 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
-[Execution Engine V2] Write payload: rank=16 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-[Execution Engine V2] Write payload: rank=17 score=8 id=3581facc title=Slice bread for school breakfast program
-[Execution Engine V2] Write payload: rank=18 score=8 id=3621facc title=Take winter supplies for pool to garage
-[Execution Engine V2] Write payload: rank=19 score=7 id=3581facc title=Ask ChatGPT to add feature for completion / outcome review pass in AIOS
+[Execution Engine V2] Write payload: rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
+[Execution Engine V2] Write payload: rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
+[Execution Engine V2] Write payload: rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
+[Execution Engine V2] Write payload: rank=10 score=8 id=e047a92a title=Plan dinner to make for Burlington trip
+[Execution Engine V2] Write payload: rank=11 score=8 id=3531facc title=Plan for annual review of wills and POAs
+[Execution Engine V2] Write payload: rank=12 score=8 id=3561facc title=Plan to attend an Ottawa Titans baseball game
+[Execution Engine V2] Write payload: rank=13 score=8 id=3661facc title=Put vacuum hose for pool in the garage
+[Execution Engine V2] Write payload: rank=14 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
+[Execution Engine V2] Write payload: rank=15 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+[Execution Engine V2] Write payload: rank=16 score=8 id=3581facc title=Slice bread for school breakfast program
+[Execution Engine V2] Write payload: rank=17 score=8 id=3621facc title=Take winter supplies for pool to garage
+[Execution Engine V2] Write payload: rank=18 score=7 id=3581facc title=Ask ChatGPT to add feature for completion / outcome review pass in AIOS
+[Execution Engine V2] Write payload: rank=19 score=7 id=36b1facc title=Prepare and portion dough for shaping exercises
 [Execution Engine V2] Write payload: rank=20 score=7 id=3571facc title=Prepare ingredients and final Khorasan focaccia for the photo shoot
 [Execution Engine V2] Write payload: rank=21 score=7 id=f63aac20 title=Update Will 
 [Execution Engine V2] Write payload: rank=22 score=7 id=3581facc title=Write a brief description of the AIOS system
@@ -343,11 +493,13 @@ BNA rank=5 score=8 title=Check skimmer basket in pool
 [Execution Engine V2] Reconciliation complete
 Execution Engine V2 completed successfully. Winners: 5
 [Execution Flow] Canonical Execution Authority complete; Quick Win view rebalance active; legacy execution-state automation remains disabled
+Removed original block: 36a1facc-c5ab-8198-97fc-c8e7861ee50e
+Trimmed 1 old archive run(s)
 === METADATA RECONCILIATION — PHASE 2.5: INLINE PRE-SUMMARY PASS ===
 === METADATA RECONCILIATION — PHASE 2.3: TRUE CANONICAL RANK REWRITE + CLEANUPS ===
 [Metadata Reconciliation] Version: metadata-reconciliation-phase2-true-canonical-rank-rewrite-v0.2.3
-[Metadata Reconciliation] Tasks scanned: 247
-[Metadata Reconciliation] Open tasks observed: 231
+[Metadata Reconciliation] Tasks scanned: 252
+[Metadata Reconciliation] Open tasks observed: 236
 [Metadata Reconciliation] Done tasks observed: 0
 [Metadata Reconciliation] Closed/done tasks observed: 16
 [Metadata Reconciliation] Findings: 0
@@ -362,17 +514,17 @@ Execution Engine V2 completed successfully. Winners: 5
 [Metadata Reconciliation] Deferred future tasks with meaningful Execution Score: 0
 [Metadata Reconciliation] Deferred future tasks with Best Next Action: 0
 [Metadata Reconciliation] Deferred future tasks with Do = Today: 0
-[Execution Rank Diagnostics] Active ranked rows observed: 24
-[Execution Rank Diagnostics] Skipped counts: closed_or_done=16; future_deferred=1; jdi=17; missing_rank_or_score=189; non_positive_score=0; not_open=0
+[Execution Rank Diagnostics] Active ranked rows observed: 25
+[Execution Rank Diagnostics] Skipped counts: closed_or_done=16; future_deferred=1; jdi=17; missing_rank_or_score=193; non_positive_score=0; not_open=0
 [Execution Rank Diagnostics] Missing persisted ranks: none
 [Execution Rank Diagnostics] Duplicate persisted ranks: none
 [Execution Rank Diagnostics] Current persisted-rank order preview: 15
 [Execution Rank Diagnostics] Rank-order row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=3 current_rank=3 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=4 current_rank=4 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3581facc title=Email school about bread order flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard flags=Strong,Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
+[Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment. flags=Parentish
 [Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location. flags=Parentish
@@ -385,10 +537,10 @@ Execution Engine V2 completed successfully. Winners: 5
 [Execution Rank Diagnostics] Deterministic score/title/page-id order preview: 15
 [Execution Rank Diagnostics] Deterministic row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
 [Execution Rank Diagnostics] Deterministic row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
-[Execution Rank Diagnostics] Deterministic row: pos=3 current_rank=3 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
-[Execution Rank Diagnostics] Deterministic row: pos=4 current_rank=4 score=8 id=3671facc title=Check skimmer basket in pool
-[Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=5 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery
-[Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3581facc title=Email school about bread order
+[Execution Rank Diagnostics] Deterministic row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
+[Execution Rank Diagnostics] Deterministic row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
+[Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool
+[Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3571facc title=Clean work surfaces and floors throughout the bakery
 [Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=7 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
 [Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=8 score=8 id=3531facc title=Organize pool equipment for opening — Clean and sanitize all equipment.
 [Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=9 score=8 id=3531facc title=Organize pool equipment for opening — Store equipment in an accessible location.
@@ -405,28 +557,28 @@ Execution Engine V2 completed successfully. Winners: 5
 [Metadata Persistence Guard] Execution fields stripped: 0
 [Metadata Reconciliation] Quick Win deferred cleanup: 0
 [Metadata Reconciliation] Closed/done execution cleanup: 0
-[Metadata Reconciliation] Applying true execution rank rewrite: 24 active rows; changed=0
+[Metadata Reconciliation] Applying true execution rank rewrite: 25 active rows; changed=0
 [Metadata Reconciliation] Execution rank rewrite skipped: canonical ranks already current
 
 --- Run summary ---
-Started:  2026-05-25 06:07:32
-Finished: 2026-05-25 06:08:29
-Elapsed:  56.7s
-Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
+Started:  2026-05-25 06:39:36
+Finished: 2026-05-25 06:41:25
+Elapsed:  108.1s
+Inbox — Extracted: 1, New: 1, Processed: 1, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
-Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
-Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0
-Archive / review — Archived items: 0, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 0
-AI log — Entries: 0, Metadata entries: 0, Errors: 0
+Tasks — Created: 6, Breakdown parents: 1, Breakdown subtasks: 5, Clarification tasks: 0
+Updates — Matched items: 0, Metadata: 5, Importance: 3, Quick Win: 2
+Archive / review — Archived items: 1, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 1
+AI log — Entries: 6, Metadata entries: 3, Errors: 0
 Task notes added: 0
 Non-task notes routed: 0
 Non-task ideas routed: 0
-Project candidates detected: 0
-Suggested Project updates: 0
-Project relations updated: 0
+Project candidates detected: 1
+Suggested Project updates: 1
+Project relations updated: 1
 Project records created: 0
 Errors: 0
-2026-05-25 06:08:29 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-25 06:41:25 — Run complete — Created: 6, Updated: 7, Archived: 1, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
 [Metadata Reconciliation] Inline reconciliation active; atexit hook disabled
 [Runtime Lock] Removing stale lock. pid=0 age_seconds=999999
