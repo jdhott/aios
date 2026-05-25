@@ -192,7 +192,7 @@ PROJECT_TOKEN_STOPWORDS = {
 # The detector should group tasks around outcomes / operational domains, not
 # around incidental bakery nouns. These token groups intentionally affect only
 # project-candidate review. They do not affect task creation, breakdowns,
-# duplicate detection, Quick Win, or Focus Now.
+# duplicate detection or Quick Win.
 
 PROJECT_LOW_VALUE_DOMAIN_TOKENS = {
     # Generic bakery / formula vocabulary. Useful in task titles, but weak as a

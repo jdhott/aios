@@ -1,3 +1,18 @@
+print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2G: COMBINED QUICK WIN RANKING + QUIET OVERLAY ===")
+print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2H2: QUICK WIN OVERLAY AFTER RANKING ===")
+
+# ============================================================
+# EXECUTION AUTHORITY CONSOLIDATION — PHASE 1
+# Legacy execution abstractions deprecated:
+# - Focus Now
+# - Strong Candidate
+# - automatic Do = Today mutation
+#
+# Canonical execution authority:
+# - Execution Score
+# - Execution Rank
+# ============================================================
+
 
 
 def notion_paginated_query(url, headers, payload):
@@ -166,9 +181,6 @@ RUN_SUMMARY = {
     "importance_updates": 0,
     "metadata_log_entries": 0,
     "quick_win_updates": 0,
-    "focus_updates": 0,
-    "focus_now_added": 0,
-    "focus_now_deferred_removed": 0,
     "matched_items_updated": 0,
     "items_archived": 0,
     "archive_runs_trimmed": 0,
@@ -353,12 +365,10 @@ def build_run_notification_text():
     created_count = RUN_SUMMARY["tasks_created"]
     clarification_count = RUN_SUMMARY["clarification_tasks_created"]
     quick_win_count = RUN_SUMMARY["quick_win_updates"]
-    focus_now_count = RUN_SUMMARY["focus_now_added"]
 
     other_updates = (
         RUN_SUMMARY["matched_items_updated"]
         + RUN_SUMMARY["metadata_updates"]
-        + RUN_SUMMARY["focus_updates"]
     )
 
     lines = []
@@ -378,9 +388,6 @@ def build_run_notification_text():
 
     if quick_win_count > 0:
         lines.append(f"⚡ Quick Win updates: {quick_win_count}")
-
-    if focus_now_count > 0:
-        lines.append(f"🎯 Focus Now added: {focus_now_count}")
 
     if other_updates > 0:
         lines.append(f"🔄 Other updates: {other_updates}")
@@ -464,9 +471,7 @@ def print_run_summary():
         f"Matched items: {RUN_SUMMARY['matched_items_updated']}, "
         f"Metadata: {RUN_SUMMARY['metadata_updates']}, "
         f"Importance: {RUN_SUMMARY.get('importance_updates', 0)}, "
-        f"Quick Win: {RUN_SUMMARY['quick_win_updates']}, "
-        f"Focus checkbox: {RUN_SUMMARY['focus_updates']}, "
-        f"Focus Now added: {RUN_SUMMARY['focus_now_added']}"
+        f"Quick Win: {RUN_SUMMARY['quick_win_updates']}"
     )
 
     print(
@@ -497,8 +502,6 @@ def print_run_summary():
         RUN_SUMMARY["matched_items_updated"]
         + RUN_SUMMARY["metadata_updates"]
         + RUN_SUMMARY["quick_win_updates"]
-        + RUN_SUMMARY["focus_updates"]
-        + RUN_SUMMARY["focus_now_added"]
     )
 
     print(
@@ -533,23 +536,13 @@ ARCHIVE_PROCESSED_ITEMS = True
 #   TEST_ONLY=true python run_aios.py
 
 # Pipeline mode switches. Keep task creation on for normal Brain Dump processing.
-# Turn RUN_TASK_CREATION_PIPELINE off when you only want to refresh Focus Now.
 RUN_TASK_CREATION_PIPELINE = True
 if TEST_MODE:
     RUN_TASK_CREATION_PIPELINE = False
 
-# Best Next Action updater. When True, the notebook will fill the primary execution view by
-# setting Do = Today on the surfaced execution lane.
-# Architecture:
-# - 1 Focus Now task
-# - 5 Strong Candidates
-# - total surfaced lane = 6 tasks
-RUN_FOCUS_NOW_UPDATE = True
-if TEST_MODE:
-    RUN_FOCUS_NOW_UPDATE = False
-FOCUS_NOW_LIMIT = 6
-FOCUS_NOW_DO_PROPERTY = "Do"
-FOCUS_NOW_TODAY_VALUE = "Today"
+# Legacy Focus / automatic Do mutation is intentionally disabled.
+# Do = Today remains a manual-only Notion flag. Execution Engine V2 owns
+# Execution Score / Execution Rank / Best Next Action selection.
 DEFER_UNTIL_PROPERTY = "Defer Until"
 DUE_DATE_PROPERTY = "Due Date"
 
@@ -608,33 +601,13 @@ INACTIVE_PROJECT_STATUS_VALUES = {"Completed", "Done", "Archived", "Paused", "So
 PARENT_TASK_PROPERTY = "Parent Task"
 STEP_ORDER_PROPERTY = "Step Order"
 
-# Ranking used by the Focus Now updater. Lower number = selected first.
-FOCUS_NOW_URGENCY_ORDER = [
-    "High Urgency",
-]
-
-FOCUS_NOW_PRIORITY_ORDER = [
-    "Immediate",
-    "High Priority",
-    "1st Priority",
-    "2nd Priority",
-    "3rd Priority",
-]
-
-# Focus Now should consider high-value metadata, but it should not compete
-# with explicit user overrides (JDI) or Quick Wins. JDIs are handled by the
-# user; Quick Wins are handled by the low-friction execution lane.
-FOCUS_NOW_IMPORTANCE_ORDER = [
-    "High Importance",
-]
-
 # ## 1.1 🧪 Quick test runner / navigation
 # 
 # Use this section when you want to run the local task tests without hunting through the notebook.
 # 
 # - Set `TEST_MODE = True` in the run-mode cell above.
 # - Run this quick runner cell after the notebook has loaded once, or use **Kernel → Restart & Run All**.
-# - In `TEST_MODE`, live Notion writes and Focus Now maintenance are skipped.
+# - In `TEST_MODE`, live Notion writes are skipped.
 # 
 # You can also jump to the full section by searching for: `TASK CLASSIFICATION TEST HARNESS`.
 # 
@@ -676,8 +649,6 @@ else:
 
 HIGH_MATCH_THRESHOLD = 0.90
 MEDIUM_MATCH_THRESHOLD = 0.75
-
-MAX_FOCUS_QUICK_WINS = 5
 
 ACTIVE_EDIT_GRACE_SECONDS = 60
 
@@ -976,7 +947,7 @@ def extract_note_texts_from_block(block):
     - direct child blocks = notes/context for that task
 
     Notes are deliberately not used for classification, duplicate detection,
-    Quick Win, Focus Now, or breakdown decisions in this V1.
+    Quick Win or breakdown decisions in this V1.
     """
     if not block.get("has_children"):
         return []
@@ -4409,7 +4380,7 @@ def get_defer_until_date(task):
 def is_deferred_until_future(task, today=None):
     """Return True when a task should be hidden until a future date.
 
-    Defer Until means: do not surface this task in Quick Win / Focus Now until
+    Defer Until means: do not surface this task in automated execution views until
     that date arrives. A task deferred to today is eligible again.
     """
     defer_until = get_defer_until_date(task)
@@ -4440,7 +4411,7 @@ def filter_to_next_sequence_tasks(tasks):
 
     Breakdown subtasks are treated as an ordered sequence. If a parent has
     multiple incomplete child steps, only the lowest Step Order is eligible for
-    Quick Win / Focus Now selection. This prevents later steps from surfacing
+    Quick Win selection. This prevents later steps from surfacing
     before earlier steps are complete.
     """
     open_tasks = [task for task in tasks if is_open_task(task) and not is_deferred_until_future(task)]
@@ -4708,39 +4679,42 @@ def update_quick_win_if_needed(task):
 
 # In[45]:
 
-def update_focus_if_needed(task, focus_value):
-    if not task or task.get("dry_run"):
-        return False
+def sort_quick_wins_by_persisted_execution_metadata(tasks):
+    """Sort Quick Wins using persisted Execution Rank / Execution Score only.
 
-    props = task.get("properties", {})
-    current_focus = get_checkbox_value(props, "Focus")
+    Phase 2G: Quick Win overlay must not call the execution scorer again.
+    Execution cognition is owned by Execution Engine V2:
+        Evaluator → Execution Score → Execution Rank
 
-    if current_focus == focus_value:
-        return False
+    Quick Wins are an overlay and should reuse persisted execution metadata.
+    """
+    def sort_key(task):
+        props = task.get("properties", {})
+        rank = get_number_value(props, EXECUTION_RANK_PROPERTY)
+        score = get_number_value(props, EXECUTION_SCORE_PROPERTY)
+        created = task.get("created_time", "")
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={
-            "properties": {
-                "Focus": {
-                    "checkbox": focus_value
-                }
-            }
-        },
-        timeout=30,
+        return (
+            rank is None,
+            rank if rank is not None else 999999,
+            -(score if score is not None else -999999),
+            created,
+        )
+
+    sorted_tasks = sorted(tasks, key=sort_key)
+    ranked_count = sum(
+        1 for task in sorted_tasks
+        if get_number_value(task.get("properties", {}), EXECUTION_RANK_PROPERTY) is not None
     )
 
-    if response.ok:
-        increment_summary("focus_updates")
-        print(f"Updated Focus: {get_title(task)} → {focus_value}")
-        return True
+    print(
+        f"[Quick Win Overlay] Sorted focused Quick Wins from persisted "
+        f"Execution Rank/Score; no scorer recomputation. "
+        f"Ranked={ranked_count}/{len(sorted_tasks)}"
+    )
 
-    print("ERROR updating Focus:", get_title(task))
-    print(response.status_code, response.text)
-    return False
+    return sorted_tasks
 
-# In[46]:
 
 def get_eligible_quick_wins():
     filter_payload = {
@@ -4770,66 +4744,9 @@ def get_eligible_quick_wins():
         if get_checkbox_value(task.get("properties", {}), "Quick Win")
     ]
 
-    return sort_focus_now_candidates(eligible_quick_wins)
+    return sort_quick_wins_by_persisted_execution_metadata(eligible_quick_wins)
 
 
-
-def get_current_focused_tasks():
-    """Return all currently focused open tasks."""
-
-    filter_payload = {
-        "and": [
-            {"property": "Open Loop", "checkbox": {"equals": True}},
-            {"property": "Done", "checkbox": {"equals": False}},
-            {"property": "Focus", "checkbox": {"equals": True}},
-        ]
-    }
-
-    return query_tasks_database(
-        filter_payload=filter_payload,
-        page_size=100,
-    )
-
-# In[47]:
-
-def update_quick_win_focus(limit=MAX_FOCUS_QUICK_WINS):
-    """
-    Maintain a capped set of focused Quick Wins.
-
-    Rebuilds the desired Focus state from scratch each run
-    so stale Focus flags cannot accumulate over time.
-    """
-
-    quick_wins = get_eligible_quick_wins()
-
-    desired_focus_ids = {
-        task["id"]
-        for task in quick_wins[:limit]
-    }
-
-    current_focused_tasks = get_current_focused_tasks()
-
-    print(f"Eligible Quick Wins retrieved: {len(quick_wins)}")
-    print(f"Current focused tasks: {len(current_focused_tasks)}")
-    print(f"Desired focused tasks: {len(desired_focus_ids)}")
-
-    focused_count = 0
-
-    # First pass: clear stale focus
-    for task in current_focused_tasks:
-        should_focus = task["id"] in desired_focus_ids
-
-        if not should_focus:
-            update_focus_if_needed(task, False)
-
-    # Second pass: apply desired focus
-    for task in quick_wins[:limit]:
-        update_focus_if_needed(task, True)
-        focused_count += 1
-
-    print(f"Focused Quick Wins: {focused_count}/{len(quick_wins)}")
-
-# In[48]:
 
 def update_missing_metadata_if_confident(
     task,
@@ -4861,10 +4778,34 @@ def update_missing_metadata_if_confident(
     # -----------------------------------------------------------------
     # Explicit temporal reinforcement parsing
     # -----------------------------------------------------------------
+    temporal_metadata = extract_temporal_metadata(source_text)
+
     normalized_source = source_text.lower()
 
-    explicit_today = "today" in normalized_source
-    explicit_tomorrow = "tomorrow" in normalized_source
+    temporal_tokens = temporal_metadata.get(
+        "temporal_tokens_found",
+        [],
+    )
+
+    explicit_today = any(
+        token in temporal_tokens
+        for token in ["today", "tonight"]
+    )
+
+    explicit_tomorrow = any(
+        "tomorrow" in token
+        for token in temporal_tokens
+    )
+
+    print(
+        "[TEMPORAL AUTHORITY]",
+        {
+            "input": source_text,
+            "cleaned_title": temporal_metadata.get("cleaned_title"),
+            "due_date": str(temporal_metadata.get("due_date")),
+            "tokens": temporal_metadata.get("temporal_tokens_found"),
+        }
+    )
 
     updates = {}
     changed_metadata = {}
@@ -6033,7 +5974,7 @@ def append_task_notes(page_id, notes, heading="Notes"):
     """Append informational Brain Dump notes to a created task page.
 
     Notes are page-body context only. They do not affect task title cleanup,
-    duplicate matching, clarification, breakdown, metadata, Quick Win, or Focus
+    duplicate matching, clarification, breakdown, metadata, or Quick Win
     Now decisions.
     """
     cleaned_notes = [
@@ -6155,7 +6096,7 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
 
     If parent_task_id is supplied, the new task is linked to that page through
     the Notion relation property named by PARENT_TASK_PROPERTY. Breakdown
-    subtasks also receive STEP_ORDER_PROPERTY so Focus Now can surface only
+    subtasks also receive STEP_ORDER_PROPERTY so execution ordering can surface only
     the next incomplete step in sequence.
     """
     # Final deterministic cleanup before anything is written to Notion.
@@ -6689,765 +6630,57 @@ def query_tasks_database(filter_payload=None, sorts=None, page_size=100):
     return results
 
 
-def get_do_value(task):
-    """Return the current Do select value, if present."""
-    props = task.get("properties", {})
-    return get_select_name(props, FOCUS_NOW_DO_PROPERTY)
+def clear_jdi_execution_state():
+    """Clear persisted execution state from manual Just Do It tasks.
 
-def is_do_today(task):
-    return get_do_value(task) == FOCUS_NOW_TODAY_VALUE
-
-
-def get_current_focus_now_tasks():
-    """Return the currently active Best Next Action tasks.
-
-    Best Next Action is now driven by:
-    - Do = Today
-    - Open Loop = true
-    - Done = false
-
-    This replaces the legacy Focus Now checkbox query, which could leave
-    stale completed tasks visible after the architecture migrated to
-    Do = Today as the presentation layer.
+    JDI is a terminal/manual execution lane. These tasks must not carry
+    Execution Score or Execution Rank values, even if earlier releases wrote
+    them before the JDI exclusion rules were tightened.
     """
 
-    filter_payload = {
-        "and": [
-            {"property": "Open Loop", "checkbox": {"equals": True}},
-            {"property": "Done", "checkbox": {"equals": False}},
-            {
-                "property": FOCUS_NOW_DO_PROPERTY,
-                "select": {"equals": FOCUS_NOW_TODAY_VALUE},
-            },
-        ]
-    }
-
-    return query_tasks_database(
-        filter_payload=filter_payload,
-        sorts=[
-            {
-                "property": "Execution Rank",
-                "direction": "ascending",
-            }
-        ],
-        page_size=10,
-    )
-
-
-def get_focus_now_eligible_tasks():
-    """Return executable tasks eligible for Best Next Action ranking.
-
-    IMPORTANT:
-    Strong Candidates are now a broad execution pool.
-
-    Exclude only:
-    - deferred tasks
-    - completed tasks
-    - JDI tasks
-    - Quick Wins
-    - vague / non-actionable tasks
-
-    Ranking handles:
-    - urgency
-    - importance
-    - due dates
-    - sequencing
-    """
-
-    open_tasks = get_open_tasks()
-    eligible_tasks = []
-
-    for task in open_tasks:
-        props = task.get("properties", {})
-        title = get_title(task)
-
-        if is_deferred_until_future(task):
-            continue
-
-        # Skip explicit JDI / Just Do It lane tasks.
-        # Some deployments may not define is_jdi(), so use a safe fallback.
-        try:
-            if is_jdi(task):
-                continue
-        except NameError:
-            props = task.get("properties", {})
-            do_value = get_select_name(props, FOCUS_NOW_DO_PROPERTY)
-
-            if do_value and str(do_value).strip().lower() == "jdi":
-                continue
-
-        if get_checkbox_value(props, "Quick Win"):
-            continue
-
-        # Keep only reasonably actionable titles.
-        # Avoid dependency on optional helper functions that may not exist
-        # in all deployments.
-        normalized = str(title or "").strip().lower()
-
-        if not normalized:
-            continue
-
-        vague_patterns = {
-            "thing",
-            "stuff",
-            "something",
-            "someone",
-        }
-
-        if normalized in vague_patterns:
-            continue
-
-        # Require at least one reasonably executable verb.
-        if not any(
-            normalized.startswith(f"{verb} ")
-            for verb in COMMON_ACTION_VERBS
-        ):
-            continue
-
-        eligible_tasks.append(task)
-
-    return eligible_tasks
-
-def focus_now_urgency_rank(task):
-    urgency = get_select_name(task.get("properties", {}), "Urgency")
-
-    if urgency in FOCUS_NOW_URGENCY_ORDER:
-        return FOCUS_NOW_URGENCY_ORDER.index(urgency)
-
-    # Blank or unknown urgency comes after the known urgency order.
-    return len(FOCUS_NOW_URGENCY_ORDER)
-
-def focus_now_priority_rank(task):
-    priority = get_select_name(task.get("properties", {}), "Priority")
-
-    if priority in FOCUS_NOW_PRIORITY_ORDER:
-        return FOCUS_NOW_PRIORITY_ORDER.index(priority)
-
-    # Blank or unknown priority comes after the known priority order.
-    return len(FOCUS_NOW_PRIORITY_ORDER)
-
-def is_breakdown_step(task):
-    """Return True when this task is a child step in a sequential breakdown."""
-    return get_parent_task_id(task) is not None
-
-def is_high_urgency(task):
-    return focus_now_urgency_rank(task) < len(FOCUS_NOW_URGENCY_ORDER)
-
-def has_ranked_priority(task):
-    return focus_now_priority_rank(task) < len(FOCUS_NOW_PRIORITY_ORDER)
-
-def focus_now_importance_rank(task):
-    importance = get_select_name(task.get("properties", {}), "Importance")
-
-    if importance in FOCUS_NOW_IMPORTANCE_ORDER:
-        return FOCUS_NOW_IMPORTANCE_ORDER.index(importance)
-
-    return len(FOCUS_NOW_IMPORTANCE_ORDER)
-
-def is_high_importance(task):
-    return focus_now_importance_rank(task) < len(FOCUS_NOW_IMPORTANCE_ORDER)
-
-def get_due_date(task):
-    """Return the task Due Date as a date, or None when blank/unparseable."""
-    props = task.get("properties", {})
-    return parse_notion_date_start(get_date_start_value(props, DUE_DATE_PROPERTY))
-
-def focus_now_due_date_rank(task, today=None):
-    """Rank due-date pressure for Best Next Action selection.
-
-    Lower number = more time-sensitive. Due dates are a ranking modifier, not a
-    hard override: they help break ties and lift genuinely time-sensitive work
-    without letting far-future dated tasks dominate high-value work.
-    """
-    due_date = get_due_date(task)
-    if not due_date:
-        return 5
-
-    today = today or datetime.now().date()
-    days_until_due = (due_date - today).days
-
-    if days_until_due < 0:
-        return 0  # overdue
-    if days_until_due == 0:
-        return 1  # due today
-    if days_until_due == 1:
-        return 2  # due tomorrow
-    if days_until_due <= 3:
-        return 3  # due soon
-    if days_until_due <= 7:
-        return 4  # due this week
-
-    return 6  # dated, but not soon
-
-def has_near_due_date(task):
-    return focus_now_due_date_rank(task) <= 3
-
-def is_due_today_or_overdue(task):
-    return focus_now_due_date_rank(task) <= 1
-
-def focus_now_candidate_bucket(task):
-    """Group executable tasks for Best Next Action ranking.
-
-    IMPORTANT:
-    Strong Candidates are now a dynamic execution pool rather than a rare
-    elite status. The system should normally keep ~5 surfaced candidates
-    unless the executable pool itself is genuinely small.
-
-    Therefore:
-    - urgency / importance / due dates influence ranking
-    - but they are no longer hard eligibility gates
-    - clear executable standalone work should still surface
-
-    The primary execution surface is not the Quick Win lane and not the JDI lane.
-    Upstream filters exclude JDIs and Quick Wins. Due dates are considered as
-    time-pressure modifiers, but they do not become a simple hard override.
-
-    Order:
-    1. Next step of urgent / important / ranked / near-due workflows
-    2. Urgent standalone tasks
-    3. Overdue or due-today standalone tasks
-    4. High-importance standalone tasks
-    5. Due-soon standalone tasks
-    6. Ranked-priority standalone tasks
-    7. Other next workflow steps
-    8. Medium/Large effort standalone tasks
-    9. Everything else
-
-    Important: being Step Order 1 should preserve workflow order inside a
-    selected parent, but it should not automatically beat standalone work with
-    real time pressure or high importance. Otherwise routine maintenance
-    breakdowns can crowd out better Best Next Action candidates.
-    """
-    props = task.get("properties", {})
-    sequence_step = is_breakdown_step(task)
-    effort = get_select_name(props, "Effort")
-
-    if sequence_step and (
-        is_high_urgency(task)
-        or is_high_importance(task)
-        or has_ranked_priority(task)
-        or has_near_due_date(task)
-    ):
-        return 0
-
-    if is_high_urgency(task):
-        return 1
-
-    if is_due_today_or_overdue(task):
-        return 2
-
-    if is_high_importance(task):
-        return 3
-
-    if has_near_due_date(task):
-        return 4
-
-    if has_ranked_priority(task):
-        return 5
-
-    if sequence_step:
-        return 6
-
-    if effort in ["Medium Effort", "Large Effort"]:
-        return 7
-
-    return 8
-
-
-
-def persist_execution_metadata(task, score, rank):
-    """Persist execution score/rank."""
-
-    properties = {}
-
-    if EXECUTION_SCORE_PROPERTY in task.get("properties", {}):
-        properties[EXECUTION_SCORE_PROPERTY] = {
-            "number": score
-        }
-
-    if EXECUTION_RANK_PROPERTY in task.get("properties", {}):
-        properties[EXECUTION_RANK_PROPERTY] = {
-            "number": rank
-        }
-
-    if not properties:
-        return False
-
-    if DRY_RUN:
-        return True
-
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={"properties": properties},
-        timeout=30,
-    )
-
-    return response.ok
-
-def sort_focus_now_candidates(tasks):
-    """Sort executable tasks by execution score."""
-
-    scored_tasks = []
-
-    for task in tasks:
-        score = compute_execution_score(task)
-        scored_tasks.append((task, score))
-
-    scored_tasks.sort(
-        key=lambda item: item[1],
-        reverse=True
-    )
-
-    # Execution metadata persistence now handled exclusively
-    # by execution_engine_v2.py (top 10 sparse persistence).
-
-    return [item[0] for item in scored_tasks]
-
-def set_do_today(task):
-    """Set Do = Today ONLY.
-
-    IMPORTANT:
-    This function is now presentation-only.
-
-    It MUST NOT:
-    - modify Focus Now
-    - modify Strong Candidate
-    - modify execution ranking metadata
-
-    Execution state is now owned exclusively by:
-        reconcile_execution_state()
-    """
-
-    title = get_title(task)
-
-    if is_do_today(task):
-        return False
-
-    if DRY_RUN:
-        print(f"[DRY RUN] Would set Do = Today: {title}")
-        return True
-
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={
-            "properties": {
-                FOCUS_NOW_DO_PROPERTY: {
-                    "select": {"name": FOCUS_NOW_TODAY_VALUE}
-                }
-            }
-        },
-        timeout=30,
-    )
-
-    if response.ok:
-        print("Set Do = Today:", title)
-        return True
-
-    increment_summary("errors")
-    print("ERROR setting Do = Today:", title)
-    print(response.status_code, response.text)
-    return False
-
-
-def clear_do_today(task):
-    """Clear Do = Today so the task leaves the Best Next Action lane."""
-    title = get_title(task)
-
-    if not is_do_today(task):
-        return False
-
-    if DRY_RUN:
-        print(f"[DRY RUN] Would clear Do because task is deferred: {title}")
-        return True
-
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={
-            "properties": {
-                FOCUS_NOW_DO_PROPERTY: {
-                    "select": None
-                }
-            }
-        },
-        timeout=30,
-    )
-
-    if response.ok:
-        increment_summary("focus_now_deferred_removed")
-        print("Cleared Do for deferred Best Next Action task:", title)
-        return True
-
-    increment_summary("errors")
-    print("ERROR clearing Do for deferred task:", title)
-    print(response.status_code, response.text)
-    return False
-
-
-
-
-def compute_execution_score(task):
-    """Authoritative Philosophy B execution scoring.
-
-    Higher score = higher executive priority.
-    """
-
-    score = 0
-
-    props = task.get("properties", {})
-    title = get_title(task).lower()
-
-    print("[Execution Engine V2] scoring:", get_title(task))
-
-    # --------------------------------------------------
-    # BASELINE EXECUTABLE COGNITION
-    # --------------------------------------------------
-    #
-    # Prevent legitimate executable tasks from
-    # collapsing to score 0.
-
-    baseline_candidate = (
-        len(title.split()) >= 3
-        and not any(
-            vague in title
-            for vague in [
-                "thing",
-                "things",
-                "stuff",
-                "something",
-                "misc",
+    jdi_tasks = query_tasks_database(
+        filter_payload={
+            "and": [
+                {
+                    "property": "Done",
+                    "checkbox": {"equals": False},
+                },
+                {
+                    "property": "Just Do It",
+                    "checkbox": {"equals": True},
+                },
             ]
-        )
+        }
     )
 
-    # --------------------------------------------------
-    # IMPORTANCE dominates
-    # --------------------------------------------------
+    print(f"[Execution Engine] JDI execution scrub candidates: {len(jdi_tasks)}")
 
-    importance = get_select_name(
-        props,
-        "Importance"
-    )
+    scrubbed = 0
 
-    if importance == "High Importance":
-        score += 40
-    elif importance == "Medium Importance":
-        score += 20
+    for task in jdi_tasks:
+        props = task.get("properties", {}) or {}
+        score = props.get("Execution Score", {}).get("number")
+        rank = props.get("Execution Rank", {}).get("number")
 
-    # --------------------------------------------------
-    # URGENCY
-    # --------------------------------------------------
-
-    urgency = get_select_name(
-        props,
-        "Urgency"
-    )
-
-    if urgency == "High Urgency":
-        score += 25
-    elif urgency == "Medium Urgency":
-        score += 10
-
-    # --------------------------------------------------
-    # DUE DATES
-    # --------------------------------------------------
-
-    due_date = get_due_date(task)
-
-    if due_date:
-
-        # Normalize both datetime and date objects.
-        if hasattr(due_date, "date"):
-            due_value = due_date.date()
-        else:
-            due_value = due_date
-
-        days_until = (
-            due_value - datetime.now().date()
-        ).days
-
-        if days_until < 0:
-            score += 35
-        elif days_until == 0:
-            score += 30
-        elif days_until <= 3:
-            score += 20
-        elif days_until <= 7:
-            score += 10
-
-    # --------------------------------------------------
-    # NEXT ACTION / BREAKDOWN TASKS
-    # --------------------------------------------------
-
-    if get_parent_task_id(task):
-        score += 10
-
-    # --------------------------------------------------
-    # STRATEGIC / LIFE-ADMIN BOOSTS
-    # --------------------------------------------------
-
-    strategic_keywords = [
-        "therapy",
-        "pension",
-        "health",
-        "claim",
-        "insurance",
-        "tax",
-        "bank",
-        "workshop",
-        "plan",
-        "planning",
-        "school",
-    ]
-
-    if any(keyword in title for keyword in strategic_keywords):
-        score += 15
-
-    
-    # Light quick-win boost only if property exists.
-    quick_win = get_checkbox_value(
-        props,
-        "Quick Win"
-    )
-
-    if quick_win:
-        score += 3
-
-
-    # --------------------------------------------------
-    # SMALL EFFORT ONLY LIGHTLY HELPS
-    # --------------------------------------------------
-
-    effort = get_select_name(
-        props,
-        "Effort"
-    )
-
-    if effort == "Small Effort":
-        score += 3
-    elif effort == "Medium Effort":
-        score += 1
-
-    if score == 0 and baseline_candidate:
-        score += 1
-        print(
-            f"[Execution Engine V2] baseline_executable: "
-            f"{get_title(task)} -> {score}"
-        )
-
-    return score
-
-
-
-
-
-def legacy_update_focus_now_DISABLED(limit=FOCUS_NOW_LIMIT):
-    """Canonical execution reconciliation engine.
-
-    Architecture:
-    1. Clear ALL execution metadata from ALL open tasks
-    2. Recompute canonical execution lane
-    3. Assign ranks 1-6 deterministically
-    4. Assign Focus Now ONLY to rank 1
-    """
-
-    print("\n--- Legacy reconciliation bypassed ---")
-
-    open_tasks = get_open_tasks()
-
-    eligible_tasks = get_focus_now_eligible_tasks()
-
-    scored_tasks = []
-
-    for task in eligible_tasks:
-
-        try:
-            score = compute_execution_score(task)
-        except Exception as e:
-            print(
-                f"Execution scoring failed: "
-                f"{get_title(task)} → {e}"
-            )
+        if score is None and rank is None:
             continue
 
-        scored_tasks.append((score, task))
+        if update_notion_page(
+            task["id"],
+            {
+                "Execution Score": {"number": None},
+                "Execution Rank": {"number": None},
+            },
+        ):
+            scrubbed += 1
 
-    # Higher score = stronger execution candidate.
-    scored_tasks.sort(
-        key=lambda x: x[0],
-        reverse=True
-    )
+    print(f"[Execution Engine] JDI execution state cleared: {scrubbed}")
 
-    canonical_lane = scored_tasks[:6]
-
-    print(
-        f"Canonical execution lane size: "
-        f"{len(canonical_lane)}"
-    )
-
-    # ------------------------------------------------------------
-    # PHASE 1 — CLEAR ALL EXECUTION STATE
-    # ------------------------------------------------------------
-
-    for task in open_tasks:
-
-        try:
-
-            requests.patch(
-                f"https://api.notion.com/v1/pages/{task['id']}",
-                headers=headers,
-                json={
-                    "properties": {
-                        "Focus Now": {
-                            "checkbox": False
-                        },
-                        "Execution Rank": {
-                            "number": -1
-                        },
-                        "Execution Score": {
-                            "number": -1
-                        }
-                    }
-                },
-                timeout=30,
-            )
-
-        except Exception as e:
-
-            print(
-                f"Execution clear failed: "
-                f"{get_title(task)} → {e}"
-            )
-
-    print("Execution metadata cleared.")
-
-    # ------------------------------------------------------------
-    # PHASE 2 — REBUILD CANONICAL LANE
-    # ------------------------------------------------------------
-
-    for rank, (score, task) in enumerate(
-        canonical_lane,
-        start=1
-    ):
-
-        should_focus = (rank == 1)
-
-        try:
-
-            requests.patch(
-                f"https://api.notion.com/v1/pages/{task['id']}",
-                headers=headers,
-                json={
-                    "properties": {
-                        "Execution Rank": {
-                            "number": rank
-                        },
-                        "Execution Score": {
-                            "number": score
-                        },
-                        "Focus Now": {
-                            "checkbox": should_focus
-                        }
-                    }
-                },
-                timeout=30,
-            )
-
-            print(
-                f"Execution reconciliation: "
-                f"rank={rank} "
-                f"score={score} "
-                f"title={get_title(task)} "
-                f"focus={should_focus}"
-            )
-
-        except Exception as e:
-
-            print(
-                f"Execution assignment failed: "
-                f"{get_title(task)} → {e}"
-            )
-
-    # ------------------------------------------------------------
-    # PHASE 3 — DASHBOARD SOURCE OF TRUTH
-    # ------------------------------------------------------------
-
-    focus_now_tasks = []
-
-    for _, task in canonical_lane:
-
-        props = task.get("properties", {})
-
-        if props.get("Focus Now", {}).get("checkbox"):
-            focus_now_tasks.append(task)
-
-    print("Execution reconciliation complete.")
-
-    # Canonical dashboard source of truth:
-    # ONLY the rank 1 task may be Focus Now = True
-    # Dashboard must render from Focus Now exclusively.
+    return scrubbed
 
 
-def run_best_next_action_due_date_ranking_tests():
-    """Validate due dates modify Best Next Action ranking without hard-overriding value."""
-    today = datetime.now().date()
-
-    def task(title, due=None, importance=None, urgency=None, priority=None, parent=False, effort=None):
-        props = {
-            "Task Name": {"type": "title", "title": [{"plain_text": title}]},
-            "Open Loop": {"checkbox": True},
-            "Done": {"checkbox": False},
-            "Archived": {"checkbox": False},
-            "Just Do It": {"checkbox": False},
-            "Quick Win": {"checkbox": False},
-        }
-        if due is not None:
-            props[DUE_DATE_PROPERTY] = {"date": {"start": due.isoformat()}}
-        if importance:
-            props["Importance"] = {"select": {"name": importance}}
-        if urgency:
-            props["Urgency"] = {"select": {"name": urgency}}
-        if priority:
-            props["Priority"] = {"select": {"name": priority}}
-        if effort:
-            props["Effort"] = {"select": {"name": effort}}
-        if parent:
-            props[PARENT_TASK_PROPERTY] = {"relation": [{"id": "parent-id"}]}
-            props[STEP_ORDER_PROPERTY] = {"number": 1}
-        return {"id": title, "created_time": "2026-01-01T00:00:00.000Z", "properties": props}
-
-    overdue = task("Overdue standalone", due=today - timedelta(days=1))
-    high_importance = task("High importance standalone", importance="High Importance")
-    due_tomorrow = task("Due tomorrow standalone", due=today + timedelta(days=1))
-    urgent = task("Urgent standalone", urgency="High Urgency")
-    sequenced_due_soon = task("Sequenced due soon", due=today + timedelta(days=3), parent=True)
-    plain_sequenced_step = task("Plain sequenced maintenance step", parent=True, effort="Medium Effort")
-
-    assert focus_now_due_date_rank(overdue, today=today) == 0
-    assert focus_now_due_date_rank(task("No due date"), today=today) == 5
-    assert focus_now_candidate_bucket(urgent) < focus_now_candidate_bucket(overdue)
-    assert focus_now_candidate_bucket(overdue) < focus_now_candidate_bucket(high_importance)
-    assert focus_now_candidate_bucket(high_importance) < focus_now_candidate_bucket(due_tomorrow)
-    assert focus_now_candidate_bucket(due_tomorrow) < focus_now_candidate_bucket(plain_sequenced_step)
-    assert focus_now_candidate_bucket(high_importance) < focus_now_candidate_bucket(plain_sequenced_step)
-    assert focus_now_candidate_bucket(sequenced_due_soon) == 0
-
-    ordered_titles = [get_title(t) for t in sort_focus_now_candidates([plain_sequenced_step, due_tomorrow, high_importance, overdue, urgent])]
-    assert ordered_titles == [
-        "Urgent standalone",
-        "Overdue standalone",
-        "High importance standalone",
-        "Due tomorrow standalone",
-        "Plain sequenced maintenance step",
-    ]
-
-    print("Best Next Action due-date ranking tests passed")
-    return True
-
-if TEST_MODE:
-    run_best_next_action_due_date_ranking_tests()
+# Legacy Focus / automatic Do mutation helpers removed in Legacy Focus / Do Cleanup Phase 1.
+# Execution state now remains in execution_engine_v2.py; Do = Today is manual-only.
 
 # ## 13.2 Project candidate detector
 
@@ -7519,20 +6752,27 @@ if TEST_MODE:
 # Keep existing Quick Win focus maintenance available during normal task pipeline runs.
 # In TEST_MODE, skip all Notion maintenance so tests remain completely local.
 if TEST_MODE:
-    print("TEST_MODE is enabled → skipping Quick Win / Focus Now maintenance.")
+    print("TEST_MODE is enabled → skipping Quick Win maintenance.")
 else:
     if RUN_TASK_CREATION_PIPELINE:
         run_project_candidate_detector_safely()
-        update_quick_win_focus()
-
 
     # New execution engine (authoritative)
+    execution_engine_success = False
     try:
+        clear_jdi_execution_state()
+
         all_open_tasks = query_tasks_database(
             filter_payload={
                 "and": [
                     {
                         "property": "Done",
+                        "checkbox": {
+                            "equals": False
+                        }
+                    },
+                    {
+                        "property": "Just Do It",
                         "checkbox": {
                             "equals": False
                         }
@@ -7550,6 +6790,8 @@ else:
             update_fn=update_notion_page,
         )
 
+        execution_engine_success = True
+
         print(
             f"Execution Engine V2 completed successfully. "
             f"Winners: {len(EXECUTION_ENGINE_WINNERS)}"
@@ -7557,10 +6799,11 @@ else:
     except Exception as e:
         print(f"Execution Engine V2 failure: {e}")
 
-
-    # Optional independent Focus Now updater.
-    if RUN_FOCUS_NOW_UPDATE:
-        print("Legacy execution reconciliation disabled.")
+    if RUN_TASK_CREATION_PIPELINE:
+        if execution_engine_success:
+            print("[Execution Flow] Execution Rank/BNA persistence complete; Focus/Do automation skipped")
+        else:
+            print("[Execution Flow] Execution Engine failed; Focus/Do automation skipped")
 
 # In[74]:
 

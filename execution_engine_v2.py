@@ -1,5 +1,5 @@
 print("=== EXECUTION ENGINE V2 MODULE LOADED ===")
-print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 5: QUICK WIN VIEW REBALANCE ===")
+print("=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 2G: COMBINED QUICK WIN RANKING + QUIET OVERLAY ===")
 print("=== FULL EVALUATOR RANKING AUTHORITY ACTIVE ===")
 
 EXECUTION_ENGINE_WINNERS = []
@@ -37,126 +37,6 @@ class ExecutionScoreResult:
 
     divergence: int = 0
 
-
-
-# ============================================================
-# EVALUATOR COMPONENT REGISTRY
-# ============================================================
-#
-# This registry is intentionally descriptive only. It does not
-# change scoring behavior. The evaluator remains the scoring
-# authority; this registry gives runtime logs and future tuning
-# work a single vocabulary for known component names.
-
-EXECUTION_COMPONENT_REGISTRY = {
-    "high_urgency": {
-        "category": "urgency",
-        "description": "Task carries high time pressure.",
-    },
-    "medium_urgency": {
-        "category": "urgency",
-        "description": "Task carries moderate time pressure.",
-    },
-    "quick_win": {
-        "category": "friction",
-        "description": "Task appears short or low-friction.",
-    },
-    "small_effort": {
-        "category": "effort",
-        "description": "Task appears small enough to execute directly.",
-    },
-    "medium_effort": {
-        "category": "effort",
-        "description": "Task appears moderately sized but executable.",
-    },
-    "large_effort": {
-        "category": "effort",
-        "description": "Task appears large and may need planning or breakdown.",
-    },
-    "operational_context": {
-        "category": "context",
-        "description": "Task relates to an active operational domain.",
-    },
-    "strategic_context": {
-        "category": "context",
-        "description": "Task contributes to longer-range planning or system work.",
-    },
-    "planning_work": {
-        "category": "work_type",
-        "description": "Task is explicitly planning-oriented.",
-    },
-    "preparation_work": {
-        "category": "work_type",
-        "description": "Task prepares materials, decisions, or conditions for later work.",
-    },
-    "baseline_executable": {
-        "category": "fallback",
-        "description": "Task is structurally executable but received no stronger evaluator component.",
-    },
-    "high_priority": {
-        "category": "legacy_priority",
-        "description": "Legacy priority signal retained for fallback compatibility.",
-    },
-    "medium_priority": {
-        "category": "legacy_priority",
-        "description": "Legacy priority signal retained for fallback compatibility.",
-    },
-    "due_today_or_overdue": {
-        "category": "legacy_due_date",
-        "description": "Legacy due-date fallback signal.",
-    },
-    "due_soon": {
-        "category": "legacy_due_date",
-        "description": "Legacy due-date fallback signal.",
-    },
-    "due_this_week": {
-        "category": "legacy_due_date",
-        "description": "Legacy due-date fallback signal.",
-    },
-}
-
-def get_component_category(component_name):
-    metadata = EXECUTION_COMPONENT_REGISTRY.get(component_name, {})
-    return metadata.get("category", "unregistered")
-
-def get_component_names(components):
-    names = []
-    for component in components or []:
-        name = getattr(component, "name", None)
-        if name:
-            names.append(name)
-    return names
-
-def format_component_summary(component_counts):
-    if not component_counts:
-        return "none"
-    parts = []
-    for name, count in sorted(component_counts.items(), key=lambda item: (-item[1], item[0])):
-        category = get_component_category(name)
-        parts.append(f"{name}:{count}({category})")
-    return ", ".join(parts)
-
-def print_execution_component_summary(ranked_items):
-    component_counts = {}
-    unknown_components = set()
-
-    for item in ranked_items:
-        for reason in item.get("reasons", []) or []:
-            component_counts[reason] = component_counts.get(reason, 0) + 1
-            if reason not in EXECUTION_COMPONENT_REGISTRY:
-                unknown_components.add(reason)
-
-    print("\n--- Execution Component Registry Summary ---")
-    print(f"Registered component types: {len(EXECUTION_COMPONENT_REGISTRY)}")
-    print(f"Components observed: {format_component_summary(component_counts)}")
-
-    if unknown_components:
-        print(
-            "Unregistered components observed: "
-            + ", ".join(sorted(unknown_components))
-        )
-    else:
-        print("Unregistered components observed: none")
 
 # ============================================================
 # EXECUTION SCORING ORCHESTRATION
@@ -249,7 +129,7 @@ def evaluate_execution_scoring(task):
         if orchestration.divergence != 0:
 
             print(
-                "[Evaluator Diagnostics] "
+                "[Ranking Shadow V3] "
                 f"title={extract_title(task)} | "
                 f"legacy={orchestration.legacy_score} | "
                 f"evaluator={orchestration.evaluator_score} | "
@@ -260,14 +140,13 @@ def evaluate_execution_scoring(task):
     except Exception as e:
 
         print(
-            "[Evaluator Diagnostics] "
+            "[Ranking Shadow V3] "
             f"evaluation failed: {e}"
         )
 
     return orchestration
 
 MAX_BEST_NEXT_ACTIONS = 5
-PERSISTED_EXECUTION_RANK_LIMIT = 25
 
 
 def safe_nested_get(value, *keys):
@@ -284,6 +163,72 @@ def safe_nested_get(value, *keys):
 
     return current
 
+
+
+
+def normalize_property_name(name):
+    return "".join(
+        ch.lower()
+        for ch in str(name or "")
+        if ch.isalnum()
+    )
+
+
+def get_property_case_insensitive(props, *candidate_names):
+    if not isinstance(props, dict):
+        return None
+
+    for name in candidate_names:
+        if name in props:
+            return props.get(name)
+
+    normalized_candidates = {
+        normalize_property_name(name)
+        for name in candidate_names
+    }
+
+    for actual_name, value in props.items():
+        if normalize_property_name(actual_name) in normalized_candidates:
+            return value
+
+    return None
+
+
+def get_checkbox_like_property(props, *candidate_names):
+    """Read a Notion checkbox-like property defensively.
+
+    Primary support is for native checkbox properties, but this also handles
+    formula booleans and rollup booleans defensively so execution exclusion
+    remains stable if the Notion schema/view changes slightly.
+    """
+    prop = get_property_case_insensitive(props, *candidate_names)
+
+    if not isinstance(prop, dict):
+        return False
+
+    if prop.get("checkbox") is True:
+        return True
+
+    formula = prop.get("formula")
+    if isinstance(formula, dict) and formula.get("boolean") is True:
+        return True
+
+    rollup = prop.get("rollup")
+    if isinstance(rollup, dict):
+        if rollup.get("type") == "array":
+            for item in rollup.get("array", []) or []:
+                if isinstance(item, dict):
+                    if item.get("checkbox") is True:
+                        return True
+                    item_formula = item.get("formula")
+                    if isinstance(item_formula, dict) and item_formula.get("boolean") is True:
+                        return True
+        if rollup.get("checkbox") is True:
+            return True
+        if rollup.get("boolean") is True:
+            return True
+
+    return False
 
 def extract_title(task):
     props = task.get("properties", {}) or {}
@@ -334,43 +279,6 @@ def get_defer_until_date(task):
     return parse_notion_date(defer_start)
 
 
-
-def get_checkbox_value(task, property_name):
-    props = task.get("properties", {}) or {}
-    return safe_nested_get(props, property_name, "checkbox") is True
-
-
-def get_select_name(task, property_name):
-    props = task.get("properties", {}) or {}
-    return safe_nested_get(props, property_name, "select", "name")
-
-
-def is_closed_or_done_task(task):
-    """Return True when a task is closed/done and must not receive execution ranks."""
-    props = task.get("properties", {}) or {}
-
-    if safe_nested_get(props, "Done", "checkbox") is True:
-        return True
-
-    if safe_nested_get(props, "Closed", "checkbox") is True:
-        return True
-
-    for property_name in ("Status", "Task Status", "State"):
-        status = safe_nested_get(props, property_name, "status", "name")
-        if status and str(status).strip().lower() in {
-            "done", "complete", "completed", "closed", "archived", "cancelled", "canceled"
-        }:
-            return True
-
-        select_value = safe_nested_get(props, property_name, "select", "name")
-        if select_value and str(select_value).strip().lower() in {
-            "done", "complete", "completed", "closed", "archived", "cancelled", "canceled"
-        }:
-            return True
-
-    return False
-
-
 def is_deferred_until_future(task, today=None):
     defer_until = get_defer_until_date(task)
 
@@ -382,38 +290,36 @@ def is_deferred_until_future(task, today=None):
     return defer_until > today
 
 
-def get_do_value(task):
-    props = task.get("properties", {}) or {}
-
-    return safe_nested_get(
-        props,
-        "Do",
-        "select",
-        "name"
-    )
-
-
 def is_jdi(task):
+    """Return True for explicit JDI tasks.
+
+    Do is no longer an execution authority. Historical values such as
+    Do = JDI are ignored here so the manual Do field cannot exclude, rank,
+    or otherwise control Execution Engine V2.
+
+    The canonical authority for JDI exclusion is the native Notion checkbox
+    property named exactly "Just Do It". The reader is defensive about
+    casing/spacing and checkbox-like booleans so JDI tasks cannot leak back
+    into Execution Score / Execution Rank after schema/view changes.
+    """
     props = task.get("properties", {}) or {}
 
-    # Primary authority: the Notion checkbox property.
-    checkbox = safe_nested_get(
+    if get_checkbox_like_property(
         props,
         "Just Do It",
-        "checkbox"
-    )
-
-    if checkbox is True:
+        "JDI",
+        "JustDoIt",
+    ):
         return True
 
-    # Historical compatibility only: older tasks may still use Do = JDI.
-    # Do is not used for execution ranking or Today selection.
-    do_value = get_do_value(task)
+    title = extract_title(task).strip().lower()
 
-    if not do_value:
-        return False
-
-    return str(do_value).strip().lower() == "jdi"
+    return (
+        title == "jdi"
+        or title.startswith("jdi ")
+        or title.endswith(" jdi")
+        or " just do it" in f" {title}"
+    )
 
 
 def is_quick_win(task):
@@ -574,20 +480,10 @@ def is_execution_active(task):
 
 
 def get_execution_active_tasks(open_tasks):
-    active = []
-    excluded_closed = 0
-
-    for task in open_tasks:
-        if is_closed_or_done_task(task):
-            if is_execution_active(task):
-                excluded_closed += 1
-            continue
-
-        if is_execution_active(task):
-            active.append(task)
-
-    print(f"[Execution Engine V2] Closed/done tasks excluded from sparse reset: {excluded_closed}")
-    return active
+    return [
+        task for task in open_tasks
+        if is_execution_active(task)
+    ]
 
 
 def filter_execution_eligible_tasks(open_tasks):
@@ -595,7 +491,6 @@ def filter_execution_eligible_tasks(open_tasks):
 
     diagnostics = {
         "total_open_tasks": len(open_tasks),
-        "rejected_closed_or_done": 0,
         "rejected_deferred": 0,
         "rejected_jdi": 0,
         "included_quick_win": 0,
@@ -604,10 +499,6 @@ def filter_execution_eligible_tasks(open_tasks):
     }
 
     for task in open_tasks:
-        if is_closed_or_done_task(task):
-            diagnostics["rejected_closed_or_done"] += 1
-            continue
-
         if is_deferred_until_future(task):
             diagnostics["rejected_deferred"] += 1
             continue
@@ -633,8 +524,6 @@ def filter_execution_eligible_tasks(open_tasks):
 
     print("\\n--- Execution Eligibility Scan ---")
     print(f"Total open tasks: {diagnostics['total_open_tasks']}")
-    print(f"Rejected closed/done: {diagnostics['rejected_closed_or_done']}")
-    print(f"[Execution Engine V2] Closed/done tasks excluded before ranking: {diagnostics['rejected_closed_or_done']}")
     print(f"Rejected deferred: {diagnostics['rejected_deferred']}")
     print(f"Rejected JDI: {diagnostics['rejected_jdi']}")
     print(f"Quick Wins included in ranking: {diagnostics['included_quick_win']}")
@@ -672,7 +561,7 @@ def rebuild_execution_state(
             task_id = task["id"]
 
             reset_properties = {
-                "Execution Score": {"number": 0},
+                "Execution Score": {"number": None},
                 "Execution Rank": {"number": None},
             }
 
@@ -724,7 +613,7 @@ def rebuild_execution_state(
                 # -> 0 ()
                 #
                 # without:
-                # - evaluator diagnostics
+                # - Ranking Shadow V3
                 # - evaluator decomposition
                 # - baseline cognition
                 #
@@ -780,13 +669,6 @@ def rebuild_execution_state(
                 f"({', '.join(reasons)})"
             )
 
-            if is_closed_or_done_task(task):
-                print(
-                    "[Execution Engine V2] Skipping closed/done task before ranking append: "
-                    f"{title}"
-                )
-                continue
-
             ranked.append({
                 "task": task,
                 "title": title,
@@ -801,23 +683,10 @@ def rebuild_execution_state(
         except Exception as e:
             print(f"[Execution Engine V2] task scoring failed: {e}")
 
-    def _canonical_execution_rank_key(item):
-        # Deterministic rank ordering owned by Execution Engine V2.
-        # Execution authority must not depend on API/list iteration order.
-        # Ties are resolved by normalized task title, then stable Notion page id.
-        title_key = str(item.get("title") or "").strip().casefold()
-        page_id = str((item.get("task") or {}).get("id") or "")
-        score = item.get("score") or 0
-        return (-score, title_key, page_id)
-
-    ranked.sort(key=_canonical_execution_rank_key)
-
-    print(
-        "[Execution Engine V2] Canonical rank ordering active: "
-        "score desc, title asc, page_id asc"
+    ranked.sort(
+        key=lambda x: x["score"],
+        reverse=True,
     )
-
-    print_execution_component_summary(ranked)
 
     print("\\n--- Execution Engine V2 In-Memory Rankings ---")
 
@@ -835,7 +704,7 @@ def rebuild_execution_state(
         limit = MAX_BEST_NEXT_ACTIONS
 
     print(f"[Execution Engine V2] Winner limit: {limit}")
-    print(f"[Execution Engine V2] Persisting top {PERSISTED_EXECUTION_RANK_LIMIT} execution rankings for dashboard/Quick Win visibility")
+    print("[Execution Engine V2] Persisting top 10 execution rankings only")
 
     winners = ranked[:limit]
 
@@ -850,29 +719,11 @@ def rebuild_execution_state(
 
     updated = 0
 
-    persisted_ranked = ranked[:PERSISTED_EXECUTION_RANK_LIMIT]
-
-    print("\n--- Execution Engine V2 Canonical Persistence Plan ---")
-    for rank_position, item in enumerate(persisted_ranked[:15], start=1):
-        task = item.get("task") or {}
-        short_id = str(task.get("id") or "")[:8]
-        print(
-            "[Execution Engine V2] Canonical persistence row: "
-            f"rank={rank_position} score={item.get('score')} "
-            f"id={short_id} title={item.get('title')}"
-        )
+    persisted_ranked = ranked[:10]
 
     for rank_position, item in enumerate(persisted_ranked, start=1):
         try:
             task = item["task"]
-
-            if is_closed_or_done_task(task):
-                print(
-                    "[Execution Engine V2] ERROR: closed/done task reached persistence; skipped: "
-                    f"rank={rank_position} title={item.get('title')}"
-                )
-                continue
-
             task_id = task["id"]
 
             properties = {
@@ -883,12 +734,6 @@ def rebuild_execution_state(
                     "number": rank_position
                 },
             }
-
-            print(
-                "[Execution Engine V2] Write payload: "
-                f"rank={rank_position} score={item['score']} "
-                f"id={str(task_id)[:8]} title={item['title']}"
-            )
 
             success = safe_update_task(
                 update_fn=update_fn,
