@@ -1,6 +1,5 @@
-Running AIOS at Mon 25 May 2026 08:00:05 EDT
 [Metadata Persistence Guard] Closed-task execution persistence guard installed — metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
-=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 5: QUICK WIN VIEW REBALANCE ===
+=== EXECUTION AUTHORITY CONSOLIDATION — PHASE 6: SURFACED QUICK WIN LANE ===
 === EXECUTION OVERLAY DERIVED FROM EXECUTION RANK / SCORE ===
 === AIOS CLEAN CUTOVER v3 ===
 __file__ = /Users/John/LocalProjects/aios/run_aios.py
@@ -43,267 +42,56 @@ Project candidate detector: no newly created top-level tasks to review.
 [query_tasks_database] Using shared pagination helper
 [Pagination] Page 1: 100 results
 [Pagination] Page 2: 100 results
-[Pagination] Page 3: 49 results
-[Pagination] Total results: 249
+[Pagination] Page 3: 51 results
+[Pagination] Total results: 251
 === PAGINATION ACTIVE ===
-[query_tasks_database] Retrieved 249 total tasks
-[Execution Engine] Full task set for reconciliation: 249
+[query_tasks_database] Retrieved 251 total tasks
+[Execution Engine] Full task set for reconciliation: 251
 === EXECUTION ENGINE V2 ACTIVE ===
-[Execution Engine V2] Tasks received: 249
+[Execution Engine V2] Tasks received: 251
 \n--- Execution Engine V2 Sparse Reset ---
 [Execution Engine V2] Previously persisted tasks: 10
 [Execution Engine V2] Reset tasks: 10
 \n--- Execution Eligibility Scan ---
-Total open tasks: 249
+Total open tasks: 251
 Rejected deferred: 1
 Rejected JDI: 17
 Quick Wins included in ranking: 59
-Rejected non-actionable: 111
-Eligible execution tasks: 120
-[Execution Engine V2] scoring: Unpack bins from the workshop -> 3 (quick_win)
-[Ranking Shadow V3] title=Prepare and portion dough for shaping exercises | legacy=0 | evaluator=7 | divergence=7 | components=[medium_effort(+3), preparation_work(+4)]
-[Execution Engine V2] scoring: Prepare and portion dough for shaping exercises -> 7 (medium_effort, preparation_work)
-[Execution Engine V2] baseline_executable_fallback: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Find bin to store hose connectors and accessories -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app -> 8 (quick_win, operational_context)
-[Ranking Shadow V3] title=Fix timezone issue with Bread Basket app | legacy=0 | evaluator=8 | divergence=8 | components=[medium_effort(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Fix timezone issue with Bread Basket app -> 8 (medium_effort, operational_context)
-[Ranking Shadow V3] title=Vacuum bakery | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Vacuum bakery -> 5 (operational_context)
-[Ranking Shadow V3] title=Check skimmer basket in pool | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Check skimmer basket in pool -> 8 (quick_win, operational_context)
-[Execution Engine V2] scoring: Book annual furnace maintenance appointment -> 3 (quick_win)
-[Execution Engine V2] scoring: Schedule time to get blood tests at the lab -> 3 (quick_win)
-[Execution Engine V2] scoring: Get more sparkling water from the basement -> 3 (quick_win)
-[Ranking Shadow V3] title=Put vacuum hose for pool in the garage | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Put vacuum hose for pool in the garage -> 8 (quick_win, operational_context)
-[Execution Engine V2] baseline_executable_fallback: Test Wi - Fi coverage in backyard and garage -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Test Wi - Fi coverage in backyard and garage -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Install network monitoring dashboard on Raspberry Pi -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Install network monitoring dashboard on Raspberry Pi -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Create backup configuration for home router | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Create backup configuration for home router -> 3 (medium_effort)
-[Ranking Shadow V3] title=Confirm the UPS is stable and properly positioned within the rack after installation | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Confirm the UPS is stable and properly positioned within the rack after installation -> 3 (medium_effort)
-[Ranking Shadow V3] title=Write speech for Will and Aimee’s wedding | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Write speech for Will and Aimee’s wedding -> 3 (medium_effort)
-[Execution Engine V2] scoring: Wash jar for Kiefer -> 3 (quick_win)
-[Ranking Shadow V3] title=Move pool vacuum equipment | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Move pool vacuum equipment -> 5 (operational_context)
-[Execution Engine V2] scoring: Buy replacement skimmer basket -> 3 (quick_win)
-[Ranking Shadow V3] title=Review current AIOS architecture and migration requirements | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review current AIOS architecture and migration requirements -> 4 (strategic_context)
-[Ranking Shadow V3] title=Take winter supplies for pool to garage | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Take winter supplies for pool to garage -> 8 (quick_win, operational_context)
-[Execution Engine V2] scoring: Check mileage on Honda Civic from when I bought the car -> 3 (quick_win)
-[Execution Engine V2] scoring: Confirm upcoming lawn services with Green Unlimited these might conflict with work by Behram -> 3 (quick_win)
-[Execution Engine V2] scoring: Submit health claims -> 3 (quick_win)
-[Execution Engine V2] scoring: Download books from Audible -> 3 (quick_win)
-[Ranking Shadow V3] title=Move extra workshop bins to the basement | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Move extra workshop bins to the basement -> 3 (medium_effort)
-[Ranking Shadow V3] title=Make dough for double chocolate cookies | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Make dough for double chocolate cookies -> 3 (medium_effort)
-[Execution Engine V2] scoring: Schedule appointment for car service -> 3 (quick_win)
-[Execution Engine V2] baseline_executable_fallback: Make notes for therapy session -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Make notes for therapy session -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Install UPS | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Install UPS -> 3 (medium_effort)
-[Execution Engine V2] baseline_executable_fallback: Move BBQ from storage to cabana -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Move BBQ from storage to cabana -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Move red fife berries to bakery | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Move red fife berries to bakery -> 5 (operational_context)
-[Execution Engine V2] scoring: Reply to message from Susan H on discord -> 3 (quick_win)
-[Execution Engine V2] scoring: Text Gabby to remind her to invoice me for grain and flour -> 3 (quick_win)
-[Execution Engine V2] scoring: Schedule Costco run -> 3 (quick_win)
-[Execution Engine V2] scoring: Log taking meds at 0500 -> 3 (quick_win)
-[Execution Engine V2] scoring: Ask Janet to add her trip to BC to the family calendar -> 3 (quick_win)
-[Execution Engine V2] scoring: Check for any nutritional or allergy information related to duhram fine flour -> 3 (quick_win)
-[Ranking Shadow V3] title=Find and review preparation tips for cooking or baking with duhram fine flour | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Find and review preparation tips for cooking or baking with duhram fine flour -> 4 (strategic_context)
-[Execution Engine V2] baseline_executable_fallback: Look up recipes that specifically call for duhram fine flour -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Look up recipes that specifically call for duhram fine flour -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Buy a new plastic bin for pool equipment | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Buy a new plastic bin for pool equipment -> 5 (operational_context)
-[Ranking Shadow V3] title=Send WhatsApp message to bread community about performance of Bread Basket app | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Send WhatsApp message to bread community about performance of Bread Basket app -> 8 (quick_win, operational_context)
-[Execution Engine V2] scoring: Arrange the kept items neatly on the desk based on usage frequency -> 3 (quick_win)
-[Execution Engine V2] baseline_executable_fallback: Clean the desk surface and surrounding area -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Clean the desk surface and surrounding area -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Remove all items from the desk surface -> 3 (quick_win)
-[Ranking Shadow V3] title=Organize my desk | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Organize my desk -> 3 (medium_effort)
-[Ranking Shadow V3] title=Make notes on seed bread bake | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Make notes on seed bread bake -> 5 (operational_context)
-[Execution Engine V2] scoring: Move lawnmower from shed to garage -> 3 (quick_win)
-[Execution Engine V2] baseline_executable_fallback: Submit health claims for 2026 year to date -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Submit health claims for 2026 year to date -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Ask ChatGPT to help evolve AIOS into a maintainable system | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Ask ChatGPT to help evolve AIOS into a maintainable system -> 4 (strategic_context)
-[Execution Engine V2] scoring: Ask ChatGPT to add feature to AIOS for deferring tasks -> 3 (quick_win)
-[Ranking Shadow V3] title=Write a brief description of the AIOS system | legacy=0 | evaluator=7 | divergence=7 | components=[medium_effort(+3), strategic_context(+4)]
-[Execution Engine V2] scoring: Write a brief description of the AIOS system -> 7 (medium_effort, strategic_context)
-[Execution Engine V2] baseline_executable_fallback: Buy soft box light for food photos -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Buy soft box light for food photos -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Confirm phone call with doctor -> 3 (quick_win)
-[Execution Engine V2] scoring: Check bank account for tax refund -> 3 (quick_win)
-[Ranking Shadow V3] title=Slice bread for school breakfast program | legacy=3 | evaluator=8 | divergence=5 | components=[quick_win(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Slice bread for school breakfast program -> 8 (quick_win, operational_context)
-[Execution Engine V2] baseline_executable_fallback: Ask ChatGPT to implement “Context extraction” in AIOS -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Ask ChatGPT to implement “Context extraction” in AIOS -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Ask ChatGPT to implement Incremental append mode in AIOS -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Ask ChatGPT to implement Incremental append mode in AIOS -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Ask ChatGPT to implementation parent / child awareness in AIOS -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Ask ChatGPT to implementation parent / child awareness in AIOS -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Ask ChatGPT to add feature for completion / outcome review pass in AIOS | legacy=3 | evaluator=7 | divergence=4 | components=[quick_win(+3), strategic_context(+4)]
-[Execution Engine V2] scoring: Ask ChatGPT to add feature for completion / outcome review pass in AIOS -> 7 (quick_win, strategic_context)
-[Execution Engine V2] scoring: Ask ChatGPT to group related tasks in AIOS into projects -> 3 (quick_win)
-[Execution Engine V2] scoring: Ask ChatGPT to break the AIOS code into modules -> 3 (quick_win)
-[Execution Engine V2] scoring: Move screenshot folder from Desktop to another location -> 3 (quick_win)
-[Execution Engine V2] scoring: Update expiry date for credit card in 1Password -> 3 (quick_win)
-[Ranking Shadow V3] title=Review photos and select the best shots for the recipe presentation | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review photos and select the best shots for the recipe presentation -> 4 (strategic_context)
-[Execution Engine V2] scoring: Take multiple photos of the Khorasan focaccia from different angles -> 3 (quick_win)
-[Execution Engine V2] baseline_executable_fallback: Arrange Khorasan focaccia and props attractively for each shot -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Arrange Khorasan focaccia and props attractively for each shot -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Set up lighting and background suitable for food photography | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Set up lighting and background suitable for food photography -> 3 (medium_effort)
-[Ranking Shadow V3] title=Prepare ingredients and final Khorasan focaccia for the photo shoot | legacy=0 | evaluator=7 | divergence=7 | components=[medium_effort(+3), preparation_work(+4)]
-[Execution Engine V2] scoring: Prepare ingredients and final Khorasan focaccia for the photo shoot -> 7 (medium_effort, preparation_work)
-[Execution Engine V2] baseline_executable_fallback: Create a checklist for daily restocking and cleaning tasks -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Create a checklist for daily restocking and cleaning tasks -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Clean work surfaces and floors throughout the bakery | legacy=0 | evaluator=8 | divergence=8 | components=[medium_effort(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Clean work surfaces and floors throughout the bakery -> 8 (medium_effort, operational_context)
-[Ranking Shadow V3] title=Organize bakery | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Organize bakery -> 5 (operational_context)
-[Execution Engine V2] baseline_executable_fallback: Fix sync between Withings and Apple Health for Janet -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Fix sync between Withings and Apple Health for Janet -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Update my Flour Guide for Bakers to share with Almanac staff | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Update my Flour Guide for Bakers to share with Almanac staff -> 5 (operational_context)
-[Ranking Shadow V3] title=Review stadium policies and COVID-19 guidelines if applicable | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review stadium policies and COVID-19 guidelines if applicable -> 4 (strategic_context)
-[Ranking Shadow V3] title=Plan to attend an Ottawa Titans baseball game | legacy=0 | evaluator=8 | divergence=8 | components=[strategic_context(+4), planning_work(+4)]
-[Execution Engine V2] scoring: Plan to attend an Ottawa Titans baseball game -> 8 (strategic_context, planning_work)
-[Execution Engine V2] scoring: Reply to email from Jennifer Coyle about workshop follow up -> 3 (quick_win)
-[Execution Engine V2] scoring: Send Mick a quick text reminding them to thank Ellen -> 3 (quick_win)
-[Execution Engine V2] scoring: Call the funeral home to ask whether they still have Dad’s ashes -> 3 (quick_win)
-[Execution Engine V2] scoring: Check flights to Italy -> 3 (quick_win)
-[Execution Engine V2] scoring: Text Kate about our wills -> 3 (quick_win)
-[Execution Engine V2] baseline_executable_fallback: Check beneficiaries on investments -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Check beneficiaries on investments -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Check beneficiaries on pensions -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Check beneficiaries on pensions -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Plan for annual review of wills and POAs | legacy=0 | evaluator=8 | divergence=8 | components=[strategic_context(+4), planning_work(+4)]
-[Execution Engine V2] scoring: Plan for annual review of wills and POAs -> 8 (strategic_context, planning_work)
-[Ranking Shadow V3] title=Organize pool equipment for opening — Store equipment in an accessible location. | legacy=0 | evaluator=8 | divergence=8 | components=[medium_effort(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Organize pool equipment for opening — Store equipment in an accessible location. -> 8 (medium_effort, operational_context)
-[Ranking Shadow V3] title=Organize pool equipment for opening — Arrange equipment by category or use. | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Organize pool equipment for opening — Arrange equipment by category or use. -> 5 (operational_context)
-[Ranking Shadow V3] title=Organize pool equipment for opening — Clean and sanitize all equipment. | legacy=0 | evaluator=8 | divergence=8 | components=[medium_effort(+3), operational_context(+5)]
-[Execution Engine V2] scoring: Organize pool equipment for opening — Clean and sanitize all equipment. -> 8 (medium_effort, operational_context)
-[Ranking Shadow V3] title=Organize pool equipment for opening — Inspect equipment for damage or wear. | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Organize pool equipment for opening — Inspect equipment for damage or wear. -> 5 (operational_context)
-[Ranking Shadow V3] title=Organize pool equipment for opening — Gather all pool equipment in one area. | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Organize pool equipment for opening — Gather all pool equipment in one area. -> 5 (operational_context)
-[Ranking Shadow V3] title=Create packaging labels | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Create packaging labels -> 5 (operational_context)
-[Ranking Shadow V3] title=Plan another test bake of focaccia for Almanac recipe development | legacy=0 | evaluator=13 | divergence=13 | components=[operational_context(+5), strategic_context(+4), planning_work(+4)]
-[Execution Engine V2] scoring: Plan another test bake of focaccia for Almanac recipe development -> 13 (operational_context, strategic_context, planning_work)
-[Ranking Shadow V3] title=Review focaccia recipe in BrED book | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review focaccia recipe in BrED book -> 4 (strategic_context)
-[Execution Engine V2] scoring: Send Khorasan recipe to Mary -> 25 (high_urgency)
-[Execution Engine V2] baseline_executable_fallback: Create custom agents for Update Focus Now and Update Quick Wins -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Create custom agents for Update Focus Now and Update Quick Wins -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Prepare Excel sheet for Income Tax 2026 | legacy=0 | evaluator=4 | divergence=4 | components=[preparation_work(+4)]
-[Execution Engine V2] scoring: Prepare Excel sheet for Income Tax 2026 -> 4 (preparation_work)
-[Execution Engine V2] baseline_executable_fallback: Confirm income transfer for May from TD -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Confirm income transfer for May from TD -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Check wehther Greenworks does grass seeding / overseeding -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Check wehther Greenworks does grass seeding / overseeding -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Finish watching Linking your Thinking with AI -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Finish watching Linking your Thinking with AI -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Buy shampoo bars -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Buy shampoo bars -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Create Hazel rule to add calendar events from appointments in attachments -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Create Hazel rule to add calendar events from appointments in attachments -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Make notes on school bake for Cinnamon Raisin Tin Loaf | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Make notes on school bake for Cinnamon Raisin Tin Loaf -> 5 (operational_context)
-[Execution Engine V2] baseline_executable_fallback: Call Ottawa Honda to get key fixed -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Call Ottawa Honda to get key fixed -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Schedule furnace maintenance -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Schedule furnace maintenance -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Install lights on fence (waiting for new fence) -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Install lights on fence (waiting for new fence) -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Buy mulch for garden | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Buy mulch for garden -> 5 (operational_context)
-[Execution Engine V2] baseline_executable_fallback: Buy phone holder for tripod (for Janet) -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Buy phone holder for tripod (for Janet) -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Plan dinner to make for Burlington trip | legacy=0 | evaluator=8 | divergence=8 | components=[strategic_context(+4), planning_work(+4)]
-[Execution Engine V2] scoring: Plan dinner to make for Burlington trip -> 8 (strategic_context, planning_work)
-[Ranking Shadow V3] title=Review and organize new content in Notion | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review and organize new content in Notion -> 4 (strategic_context)
-[Ranking Shadow V3] title=Buy mixing bowl for recipe development photos | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Buy mixing bowl for recipe development photos -> 4 (strategic_context)
-[Execution Engine V2] baseline_executable_fallback: Check airline prices for Italy trip -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Check airline prices for Italy trip -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Make cookie batter | legacy=0 | evaluator=3 | divergence=3 | components=[medium_effort(+3)]
-[Execution Engine V2] scoring: Make cookie batter -> 3 (medium_effort)
-[Execution Engine V2] baseline_executable_fallback: Label storage boxes in office -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Label storage boxes in office -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Submit University of Windsor pension forms -> 25 (high_urgency)
-[Execution Engine V2] baseline_executable_fallback: Submit 2026 health claims -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Submit 2026 health claims -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Review notes in Notion about ADHD | legacy=0 | evaluator=4 | divergence=4 | components=[strategic_context(+4)]
-[Execution Engine V2] scoring: Review notes in Notion about ADHD -> 4 (strategic_context)
-[Ranking Shadow V3] title=Get out garden hoses | legacy=0 | evaluator=5 | divergence=5 | components=[operational_context(+5)]
-[Execution Engine V2] scoring: Get out garden hoses -> 5 (operational_context)
-[Execution Engine V2] baseline_executable_fallback: Check OAS payments -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Check OAS payments -> 1 (baseline_executable)
-[Execution Engine V2] baseline_executable_fallback: Organize papers in my office -> 1 (baseline_executable)
-[Execution Engine V2] scoring: Organize papers in my office -> 1 (baseline_executable)
-[Ranking Shadow V3] title=Update Will  | legacy=0 | evaluator=7 | divergence=7 | components=[large_effort(+7)]
-[Execution Engine V2] scoring: Update Will  -> 7 (large_effort)
-[Ranking Shadow V3] title=Review recurring charges on Mastercard | legacy=10 | evaluator=17 | divergence=7 | components=[medium_urgency(+10), medium_effort(+3), strategic_context(+4)]
-[Execution Engine V2] scoring: Review recurring charges on Mastercard -> 17 (medium_urgency, medium_effort, strategic_context)
-\n--- Execution Engine V2 In-Memory Rankings ---
-rank=1 score=25 title=Send Khorasan recipe to Mary
-rank=2 score=25 title=Submit University of Windsor pension forms
-rank=3 score=17 title=Review recurring charges on Mastercard
-rank=4 score=13 title=Plan another test bake of focaccia for Almanac recipe development
-rank=5 score=8 title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-rank=6 score=8 title=Fix timezone issue with Bread Basket app
-rank=7 score=8 title=Check skimmer basket in pool
-rank=8 score=8 title=Put vacuum hose for pool in the garage
-rank=9 score=8 title=Take winter supplies for pool to garage
-rank=10 score=8 title=Send WhatsApp message to bread community about performance of Bread Basket app
-rank=11 score=8 title=Slice bread for school breakfast program
-rank=12 score=8 title=Clean work surfaces and floors throughout the bakery
-rank=13 score=8 title=Plan to attend an Ottawa Titans baseball game
-rank=14 score=8 title=Plan for annual review of wills and POAs
-rank=15 score=8 title=Organize pool equipment for opening — Store equipment in an accessible location.
+Rejected non-actionable: 112
+Eligible execution tasks: 121
 [Execution Engine V2] Winner limit: 5
 [Execution Engine V2] Persisting top 10 execution rankings only
 \n--- Best Next Actions ---
-BNA rank=1 score=25 title=Send Khorasan recipe to Mary
-BNA rank=2 score=25 title=Submit University of Windsor pension forms
-BNA rank=3 score=17 title=Review recurring charges on Mastercard
-BNA rank=4 score=13 title=Plan another test bake of focaccia for Almanac recipe development
-BNA rank=5 score=8 title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
+BNA rank=1 score=53 title=Write summary of workshop for Gaby
+BNA rank=2 score=25 title=Send Khorasan recipe to Mary
+BNA rank=3 score=25 title=Submit University of Windsor pension forms
+BNA rank=4 score=17 title=Review recurring charges on Mastercard
+BNA rank=5 score=13 title=Plan another test bake of focaccia for Almanac recipe development
 \n[Execution Engine V2] Tasks updated: 10
 [Execution Engine V2] Reconciliation complete
 Execution Engine V2 completed successfully. Winners: 5
+
+--- Quick Win Surfacing ---
+Eligible Quick Wins after sequence filtering: 51
+Excluded BNA overlap: 0
+Surfaced Quick Win target: 5
+Surfaced Quick Wins selected: 5
+QW surface 1: Submit health claims
+QW surface 2: Refill pill dispenser
+QW surface 3: Pay MasterCard bill
+QW surface 4: Download books from Audible
+QW surface 5: Wash jar for Kiefer
+Surfaced Quick Win updates: 0
 [Execution Flow] Canonical Execution Authority complete; Quick Win view rebalance active; legacy execution-state automation remains disabled
 === METADATA RECONCILIATION — PHASE 2.5: INLINE PRE-SUMMARY PASS ===
-=== METADATA RECONCILIATION — PHASE 2.3: TRUE CANONICAL RANK REWRITE + CLEANUPS ===
-[Metadata Reconciliation] Version: metadata-reconciliation-phase2-true-canonical-rank-rewrite-v0.2.3
-[Metadata Reconciliation] Tasks scanned: 249
-[Metadata Reconciliation] Open tasks observed: 233
+=== METADATA RECONCILIATION — PHASE 8.2: GOVERNANCE OBSERVATION BASELINE ===
+[Metadata Reconciliation] Version: metadata-reconciliation-phase8-2-governance-observation-baseline-v0.8.2
+[Metadata Reconciliation] Tasks scanned: 251
+[Metadata Reconciliation] Open tasks observed: 235
 [Metadata Reconciliation] Done tasks observed: 0
 [Metadata Reconciliation] Closed/done tasks observed: 16
 [Metadata Reconciliation] Findings: 0
 [Metadata Reconciliation] No metadata reconciliation issues observed in available runtime objects.
-[Metadata Reconciliation] Open tasks with Do = Today but not Best Next Action: 0
-[Metadata Reconciliation] Open Best Next Action tasks not surfaced in Do = Today: 0
 [Metadata Reconciliation] Open Best Next Action tasks without Execution Rank: 0
 [Metadata Reconciliation] Open Best Next Action tasks without meaningful Execution Score: 0
 [Metadata Reconciliation] JDI tasks with forbidden execution metadata: 0
@@ -311,51 +99,50 @@ Execution Engine V2 completed successfully. Winners: 5
 [Metadata Reconciliation] Deferred future tasks with Execution Rank: 0
 [Metadata Reconciliation] Deferred future tasks with meaningful Execution Score: 0
 [Metadata Reconciliation] Deferred future tasks with Best Next Action: 0
-[Metadata Reconciliation] Deferred future tasks with Do = Today: 0
+[Metadata Policy] Version: canonical-metadata-policy-v0.4.1
+[Metadata Policy] Canonical execution fields: Execution Score, Execution Rank, Best Next Action
+[Metadata Policy] Presentation overlays: Quick Win
+[Metadata Policy] Manual-only fields: Do = Today
+[Metadata Policy] Deprecated execution fields ignored by reconciliation: Focus Now, Strong Candidate
 [Execution Rank Diagnostics] Active ranked rows observed: 10
-[Execution Rank Diagnostics] Skipped counts: closed_or_done=16; future_deferred=1; jdi=17; missing_rank_or_score=205; non_positive_score=0; not_open=0
 [Execution Rank Diagnostics] Missing persisted ranks: none
 [Execution Rank Diagnostics] Duplicate persisted ranks: none
-[Execution Rank Diagnostics] Current persisted-rank order preview: 10
-[Execution Rank Diagnostics] Rank-order row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard flags=Strong,Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app flags=Parentish
-[Execution Rank Diagnostics] Rank-order row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage flags=Parentish
-[Execution Rank Diagnostics] Deterministic score/title/page-id order preview: 10
-[Execution Rank Diagnostics] Deterministic row: pos=1 current_rank=1 score=25 id=7b61ccce title=Send Khorasan recipe to Mary
-[Execution Rank Diagnostics] Deterministic row: pos=2 current_rank=2 score=25 id=1a587de0 title=Submit University of Windsor pension forms
-[Execution Rank Diagnostics] Deterministic row: pos=3 current_rank=3 score=17 id=80580b4c title=Review recurring charges on Mastercard
-[Execution Rank Diagnostics] Deterministic row: pos=4 current_rank=4 score=13 id=3ddede5b title=Plan another test bake of focaccia for Almanac recipe development
-[Execution Rank Diagnostics] Deterministic row: pos=5 current_rank=5 score=8 id=3671facc title=Check skimmer basket in pool
-[Execution Rank Diagnostics] Deterministic row: pos=6 current_rank=6 score=8 id=3671facc title=Fix timezone issue with Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=7 current_rank=7 score=8 id=3661facc title=Put vacuum hose for pool in the garage
-[Execution Rank Diagnostics] Deterministic row: pos=8 current_rank=8 score=8 id=3591facc title=Send WhatsApp message to bread community about performance of Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=9 current_rank=9 score=8 id=3671facc title=Send WhatsApp message to Solara Bread Community about timezone issues with the Bread Basket app
-[Execution Rank Diagnostics] Deterministic row: pos=10 current_rank=10 score=8 id=3621facc title=Take winter supplies for pool to garage
-[Execution Rank Diagnostics] Rank-order and deterministic-order previews match for observed rows.
+[Execution Rank Diagnostics] Rank-order health: clean
+[Execution Rank Diagnostics] Detailed row previews suppressed (set AIOS_VERBOSE_RANK_DIAGNOSTICS=true to enable)
+=== METADATA GOVERNANCE TELEMETRY SUMMARY ===
+[Metadata Governance] Version: metadata-reconciliation-phase8-2-governance-observation-baseline-v0.8.2
+[Metadata Governance] Observed tasks: scanned=251; open=235; closed_or_done=16; done=0
+[Metadata Governance] Reconciliation signals: findings=0; stale_presentation_candidates=0; stale_execution_candidates=0; active_rank_rows=10; rank_rewrite_changes=0
+[Metadata Governance] Rank health: missing=none; duplicates=none; order_mismatches=0
+[Metadata Governance] Anomaly health: total=0; ranked_without_score=0; score_without_rank=0; quickwin_bna_overlap=0; orphaned_today_flags=0; deprecated_metadata_seen=0
+[Metadata Governance] Authority boundary: execution=Execution Score, Execution Rank, Best Next Action
+[Metadata Governance] Overlay/manual/deprecated boundary: overlays=Quick Win; manual_only=Do = Today; deprecated_ignored=Focus Now, Strong Candidate
+[Metadata Governance] Status: clean
+=== GOVERNANCE ANOMALY DIAGNOSTICS ===
+[Metadata Governance] Anomaly signals: total=0; ranked_without_score=0; score_without_rank=0; bna_without_rank_or_score=0; quickwin_bna_overlap=0; orphaned_today_flags=0; deprecated_metadata_seen=0; future_deferred_surface=0; closed_or_done_surface=0; duplicate_execution_ranks=0
+[Metadata Governance] No governance anomaly signals observed in available runtime objects.
+[Metadata Governance] Anomaly diagnostics do not affect ranking, scoring, BNA selection, or Quick Win behavior.
 [Metadata Persistence Guard] Version: metadata-reconciliation-phase2-closed-task-persistence-guard-v0.2.0
 [Metadata Persistence Guard] Installed: True
 [Metadata Persistence Guard] Execution-only writes blocked: 0
 [Metadata Persistence Guard] Execution fields stripped: 0
-[Metadata Reconciliation] Quick Win deferred cleanup: 0
-[Metadata Reconciliation] Closed/done execution cleanup: 0
-[Metadata Reconciliation] Applying true execution rank rewrite: 10 active rows; changed=0
+[Metadata Reconciliation] Policy stale presentation cleanup: 0
+[Metadata Reconciliation] Policy stale execution cleanup: 0
+[Metadata Reconciliation] Deprecated metadata cleanup: 0
 [Metadata Reconciliation] Execution rank rewrite skipped: canonical ranks already current
+=== GOVERNANCE OBSERVATION BASELINE ===
+[Metadata Governance] Observation baseline: status=clean; anomalies=0; planned_mutations=0; cleanup_errors=0; observe_next_cron=no
+[Metadata Governance] Observation detail: stale_presentation=0; stale_execution=0; deprecated_cleanup=0; rank_rewrite_changes=0
+[Metadata Governance] Observation layer is read-only and does not alter execution authority.
 
 --- Run summary ---
-Started:  2026-05-25 08:00:06
-Finished: 2026-05-25 08:00:36
-Elapsed:  29.6s
+Started:  2026-05-26 05:32:21
+Finished: 2026-05-26 05:32:47
+Elapsed:  26.0s
 Inbox — Extracted: 0, New: 0, Processed: 0, Left for later: 0
 Matching — Exact/high matches: 0, Possible matches: 0, Duplicate inbox items: 0
 Tasks — Created: 0, Breakdown parents: 0, Breakdown subtasks: 0, Clarification tasks: 0
-Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0
+Updates — Matched items: 0, Metadata: 0, Importance: 0, Quick Win: 0, Surfaced Quick Win: 0
 Archive / review — Archived items: 0, Clarification blocks added: 0, Possible duplicate blocks added: 0, Archive runs trimmed: 0
 AI log — Entries: 0, Metadata entries: 0, Errors: 0
 Task notes added: 0
@@ -366,8 +153,6 @@ Suggested Project updates: 0
 Project relations updated: 0
 Project records created: 0
 Errors: 0
-2026-05-25 08:00:36 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
+2026-05-26 05:32:47 — Run complete — Created: 0, Updated: 0, Archived: 0, Errors: 0
 AIOS dashboard updated from Execution Engine V2.
 [Metadata Reconciliation] Inline reconciliation active; atexit hook disabled
-[Runtime Lock] Removing stale lock. pid=0 age_seconds=999999
-[Runtime Lock] Acquired lock: /Users/John/LocalProjects/aios/.aios_runtime.lock
