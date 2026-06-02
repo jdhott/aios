@@ -28,6 +28,22 @@ to make future write-back risky.
 D1.8 adds duplicate/overlapping project-neighborhood detection. It compares
 historical neighborhood term profiles and reports likely duplicate or overlapping
 project concepts before any future project write-back phase.
+
+D1.9 adds read-only canonical project consolidation suggestions. It groups
+overlapping neighborhoods, selects a likely canonical project label, and reports
+which shadow/suggested neighborhoods may be candidates for manual consolidation.
+It performs no merges and no task/project mutation.
+
+D2.1 adds longitudinal Suggested Project stability telemetry. It compares
+current staged Suggested Project values against fresh affinity previews to detect
+stable matches, drift, and new suggestions before broader persistence expansion.
+
+D2.4 adds stability-governed persistence.
+
+D2.6 adds normal-runtime compact summary support via the report wrapper. It uses read-only
+canonical preference signals to classify staged Suggested Project writes more
+conservatively, suppressing weak/shadow/ambiguous project-memory writes before
+any future relation mutation.
 """
 
 from __future__ import annotations
@@ -180,10 +196,17 @@ class AffinitySummary:
     top_global_terms: List[Tuple[str, int]]
     active_task_previews: List[Dict[str, Any]]
     overlapping_neighborhoods: List[Dict[str, Any]]
+    consolidation_suggestions: List[Dict[str, Any]]
+    suggested_project_write_plan: List[Dict[str, Any]]
+    suggested_project_suppressed: List[Dict[str, Any]]
+    suggested_project_stability: Dict[str, Any]
+    canonical_project_preferences: Dict[str, Any]
+    canonical_preference_assistance: Dict[str, Any]
+    stability_governed_persistence: Dict[str, Any]
 
     def telemetry_lines(self) -> List[str]:
         lines = [
-            "=== PROJECT COGNITION — D1.8: HISTORICAL AFFINITY TELEMETRY ===",
+            "=== PROJECT COGNITION — D2.6: STABILITY-GOVERNED SUGGESTED PROJECT PERSISTENCE ===",
             f"[Project Cognition] Historical tasks observed: {self.historical_tasks}/{self.total_tasks}",
             f"[Project Cognition] Active tasks observed: {self.active_tasks}/{self.total_tasks}",
             f"[Project Cognition] Project affinity groups: {self.project_groups}; unassigned_historical={self.unassigned_historical_tasks}",
@@ -247,12 +270,132 @@ class AffinitySummary:
         else:
             lines.append("[Project Cognition] Overlapping project neighborhoods: candidates=0; read_only=true")
 
+        if self.consolidation_suggestions:
+            lines.append(
+                "[Project Cognition] Canonical consolidation suggestions: "
+                f"candidates={len(self.consolidation_suggestions)}; read_only=true"
+            )
+            for item in self.consolidation_suggestions[:6]:
+                absorbs = ", ".join(item.get("absorbs", [])[:4])
+                terms = ", ".join(item.get("shared_terms", [])[:5])
+                lines.append(
+                    "[Project Cognition] Consolidation suggestion: "
+                    f"canonical={item['canonical_label']} absorbs={absorbs} "
+                    f"(risk={item['risk']}; overlaps={item['overlap_count']}; shared={terms}; action=manual_review_only)"
+                )
+        else:
+            lines.append("[Project Cognition] Canonical consolidation suggestions: candidates=0; read_only=true")
+
         lines.append("[Project Cognition] Affinity weighting: weak_terms_discounted=true; one_word_broad_matches_suppressed=true")
         ambiguous_count = sum(1 for item in self.active_task_previews if item.get("ambiguity") in {"medium", "high"})
         lines.append("[Project Cognition] Strong-domain confidence: anchor_terms_enabled=true; threshold=14; broad_terms_still_suppressed=true")
         lines.append(f"[Project Cognition] Runner-up ambiguity: enabled=true; ambiguous_candidates={ambiguous_count}; writeback_guard=active")
         lines.append(f"[Project Cognition] Project overlap detection: enabled=true; overlap_candidates={len(self.overlapping_neighborhoods)}; writeback_guard=active")
-        lines.append("[Project Cognition] D1 mode: read_only=true; writes=0; execution_authority_impact=none")
+        lines.append(f"[Project Cognition] Consolidation suggestions: enabled=true; suggestions={len(self.consolidation_suggestions)}; writeback_guard=active")
+
+        if self.suggested_project_write_plan or self.suggested_project_suppressed:
+            lines.append(
+                "[Project Cognition] Suggested Project persistence preview: "
+                f"write_candidates={len(self.suggested_project_write_plan)}; "
+                f"suppressed={len(self.suggested_project_suppressed)}; full_plan=explicit_only"
+            )
+            for item in self.suggested_project_write_plan[:8]:
+                lines.append(
+                    "[Project Cognition] Suggested Project write candidate: "
+                    f"{item['task_title']} → {item['suggested_project']} "
+                    f"(confidence={item['confidence']}; ambiguity={item['ambiguity']}; reason={item['reason']}; action=staging_field_only)"
+                )
+            for item in self.suggested_project_suppressed[:8]:
+                lines.append(
+                    "[Project Cognition] Suggested Project suppressed: "
+                    f"{item['task_title']} → {item.get('suggested_project', item.get('project_label', '(unknown)'))} "
+                    f"(reason={item['reason']}; confidence={item.get('confidence')}; ambiguity={item.get('ambiguity')})"
+                )
+        else:
+            lines.append("[Project Cognition] Suggested Project persistence preview: write_candidates=0; suppressed=0; full_plan=explicit_only")
+
+        stability = self.suggested_project_stability or {}
+        lines.append(
+            "[Project Cognition] Suggested Project stability telemetry: "
+            f"enabled={str(bool(stability.get('enabled'))).lower()}; "
+            f"preview_candidates={stability.get('preview_candidates', 0)}; "
+            f"existing_suggestions={stability.get('existing_suggestions', 0)}; "
+            f"stable_matches={stability.get('stable_matches', 0)}; "
+            f"drift_candidates={stability.get('drift_candidates', 0)}; "
+            f"new_suggestions={stability.get('new_suggestions', 0)}; writeback_guard=active"
+        )
+        for item in (stability.get("project_stability") or [])[:6]:
+            stable_value = item.get("stability")
+            stable_text = "n/a" if stable_value is None else f"{stable_value:.2f}"
+            lines.append(
+                "[Project Cognition] Suggested Project stability: "
+                f"project={item.get('project')} stability={stable_text}; "
+                f"repeated_matches={item.get('stable_matches', 0)}; "
+                f"drift={item.get('drift_candidates', 0)}; "
+                f"new={item.get('new_suggestions', 0)}"
+            )
+        for item in (stability.get("drift_examples") or [])[:4]:
+            lines.append(
+                "[Project Cognition] Suggested Project drift: "
+                f"{item.get('task_title')} existing={item.get('existing_suggested_project')} "
+                f"proposed={item.get('proposed_suggested_project')} "
+                f"(confidence={item.get('confidence')}; ambiguity={item.get('ambiguity')})"
+            )
+
+        preferences = self.canonical_project_preferences or {}
+        lines.append(
+            "[Project Cognition] Canonical project preference memory: "
+            f"enabled={str(bool(preferences.get('enabled'))).lower()}; "
+            f"preferences={len(preferences.get('preferences') or [])}; "
+            f"drift_dampening=preview_only; writeback_guard=active"
+        )
+        for item in (preferences.get("preferences") or [])[:6]:
+            absorbs = ", ".join(item.get("absorbs", [])[:4])
+            evidence = ", ".join(item.get("evidence", [])[:4])
+            lines.append(
+                "[Project Cognition] Canonical preference: "
+                f"canonical={item.get('canonical_project')} strength={item.get('preference_strength'):.2f}; "
+                f"absorbs={absorbs or 'none'}; evidence={evidence or 'none'}; "
+                f"action=manual_review_only"
+            )
+
+        assistance = self.canonical_preference_assistance or {}
+        lines.append(
+            "[Project Cognition] Canonical preference assisted suppression: "
+            f"enabled={str(bool(assistance.get('enabled'))).lower()}; "
+            f"safe_candidates={assistance.get('safe_candidates', 0)}; "
+            f"suppressed_by_preference={assistance.get('suppressed_by_preference', 0)}; "
+            f"shadow_suppressed={assistance.get('shadow_suppressed', 0)}; "
+            f"weak_preference_suppressed={assistance.get('weak_preference_suppressed', 0)}; "
+            "writeback_guard=active"
+        )
+
+        sgp = self.stability_governed_persistence or {}
+        lines.append(
+            "[Project Cognition] Stability-governed Suggested Project persistence: "
+            f"enabled={str(bool(sgp.get('enabled'))).lower()}; "
+            f"auto_apply_default={str(bool(sgp.get('auto_apply_default'))).lower()}; "
+            f"eligible={len(sgp.get('eligible_writes') or [])}; "
+            f"suppressed={len(sgp.get('suppressed') or [])}; "
+            f"threshold={sgp.get('stability_threshold', 0)}; "
+            "project_relation_mutation=disabled; execution_authority_impact=none"
+        )
+        for item in (sgp.get("eligible_writes") or [])[:6]:
+            lines.append(
+                "[Project Cognition] Stability-governed write eligible: "
+                f"{item.get('task_title')} → {item.get('suggested_project')} "
+                f"(stability={item.get('project_stability')}; repeated={item.get('stable_matches')}; "
+                f"reason={item.get('reason')}; action=staging_field_only)"
+            )
+        for item in (sgp.get("suppressed") or [])[:4]:
+            lines.append(
+                "[Project Cognition] Stability-governed write suppressed: "
+                f"{item.get('task_title')} → {item.get('suggested_project')} "
+                f"(reason={item.get('suppression_reason')}; stability={item.get('project_stability')}; "
+                f"repeated={item.get('stable_matches')})"
+            )
+
+        lines.append("[Project Cognition] D2.4 mode: stability_governed_auto_writes=true; writes=bounded_to_stable_low_ambiguity_suggestions; project_relation_mutation=disabled; execution_authority_impact=none")
         return lines
 
 
@@ -394,6 +537,442 @@ def detect_overlapping_neighborhoods(
     overlaps.sort(key=lambda item: (risk_rank.get(item["risk"], 0), item["overlap_score"], len(item["shared_terms"])), reverse=True)
     return overlaps[:max_pairs]
 
+
+
+def _canonical_priority(neighborhood: Mapping[str, Any]) -> Tuple[int, int, str]:
+    """Prefer real relation-backed projects, larger histories, then stable labels."""
+    key = str(neighborhood.get("project_key") or "")
+    label = str(neighborhood.get("project_label") or key)
+    is_relation = key.startswith("relation:")
+    is_suggested = key.startswith("suggested:")
+    return (1 if is_relation and not is_suggested else 0, int(neighborhood.get("task_count") or 0), label.lower())
+
+
+def suggest_canonical_consolidations(
+    neighborhoods: Sequence[Mapping[str, Any]],
+    overlaps: Sequence[Mapping[str, Any]],
+    *,
+    max_suggestions: int = 8,
+) -> List[Dict[str, Any]]:
+    """Suggest manual canonicalization candidates from overlapping neighborhoods.
+
+    This is deliberately read-only. It does not merge projects, rewrite Suggested
+    Project values, or update task relations. The output is a manual-review signal
+    for future governed write-back design.
+    """
+    by_key = {str(n.get("project_key") or ""): n for n in neighborhoods if n.get("project_key")}
+    parent: Dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    useful_overlaps = []
+    for item in overlaps:
+        left = str(item.get("left_key") or "")
+        right = str(item.get("right_key") or "")
+        if not left or not right or left not in by_key or right not in by_key:
+            continue
+        if str(item.get("risk")) not in {"medium", "high"}:
+            continue
+        useful_overlaps.append(item)
+        union(left, right)
+
+    clusters: Dict[str, List[str]] = defaultdict(list)
+    for item in useful_overlaps:
+        clusters[find(str(item.get("left_key")))].append(str(item.get("left_key")))
+        clusters[find(str(item.get("right_key")))].append(str(item.get("right_key")))
+
+    suggestions: List[Dict[str, Any]] = []
+    for keys in clusters.values():
+        unique_keys = sorted(set(keys))
+        if len(unique_keys) < 2:
+            continue
+        members = [by_key[key] for key in unique_keys]
+        canonical = sorted(members, key=_canonical_priority, reverse=True)[0]
+        canonical_key = str(canonical.get("project_key") or "")
+        absorbs = [str(member.get("project_label") or member.get("project_key")) for member in members if member.get("project_key") != canonical_key]
+        cluster_overlaps = [
+            item for item in useful_overlaps
+            if str(item.get("left_key")) in unique_keys and str(item.get("right_key")) in unique_keys
+        ]
+        shared_counter: Counter[str] = Counter()
+        high_seen = False
+        for item in cluster_overlaps:
+            shared_counter.update(item.get("shared_terms") or [])
+            high_seen = high_seen or item.get("risk") == "high"
+        suggestions.append({
+            "canonical_key": canonical_key,
+            "canonical_label": str(canonical.get("project_label") or canonical_key),
+            "absorbs": absorbs,
+            "shared_terms": [term for term, _ in shared_counter.most_common(8)],
+            "risk": "high" if high_seen else "medium",
+            "overlap_count": len(cluster_overlaps),
+            "read_only": True,
+            "action": "manual_review_only",
+        })
+
+    risk_rank = {"high": 2, "medium": 1}
+    suggestions.sort(key=lambda item: (risk_rank.get(item["risk"], 0), item["overlap_count"], len(item["absorbs"])), reverse=True)
+    return suggestions[:max_suggestions]
+
+
+def _project_keys_in_consolidation_risk(suggestions: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Return project keys that are part of manual-review consolidation clusters."""
+    keys: set[str] = set()
+    for suggestion in suggestions:
+        canonical = str(suggestion.get("canonical_key") or "")
+        if canonical:
+            keys.add(canonical)
+        # D1.9 suggestions intentionally expose labels, not every absorbed key, so
+        # write gating below also uses runner-up ambiguity. This function is kept
+        # conservative for canonical relation keys we can identify exactly.
+    return keys
+
+
+
+def build_suggested_project_stability_telemetry(
+    tasks: Sequence[HistoricalTask],
+    active_previews: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Compare existing Suggested Project staging values to fresh affinity previews.
+
+    This is telemetry only. It does not decide writes. It gives us a longitudinal
+    safety signal: if the same task already carries the same staged suggestion that
+    the current affinity pass would make, the suggestion is considered stable. If a
+    task already has a different staged suggestion, it is drift and should remain
+    guarded before broader write-back.
+    """
+    task_by_id = {task.id: task for task in tasks if task.id}
+    stable_examples: List[Dict[str, Any]] = []
+    drift_examples: List[Dict[str, Any]] = []
+    new_examples: List[Dict[str, Any]] = []
+    project_counts: Dict[str, Counter[str]] = defaultdict(Counter)
+
+    for preview in active_previews:
+        task_id = str(preview.get("task_id") or "")
+        task = task_by_id.get(task_id)
+        if not task:
+            continue
+        existing = (task.suggested_project or "").strip()
+        proposed = str(preview.get("project_label") or "").strip()
+        if not proposed:
+            continue
+        base = {
+            "task_id": task_id,
+            "task_title": task.title,
+            "existing_suggested_project": existing,
+            "proposed_suggested_project": proposed,
+            "confidence": preview.get("confidence"),
+            "ambiguity": preview.get("ambiguity", "none"),
+        }
+        if existing and existing.lower() == proposed.lower():
+            stable_examples.append({**base, "status": "stable_match"})
+            project_counts[proposed]["stable"] += 1
+        elif existing:
+            drift_examples.append({**base, "status": "drift"})
+            project_counts[proposed]["drift"] += 1
+        else:
+            new_examples.append({**base, "status": "new_suggestion"})
+            project_counts[proposed]["new"] += 1
+
+    project_stability: List[Dict[str, Any]] = []
+    for project, counts in project_counts.items():
+        stable = int(counts.get("stable", 0))
+        drift = int(counts.get("drift", 0))
+        new = int(counts.get("new", 0))
+        denominator = stable + drift
+        stability = round(stable / denominator, 2) if denominator else None
+        if denominator or new:
+            project_stability.append({
+                "project": project,
+                "stable_matches": stable,
+                "drift_candidates": drift,
+                "new_suggestions": new,
+                "stability": stability,
+            })
+    project_stability.sort(key=lambda item: ((item["stability"] is not None, item["stability"] or 0), item["stable_matches"], item["new_suggestions"]), reverse=True)
+
+    return {
+        "enabled": True,
+        "preview_candidates": len(active_previews),
+        "existing_suggestions": len(stable_examples) + len(drift_examples),
+        "stable_matches": len(stable_examples),
+        "drift_candidates": len(drift_examples),
+        "new_suggestions": len(new_examples),
+        "stable_examples": stable_examples[:6],
+        "drift_examples": drift_examples[:6],
+        "new_examples": new_examples[:6],
+        "project_stability": project_stability[:8],
+        "writeback_guard": "active",
+    }
+
+
+
+def build_canonical_project_preference_memory(
+    consolidation_suggestions: Sequence[Mapping[str, Any]],
+    suggested_project_stability: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Derive read-only canonical project preference signals.
+
+    D2.4 does not mutate projects or tasks. It creates a governance-memory preview
+    that answers: when project neighborhoods conflict, which canonical label looks
+    most stable and should be preferred by future guarded write-back?
+    """
+    stability_by_project: Dict[str, Mapping[str, Any]] = {
+        str(item.get("project") or ""): item
+        for item in (suggested_project_stability.get("project_stability") or [])
+        if item.get("project")
+    }
+    drift_toward: Counter[str] = Counter()
+    drift_from: Counter[str] = Counter()
+    for item in (suggested_project_stability.get("drift_examples") or []):
+        proposed = str(item.get("proposed_suggested_project") or "").strip()
+        existing = str(item.get("existing_suggested_project") or "").strip()
+        if proposed:
+            drift_toward[proposed] += 1
+        if existing:
+            drift_from[existing] += 1
+
+    preferences: List[Dict[str, Any]] = []
+    for suggestion in consolidation_suggestions:
+        canonical = str(suggestion.get("canonical_label") or "").strip()
+        if not canonical:
+            continue
+        stability = stability_by_project.get(canonical, {})
+        stable_matches = int(stability.get("stable_matches") or 0)
+        drift_candidates = int(stability.get("drift_candidates") or 0)
+        new_suggestions = int(stability.get("new_suggestions") or 0)
+        overlap_count = int(suggestion.get("overlap_count") or 0)
+        absorbs = [str(item) for item in (suggestion.get("absorbs") or []) if item]
+        drift_to = int(drift_toward.get(canonical, 0))
+
+        # Conservative bounded score. This is a preference signal, not authority.
+        raw = (
+            0.12 * min(overlap_count, 8)
+            + 0.10 * min(len(absorbs), 5)
+            + 0.10 * min(stable_matches, 5)
+            + 0.08 * min(new_suggestions, 5)
+            + 0.08 * min(drift_to, 5)
+            - 0.06 * min(drift_candidates, 5)
+        )
+        strength = max(0.0, min(1.0, round(raw, 2)))
+        evidence: List[str] = []
+        if overlap_count:
+            evidence.append(f"overlaps:{overlap_count}")
+        if absorbs:
+            evidence.append(f"absorbs:{len(absorbs)}")
+        if stable_matches:
+            evidence.append(f"stable:{stable_matches}")
+        if drift_to:
+            evidence.append(f"drift_toward:{drift_to}")
+        if drift_candidates:
+            evidence.append(f"drift_against:{drift_candidates}")
+
+        preferences.append({
+            "canonical_project": canonical,
+            "canonical_key": suggestion.get("canonical_key", ""),
+            "absorbs": absorbs,
+            "preference_strength": strength,
+            "evidence": evidence,
+            "read_only": True,
+            "action": "manual_review_only",
+        })
+
+    preferences.sort(key=lambda item: (item["preference_strength"], len(item.get("absorbs", []))), reverse=True)
+    return {
+        "enabled": True,
+        "preferences": preferences[:8],
+        "writeback_guard": "active",
+        "project_relation_mutation": "disabled",
+    }
+
+
+def _canonical_preference_maps(
+    canonical_project_preferences: Mapping[str, Any] | None,
+) -> Tuple[Dict[str, Mapping[str, Any]], Dict[str, Mapping[str, Any]]]:
+    """Return canonical and absorbed-label lookup maps for D2.4 write guards."""
+    by_canonical: Dict[str, Mapping[str, Any]] = {}
+    by_absorbed: Dict[str, Mapping[str, Any]] = {}
+    for pref in (canonical_project_preferences or {}).get("preferences") or []:
+        canonical = str(pref.get("canonical_project") or "").strip().lower()
+        if canonical:
+            by_canonical[canonical] = pref
+        for absorbed in pref.get("absorbs") or []:
+            label = str(absorbed or "").strip().lower()
+            if label:
+                by_absorbed[label] = pref
+    return by_canonical, by_absorbed
+
+
+def build_suggested_project_write_plan(
+    active_previews: Sequence[Mapping[str, Any]],
+    consolidation_suggestions: Sequence[Mapping[str, Any]],
+    canonical_project_preferences: Mapping[str, Any] | None = None,
+    *,
+    allow_overlap_risk: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """Classify active previews into dry-run Suggested Project write candidates.
+
+    D2.4 uses canonical preference memory as a suppression aid only. It does not
+    rewrite project labels, merge projects, mutate project relations, or create
+    new Notion authority. It keeps high-confidence/low-ambiguity stable writes,
+    suppresses shadow project targets, and requires manual review when a target
+    belongs to a weak or fragmented canonical-preference cluster.
+    """
+    risky_keys = _project_keys_in_consolidation_risk(consolidation_suggestions)
+    pref_by_canonical, pref_by_absorbed = _canonical_preference_maps(canonical_project_preferences)
+    plan: List[Dict[str, Any]] = []
+    suppressed: List[Dict[str, Any]] = []
+    assisted_counts: Counter[str] = Counter()
+
+    for preview in active_previews:
+        confidence = str(preview.get("confidence") or "")
+        ambiguity = str(preview.get("ambiguity") or "none")
+        project_key = str(preview.get("project_key") or "")
+        project_label = str(preview.get("project_label") or "")
+        label_key = project_label.strip().lower()
+        canonical_pref = pref_by_canonical.get(label_key)
+        absorbed_pref = pref_by_absorbed.get(label_key)
+        pref = canonical_pref or absorbed_pref
+        pref_strength = float((pref or {}).get("preference_strength") or 0.0)
+        base = {
+            "task_id": str(preview.get("task_id") or ""),
+            "task_title": str(preview.get("task_title") or ""),
+            "project_key": project_key,
+            "project_label": project_label,
+            "suggested_project": project_label,
+            "confidence": confidence,
+            "ambiguity": ambiguity,
+            "score": preview.get("score", 0),
+            "canonical_preference_strength": pref_strength,
+            "canonical_preference": (pref or {}).get("canonical_project", ""),
+            "read_only_plan": True,
+        }
+
+        reason = ""
+        if not base["task_id"]:
+            reason = "missing_task_id"
+        elif confidence != "high":
+            reason = "confidence_not_high"
+        elif ambiguity not in {"none", "low"}:
+            reason = "canonical_preference_ambiguity_guard" if pref_strength >= 0.75 else "ambiguity_guard"
+        elif not project_key.startswith("relation:"):
+            reason = "suggested_or_unassigned_target_guard"
+        elif absorbed_pref:
+            reason = "shadow_project_guard"
+        elif canonical_pref and pref_strength < 0.75:
+            reason = "weak_canonical_preference_guard"
+        elif project_key in risky_keys and not allow_overlap_risk:
+            # D2.4 allows strong canonical preference to dampen overlap noise only
+            # when the active-task match is otherwise very safe.
+            if pref_strength >= 0.75 and ambiguity in {"none", "low"}:
+                assisted_counts["overlap_dampened"] += 1
+            else:
+                reason = "consolidation_overlap_guard"
+        elif project_label.startswith("suggested:") or project_label.startswith("unresolved_relation:"):
+            reason = "non_canonical_label_guard"
+
+        if reason:
+            if reason in {"canonical_preference_ambiguity_guard", "shadow_project_guard", "weak_canonical_preference_guard"}:
+                assisted_counts["suppressed_by_preference"] += 1
+            if reason == "shadow_project_guard":
+                assisted_counts["shadow_suppressed"] += 1
+            if reason == "weak_canonical_preference_guard":
+                assisted_counts["weak_preference_suppressed"] += 1
+            suppressed.append({**base, "reason": reason})
+        else:
+            assisted_counts["safe_candidates"] += 1
+            plan.append({**base, "reason": "safe_high_confidence_low_ambiguity"})
+
+    assistance = {
+        "enabled": True,
+        "safe_candidates": len(plan),
+        "suppressed_by_preference": int(assisted_counts.get("suppressed_by_preference", 0)),
+        "shadow_suppressed": int(assisted_counts.get("shadow_suppressed", 0)),
+        "weak_preference_suppressed": int(assisted_counts.get("weak_preference_suppressed", 0)),
+        "overlap_dampened": int(assisted_counts.get("overlap_dampened", 0)),
+        "writeback_guard": "active",
+    }
+    return plan, suppressed, assistance
+
+
+def build_stability_governed_persistence_plan(
+    suggested_project_write_plan: Sequence[Mapping[str, Any]],
+    suggested_project_stability: Mapping[str, Any],
+    canonical_project_preferences: Mapping[str, Any] | None = None,
+    *,
+    stability_threshold: float = 0.85,
+    min_repeated_matches: int = 2,
+) -> Dict[str, Any]:
+    """Select the safest Suggested Project staging writes for D2.4 default persistence.
+
+    This remains a staging-field-only authority. It never mutates project relations,
+    never creates projects, and never affects execution ranking. A candidate must
+    already pass the D2.3 write guards, then demonstrate longitudinal stability.
+    """
+    stability_by_project: Dict[str, Mapping[str, Any]] = {
+        str(item.get("project") or "").strip().lower(): item
+        for item in (suggested_project_stability.get("project_stability") or [])
+        if item.get("project")
+    }
+    pref_by_canonical, _ = _canonical_preference_maps(canonical_project_preferences)
+    eligible: List[Dict[str, Any]] = []
+    suppressed: List[Dict[str, Any]] = []
+
+    for item in suggested_project_write_plan:
+        project = str(item.get("suggested_project") or item.get("project_label") or "").strip()
+        project_key = project.lower()
+        stability = stability_by_project.get(project_key, {})
+        stable_value = stability.get("stability")
+        stable_matches = int(stability.get("stable_matches") or 0)
+        drift_candidates = int(stability.get("drift_candidates") or 0)
+        pref = pref_by_canonical.get(project_key) or {}
+        pref_strength = float(pref.get("preference_strength") or item.get("canonical_preference_strength") or 0.0)
+
+        base = {
+            **dict(item),
+            "project_stability": stable_value,
+            "stable_matches": stable_matches,
+            "drift_candidates": drift_candidates,
+            "canonical_preference_strength": pref_strength,
+        }
+
+        reason = ""
+        if stable_value is None:
+            reason = "no_longitudinal_stability_yet"
+        elif float(stable_value) < stability_threshold:
+            reason = "stability_below_threshold"
+        elif stable_matches < min_repeated_matches:
+            reason = "insufficient_repeated_matches"
+        elif drift_candidates:
+            reason = "drift_present"
+
+        if reason:
+            suppressed.append({**base, "suppression_reason": reason})
+        else:
+            eligible.append({**base, "reason": "stable_high_confidence_low_ambiguity"})
+
+    return {
+        "enabled": True,
+        "auto_apply_default": True,
+        "stability_threshold": stability_threshold,
+        "min_repeated_matches": min_repeated_matches,
+        "eligible_writes": eligible,
+        "suppressed": suppressed,
+        "writeback_guard": "active",
+        "project_relation_mutation": "disabled",
+        "execution_authority_impact": "none",
+    }
+
 def build_active_task_previews(
     tasks: Sequence[HistoricalTask],
     neighborhoods: Sequence[Mapping[str, Any]],
@@ -525,6 +1104,26 @@ def summarize_historical_affinity(
             max_candidates=active_preview_limit,
         )
     overlapping_neighborhoods = detect_overlapping_neighborhoods(neighborhoods)
+    consolidation_suggestions = suggest_canonical_consolidations(neighborhoods, overlapping_neighborhoods)
+    suggested_project_stability = build_suggested_project_stability_telemetry(tasks, active_previews)
+    canonical_project_preferences = build_canonical_project_preference_memory(
+        consolidation_suggestions,
+        suggested_project_stability,
+    )
+    (
+        suggested_project_write_plan,
+        suggested_project_suppressed,
+        canonical_preference_assistance,
+    ) = build_suggested_project_write_plan(
+        active_previews,
+        consolidation_suggestions,
+        canonical_project_preferences,
+    )
+    stability_governed_persistence = build_stability_governed_persistence_plan(
+        suggested_project_write_plan,
+        suggested_project_stability,
+        canonical_project_preferences,
+    )
 
     return AffinitySummary(
         total_tasks=len(tasks),
@@ -536,6 +1135,13 @@ def summarize_historical_affinity(
         top_global_terms=global_terms.most_common(top_terms),
         active_task_previews=active_previews,
         overlapping_neighborhoods=overlapping_neighborhoods,
+        consolidation_suggestions=consolidation_suggestions,
+        suggested_project_write_plan=suggested_project_write_plan,
+        suggested_project_suppressed=suggested_project_suppressed,
+        suggested_project_stability=suggested_project_stability,
+        canonical_project_preferences=canonical_project_preferences,
+        canonical_preference_assistance=canonical_preference_assistance,
+        stability_governed_persistence=stability_governed_persistence,
     )
 
 

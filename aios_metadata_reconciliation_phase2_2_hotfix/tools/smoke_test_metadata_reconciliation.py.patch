@@ -1,5 +1,0 @@
---- smoke_test_metadata_reconciliation.py.orig
-+++ smoke_test_metadata_reconciliation.py
-@@
--assert "PHASE 2.1" in formatted
-+assert "PHASE 2.2" in formatted
