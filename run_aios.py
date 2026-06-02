@@ -792,6 +792,8 @@ CLARIFY_HEADER = "🔍 Clarify next action"
 CHOOSE_PROMPT = "💡 Choose the first action you would take:"
 ANALYTICAL_CHOOSE_PROMPT = "💡 Choose the first outcome-producing step:"
 DEFINE_PROMPT = "💡 Answer one question to define this task:"
+CLARIFICATION_ANALYTICAL_MODE_VERSION = "clarification-last-resort-placeholder-guard-a1.2"
+print("=== CLARIFICATION ANALYTICAL MODE A1.2 ACTIVE ===")
 
 # In[11]:
 
@@ -1405,6 +1407,48 @@ def contains_weak_reference(title):
     words = words_in(title)
     return any(word in WEAK_REFERENCE_WORDS for word in words)
 
+def has_unresolved_placeholder_reference(title):
+    """Return True for unrecoverably vague placeholder tasks.
+
+    Clarification should remain a last resort. This guard only catches titles
+    where the rewrite layer still has no concrete object after cleanup, e.g.:
+    - Fix this
+    - Deal with that
+    - Look into it
+    - Fix the issue
+    - Resolve the problem
+
+    Concrete domain/context nouns keep flowing normally:
+    - Fix Bread Basket login issue
+    - Check execution rankings for issues
+    - Review ranking health
+    """
+    text = re.sub(r"\s+", " ", str(title or "").lower()).strip()
+    words = words_in(text)
+
+    if not words or text.startswith("clarify next action:"):
+        return False
+
+    placeholder_terms = {"this", "that", "it"}
+    generic_problem_terms = {"issue", "issues", "problem", "problems"}
+    filler_terms = {"the", "a", "an", "with", "about", "for", "to", "into", "on"}
+
+    if any(w in placeholder_terms for w in words):
+        # Very short action + placeholder phrases have no recoverable context.
+        non_filler = [w for w in words if w not in filler_terms]
+        if len(non_filler) <= 3:
+            return True
+
+    if any(w in generic_problem_terms for w in words):
+        # "Fix the issue" / "Resolve problem" should clarify, but domain-rich
+        # variants like "Fix Bread Basket login issue" should not.
+        non_filler = [w for w in words if w not in filler_terms]
+        if len(non_filler) <= 3:
+            return True
+
+    return False
+
+
 def starts_with_action_verb(title):
     words = words_in(title)
     return bool(words) and words[0] in COMMON_ACTION_VERBS
@@ -1614,8 +1658,7 @@ def is_atomic_action(title):
         return False
 
     # Keep genuinely vague placeholders in the clarification path.
-    # Exception: "open app" / "restart phone" can be clear if there is an object.
-    if contains_vague_word(title):
+    if contains_vague_word(title) or has_unresolved_placeholder_reference(title):
         return False
 
     # If the task starts with a concrete verb and contains more than just the verb,
@@ -2072,6 +2115,11 @@ def is_bare_noun_phrase(title):
     return True
 
 def needs_ai_cleanup(title):
+    # Unresolved placeholder objects should enter the clarification path even
+    # if they start with a superficially valid action verb such as "fix".
+    if has_unresolved_placeholder_reference(title):
+        return True
+
     # Clear atomic/process/creative tasks should not go through clarification cleanup.
     if is_atomic_action(title) or is_process_task(title) or is_obvious_single_step_task(title) or is_immediately_actionable_operational_task(title):
         return False
@@ -2085,12 +2133,15 @@ def needs_ai_cleanup(title):
 def is_still_vague(title):
     lower = title.lower().strip()
 
+    if lower.startswith("clarify next action:"):
+        return True
+
+    if has_unresolved_placeholder_reference(title):
+        return True
+
     # Atomic/process/creative tasks can be clear without being perfectly atomic.
     if is_atomic_action(title) or is_process_task(title) or is_obvious_single_step_task(title) or is_immediately_actionable_operational_task(title):
         return False
-
-    if lower.startswith("clarify next action:"):
-        return True
 
     if contains_vague_word(title):
         return True
@@ -3181,6 +3232,10 @@ def prepare_task_title(item, allow_ai=True):
     task_title = strip_due_date_phrases(task_title)
     task_title = restore_preferred_proper_nouns(task_title)
 
+    if has_unresolved_placeholder_reference(task_title):
+        print("[Clarification Guard] unresolved placeholder reference after rewrite; routing to clarification")
+        task_title = f"Clarify next action: {original_clean_title or parsed['clean_title']}"
+
     return parsed, task_title, due_date
 
 
@@ -3224,6 +3279,12 @@ assert starts_with_action_verb("Bulk up starter for workshop") is True
 assert is_immediately_actionable_operational_task("Bulk up starter for workshop") is True
 assert needs_ai_cleanup("Bulk up starter for workshop") is False
 assert needs_action_verb("Bulk up starter for workshop") is False
+assert has_unresolved_placeholder_reference("Fix this") is True
+assert needs_ai_cleanup("Fix this") is True
+assert is_still_vague("Fix this") is True
+assert has_unresolved_placeholder_reference("Fix Bread Basket login issue") is False
+assert needs_ai_cleanup("Fix Bread Basket login issue") is False
+assert has_unresolved_placeholder_reference("Check execution rankings for issues") is False
 
 # This must not require AI helper cells, which are defined later in the notebook.
 _, _struct_title, _struct_due = prepare_task_title({"text": "Change furnace filter this weekend"}, allow_ai=False)
@@ -5146,42 +5207,103 @@ def is_command_checkbox(text):
 
 
 
-def clarification_mode(task_title):
-    """Return the clarification generation mode for a task title.
+def clarification_mode_reason(task_title):
+    """Return (mode, reason) for clarification generation telemetry.
 
-    procedural: concrete physical/setup tasks.
-    analytical: audit/validation/review tasks where the first useful step is
-    to inspect evidence and identify anomalies, not gather inputs.
-    define_context: delegated to existing clarification_route().
+    Analytical mode is for evaluation/audit tasks. It should generate
+    outcome-producing first steps, not prerequisite-gathering steps.
     """
     route = clarification_route(task_title, allow_ai=True)
     if route == "define_context":
-        return "define_context"
+        return "define_context", "route_define_context"
 
-    text = (task_title or "").lower()
+    text = (task_title or "").lower().strip()
     analytical_terms = [
         "audit", "validate", "validation", "compare", "review", "analyze",
         "analyse", "inspect", "diagnose", "investigate", "verify", "confirm",
         "reconcile", "reconciliation", "rank", "ranking", "rankings", "metadata",
         "telemetry", "log", "logs", "report", "reports", "dashboard",
         "anomaly", "anomalies", "discrepancy", "discrepancies", "governance",
-        "ontology", "baseline", "score", "scoring",
+        "ontology", "baseline", "score", "scoring", "quality", "health",
+        "regression", "regressions", "drift", "stability",
     ]
-    analytical_prefixes = ("aios:", "audit ", "validate ", "verify ", "review ", "compare ")
+    analytical_prefixes = (
+        "aios:", "audit ", "validate ", "verify ", "review ", "compare ",
+        "inspect ", "analyze ", "analyse ", "diagnose ",
+    )
 
-    if text.strip().startswith(analytical_prefixes) or any(term in text for term in analytical_terms):
-        return "analytical"
+    if text.startswith(analytical_prefixes):
+        return "analytical", "analytical_prefix"
 
-    return "procedural"
+    matches = [term for term in analytical_terms if term in text]
+    if matches:
+        return "analytical", "analytical_terms=" + ",".join(matches[:4])
+
+    return "procedural", "default_procedural"
+
+
+def clarification_mode(task_title):
+    """Return the clarification generation mode for a task title."""
+    return clarification_mode_reason(task_title)[0]
 
 
 def clarification_prompt_for_mode(task_title):
-    mode = clarification_mode(task_title)
+    mode, reason = clarification_mode_reason(task_title)
+    print(f"[Clarification Mode] version={CLARIFICATION_ANALYTICAL_MODE_VERSION}; mode={mode}; reason={reason}; task={task_title}")
     if mode == "define_context":
         return DEFINE_PROMPT
     if mode == "analytical":
         return ANALYTICAL_CHOOSE_PROMPT
     return CHOOSE_PROMPT
+
+
+def clean_clarification_suggestions(raw_suggestions, mode, task_title):
+    """Normalize and guard clarification suggestions.
+
+    Prompting alone was allowing analytical tasks to degrade into tool-centric
+    preparation steps such as retrieve/open/download. This post-filter keeps
+    analytical options focused on outcomes: findings, discrepancies, anomalies,
+    or decisions.
+    """
+    cleaned = []
+    seen = set()
+    banned_analytical_prefixes = (
+        "access ", "retrieve ", "download ", "open ", "locate ", "find the ",
+        "gather ", "collect ", "prepare ", "create a spreadsheet",
+        "make a spreadsheet", "export ", "pull ", "get the ",
+    )
+
+    for item in raw_suggestions:
+        s = (item or "").strip().strip("-•0123456789. ").strip()
+        if not s:
+            continue
+        low = s.lower()
+        if mode == "analytical" and low.startswith(banned_analytical_prefixes):
+            print(f"[Clarification Filter] dropped_non_outcome_step={s}")
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        cleaned.append(s)
+
+    if mode == "analytical" and len(cleaned) < 2:
+        fallback = [
+            "Review top-ranked tasks for obvious scoring anomalies",
+            "Compare top-ranked tasks against their underlying metadata",
+            "Identify rankings inconsistent with Urgency, Importance, or Due Date",
+            "Document the first ranking discrepancy found",
+        ]
+        for s in fallback:
+            low = s.lower()
+            if low not in seen:
+                cleaned.append(s)
+                seen.add(low)
+            if len(cleaned) >= 4:
+                break
+        print(f"[Clarification Fallback] analytical_defaults_applied; task={task_title}")
+
+    limit = 5 if mode != "analytical" else 4
+    return cleaned[:limit]
 
 def append_clarification_blocks(page_id, original_task, suggestions):
     children = [
@@ -5298,8 +5420,8 @@ def get_checked_clarification_action(page_id):
 # In[52]:
 
 def generate_clarification_suggestions(task_title):
-    mode = clarification_mode(task_title)
-    print(f"[Clarification] mode={mode}; task={task_title}")
+    mode, reason = clarification_mode_reason(task_title)
+    print(f"[Clarification] version={CLARIFICATION_ANALYTICAL_MODE_VERSION}; mode={mode}; reason={reason}; task={task_title}")
 
     if mode == "define_context":
         prompt = f"""
@@ -5376,14 +5498,15 @@ Task: {task_title}
 
         output = response.output_text.strip()
 
-        suggestions = [
+        raw_suggestions = [
             line.strip("- ").strip()
             for line in output.splitlines()
             if line.strip()
         ]
+        suggestions = clean_clarification_suggestions(raw_suggestions, mode, task_title)
 
-        print(f"[Clarification] suggestions_generated={len(suggestions[:5])}; mode={mode}")
-        return suggestions[:5]
+        print(f"[Clarification] suggestions_generated={len(suggestions)}; raw={len(raw_suggestions)}; mode={mode}")
+        return suggestions
 
     except Exception as e:
         print("AI suggestion generation failed:", e)
@@ -5417,8 +5540,8 @@ def get_existing_clarification_suggestions(page_id):
 
 def generate_more_clarification_suggestions(task_title, existing_suggestions):
     existing_text = "\n".join(f"- {s}" for s in existing_suggestions)
-    mode = clarification_mode(task_title)
-    print(f"[Clarification] generate_more mode={mode}; existing={len(existing_suggestions)}; task={task_title}")
+    mode, reason = clarification_mode_reason(task_title)
+    print(f"[Clarification] generate_more version={CLARIFICATION_ANALYTICAL_MODE_VERSION}; mode={mode}; reason={reason}; existing={len(existing_suggestions)}; task={task_title}")
 
     if mode == "define_context":
         prompt = f"""
@@ -5486,12 +5609,13 @@ Existing suggestions:
 
         output = response.output_text.strip()
 
-        suggestions = [
+        raw_suggestions = [
             line.strip("- ").strip()
             for line in output.splitlines()
             if line.strip()
-        ][:3]
-        print(f"[Clarification] additional_suggestions_generated={len(suggestions)}; mode={mode}")
+        ]
+        suggestions = clean_clarification_suggestions(raw_suggestions, mode, task_title)[:3]
+        print(f"[Clarification] additional_suggestions_generated={len(suggestions)}; raw={len(raw_suggestions)}; mode={mode}")
         return suggestions
 
     except Exception as e:
