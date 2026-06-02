@@ -790,7 +790,6 @@ ADD_OWN_OPTION_COMMAND = "✏️ Add your own checkbox above, then check it"
 
 CLARIFY_HEADER = "🔍 Clarify next action"
 CHOOSE_PROMPT = "💡 Choose the first action you would take:"
-ANALYTICAL_CHOOSE_PROMPT = "💡 Choose the first outcome-producing step:"
 DEFINE_PROMPT = "💡 Answer one question to define this task:"
 
 # In[11]:
@@ -5144,45 +5143,6 @@ def is_command_checkbox(text):
 
 # In[50]:
 
-
-
-def clarification_mode(task_title):
-    """Return the clarification generation mode for a task title.
-
-    procedural: concrete physical/setup tasks.
-    analytical: audit/validation/review tasks where the first useful step is
-    to inspect evidence and identify anomalies, not gather inputs.
-    define_context: delegated to existing clarification_route().
-    """
-    route = clarification_route(task_title, allow_ai=True)
-    if route == "define_context":
-        return "define_context"
-
-    text = (task_title or "").lower()
-    analytical_terms = [
-        "audit", "validate", "validation", "compare", "review", "analyze",
-        "analyse", "inspect", "diagnose", "investigate", "verify", "confirm",
-        "reconcile", "reconciliation", "rank", "ranking", "rankings", "metadata",
-        "telemetry", "log", "logs", "report", "reports", "dashboard",
-        "anomaly", "anomalies", "discrepancy", "discrepancies", "governance",
-        "ontology", "baseline", "score", "scoring",
-    ]
-    analytical_prefixes = ("aios:", "audit ", "validate ", "verify ", "review ", "compare ")
-
-    if text.strip().startswith(analytical_prefixes) or any(term in text for term in analytical_terms):
-        return "analytical"
-
-    return "procedural"
-
-
-def clarification_prompt_for_mode(task_title):
-    mode = clarification_mode(task_title)
-    if mode == "define_context":
-        return DEFINE_PROMPT
-    if mode == "analytical":
-        return ANALYTICAL_CHOOSE_PROMPT
-    return CHOOSE_PROMPT
-
 def append_clarification_blocks(page_id, original_task, suggestions):
     children = [
         {
@@ -5207,7 +5167,7 @@ def append_clarification_blocks(page_id, original_task, suggestions):
                     {
                         "type": "text",
                         "text": {
-                            "content": clarification_prompt_for_mode(original_task)
+                            "content": DEFINE_PROMPT if clarification_route(original_task, allow_ai=True) == "define_context" else CHOOSE_PROMPT
                         }
                     }
                 ]
@@ -5298,10 +5258,7 @@ def get_checked_clarification_action(page_id):
 # In[52]:
 
 def generate_clarification_suggestions(task_title):
-    mode = clarification_mode(task_title)
-    print(f"[Clarification] mode={mode}; task={task_title}")
-
-    if mode == "define_context":
+    if clarification_route(task_title, allow_ai=True) == "define_context":
         prompt = f"""
 This task needs more context before it can become a clear next action.
 
@@ -5314,34 +5271,6 @@ Rules:
 - Do not suggest actions like email, call, or text
 - Do not include numbering or bullets
 - No extra text
-
-Task: {task_title}
-"""
-    elif mode == "analytical":
-        prompt = f"""
-Rewrite this analytical or audit-oriented task into outcome-producing first-step options.
-
-Goal:
-Generate options that let a knowledgeable human begin evaluating the work itself, not merely gather files or open tools.
-
-Rules:
-- Generate only distinct, meaningful options (2–4 total)
-- Each option must produce an evaluative outcome, finding, discrepancy, anomaly, or decision
-- Prefer review, compare, validate, identify, inspect, verify, sample, or document when appropriate
-- Do NOT split a combined evaluation into separate options for each field or keyword
-- Do NOT suggest merely accessing, retrieving, downloading, opening, preparing, or creating a spreadsheet unless the task explicitly asks for that artifact
-- Do NOT ask the user to gather prerequisites when the task already states the artifact or scope
-- Start with a verb
-- Be immediately executable
-- Keep each option under 14 words
-- Do not include numbering or bullets
-- No extra text
-
-Good examples:
-Review the top-ranked tasks for obvious scoring anomalies
-Compare top-ranked tasks against their underlying metadata
-Identify rankings that appear inconsistent with Urgency, Importance, or Due Date
-Document the first ranking discrepancy found
 
 Task: {task_title}
 """
@@ -5382,13 +5311,11 @@ Task: {task_title}
             if line.strip()
         ]
 
-        print(f"[Clarification] suggestions_generated={len(suggestions[:5])}; mode={mode}")
         return suggestions[:5]
 
     except Exception as e:
         print("AI suggestion generation failed:", e)
         return []
-
 
 # In[53]:
 
@@ -5417,10 +5344,8 @@ def get_existing_clarification_suggestions(page_id):
 
 def generate_more_clarification_suggestions(task_title, existing_suggestions):
     existing_text = "\n".join(f"- {s}" for s in existing_suggestions)
-    mode = clarification_mode(task_title)
-    print(f"[Clarification] generate_more mode={mode}; existing={len(existing_suggestions)}; task={task_title}")
 
-    if mode == "define_context":
+    if clarification_route(task_title, allow_ai=True) == "define_context":
         prompt = f"""
 Generate 2–3 additional clarification questions for this task that needs more context.
 
@@ -5435,26 +5360,6 @@ Rules:
 Task: {task_title}
 
 Existing questions:
-{existing_text}
-"""
-    elif mode == "analytical":
-        prompt = f"""
-Generate 2–3 additional outcome-producing analytical first steps for this task.
-
-Rules:
-- Do not repeat or lightly rephrase existing suggestions
-- Each option must produce an evaluative outcome, finding, discrepancy, anomaly, or decision
-- Do NOT split one evaluation into separate options for each field or keyword
-- Do NOT suggest merely accessing, retrieving, downloading, opening, preparing, or creating a spreadsheet unless explicitly requested
-- Start with a verb
-- Be immediately executable
-- Keep each option under 14 words
-- Do not include numbering or bullets
-- No extra text
-
-Task: {task_title}
-
-Existing suggestions:
 {existing_text}
 """
     else:
@@ -5486,18 +5391,15 @@ Existing suggestions:
 
         output = response.output_text.strip()
 
-        suggestions = [
+        return [
             line.strip("- ").strip()
             for line in output.splitlines()
             if line.strip()
         ][:3]
-        print(f"[Clarification] additional_suggestions_generated={len(suggestions)}; mode={mode}")
-        return suggestions
 
     except Exception as e:
         print("AI generate-more failed:", e)
         return []
-
 
 # In[55]:
 
