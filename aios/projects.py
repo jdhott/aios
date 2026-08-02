@@ -32,6 +32,9 @@ RUN_PROJECT_RELATION_WRITEBACK = False
 RUN_PROJECT_STUB_CREATION = False
 PROJECT_RELATION_WRITEBACK_RAW = None
 PROJECT_CANDIDATE_MIN_RELATED_TASKS = 1
+RUN_EXISTING_TASK_PROJECT_DISCOVERY = os.getenv("RUN_EXISTING_TASK_PROJECT_DISCOVERY", "true").strip().lower() in {"1", "true", "yes", "on"}
+PROJECT_DISCOVERY_SCAN_LIMIT = int(os.getenv("PROJECT_DISCOVERY_SCAN_LIMIT", "50"))
+PROJECT_REVIEW_LINK_STUBS = os.getenv("PROJECT_REVIEW_LINK_STUBS", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 # ============================================================
 # B2 RUNTIME PERFORMANCE FLAGS
@@ -600,6 +603,78 @@ def get_open_tasks_for_project_candidate_scan():
         page_size=globals().get('PROJECT_CANDIDATE_SCAN_LIMIT', 25),
     )
 
+
+
+def task_has_project_relation(task):
+    """Return True when a task already has any Project relation."""
+    if not task:
+        return False
+    prop = (task.get("properties", {}) or {}).get(TASK_PROJECT_RELATION_PROPERTY, {})
+    return bool(prop.get("relation") or [])
+
+
+def get_existing_unprojected_tasks_for_discovery(open_tasks):
+    """Return existing open tasks eligible for retroactive project emergence.
+
+    This is intentionally review-oriented: tasks already assigned to a Project
+    are excluded, as are clarification placeholders and child tasks.
+    """
+    eligible = []
+    for task in open_tasks or []:
+        if task_has_project_relation(task):
+            continue
+        if get_parent_task_id(task):
+            continue
+        title = get_title(task)
+        if not title or title.lower().startswith("clarify next action:"):
+            continue
+        eligible.append(task)
+    return eligible[:globals().get("PROJECT_DISCOVERY_SCAN_LIMIT", 50)]
+
+
+def set_review_project_relation_if_empty(task, project, suggested_project):
+    """Link a task to an inactive project stub strictly for manual review.
+
+    The inactive Project row is the review object:
+    - rename the project row to edit the proposed project name;
+    - remove/add task relations to edit membership;
+    - change project Status to Active to confirm the reviewed project.
+
+    Existing Project relations are never overwritten.
+    """
+    if not globals().get("PROJECT_REVIEW_LINK_STUBS", True):
+        return False
+    if not task or not project or task.get("dry_run"):
+        return False
+    if is_active_project(project):
+        return False
+    if task_has_project_relation(task):
+        return False
+    if TEST_MODE or DRY_RUN:
+        return False
+
+    title = get_title(task)
+    response = requests.patch(
+        f"https://api.notion.com/v1/pages/{task['id']}",
+        headers=headers,
+        json={
+            "properties": {
+                TASK_PROJECT_RELATION_PROPERTY: {
+                    "relation": [{"id": project["id"]}]
+                }
+            }
+        },
+        timeout=30,
+    )
+    if response.ok:
+        increment_summary("project_relation_updates")
+        print(f"Set REVIEW Project relation: {title} → {get_title(project)} (inactive; manual review required)")
+        return True
+
+    increment_summary("errors")
+    print("ERROR setting review Project relation:", title)
+    print(response.status_code, response.text)
+    return False
 
 
 
@@ -4012,16 +4087,20 @@ def apply_project_candidate_writeback(seed_task, result, open_tasks, all_project
 
     existing_project = find_project_by_name(suggested_project, all_projects)
     project, score, reason = find_existing_project_match(suggested_project, active_projects)
+    review_project = None
 
     if not project and existing_project:
         existing_status = get_project_status_name(existing_project)
         reason = f"Suggested project already exists but is not active: Status={existing_status!r}."
+        review_project = existing_project
     elif not project and not existing_project:
-        create_inactive_project_stub_if_missing(
+        review_project = create_inactive_project_stub_if_missing(
             suggested_project,
             existing_projects=all_projects,
             source_reason=reason,
         )
+        if review_project:
+            all_projects.append(review_project)
 
     tasks_by_title = {}
     for task in [seed_task] + list(open_tasks or []):
@@ -4053,6 +4132,11 @@ def apply_project_candidate_writeback(seed_task, result, open_tasks, all_project
 
         if project:
             if set_project_relation_if_safe(task, project, suggested_project, score, reason):
+                updated_count += 1
+        elif review_project:
+            # M1.2: inactive stubs are explicit review objects. Linking is safe
+            # only when the task has no existing Project relation.
+            if set_review_project_relation_if_empty(task, review_project, suggested_project):
                 updated_count += 1
         else:
             increment_summary("project_relation_skipped")
@@ -4157,11 +4241,18 @@ def run_project_candidate_detector():
         return []
 
     source_tasks = get_project_candidate_source_tasks()
-    if not source_tasks:
-        print("Project candidate detector: no newly created top-level tasks to review.")
-        return []
-
     open_tasks = get_open_tasks_for_project_candidate_scan()
+
+    # M1.2 retroactive emergence: existing unprojected tasks can seed project
+    # discovery even when no new Brain Dump item was created in this run.
+    if globals().get("RUN_EXISTING_TASK_PROJECT_DISCOVERY", True):
+        existing_sources = get_existing_unprojected_tasks_for_discovery(open_tasks)
+        seen_ids = {task.get("id") for task in source_tasks}
+        source_tasks.extend(task for task in existing_sources if task.get("id") not in seen_ids)
+
+    if not source_tasks:
+        print("Project candidate detector: no eligible new or existing unprojected tasks to review.")
+        return []
     operational_context_tasks = (
         build_operational_context_task_set(
             open_tasks
@@ -4176,7 +4267,7 @@ def run_project_candidate_detector():
         seed_task="Telemetry Runtime Validation",
         notes="B2 telemetry pipeline test event",
     )
-    print(f"Reviewing {len(source_tasks)} newly created top-level task(s).")
+    print(f"Reviewing {len(source_tasks)} new/existing unprojected top-level task(s).")
     print(
         "Project relation write-back:",
         "enabled" if RUN_PROJECT_RELATION_WRITEBACK else "disabled",
@@ -4212,8 +4303,11 @@ def run_project_candidate_detector():
         print("Project stub creation disabled by RUN_PROJECT_STUB_CREATION.")
 
     detected = []
+    claimed_task_ids = set()
 
     for seed_task in source_tasks:
+        if seed_task.get("id") in claimed_task_ids:
+            continue
         seed_title = get_title(seed_task)
 
         print(f"[TRACE] Seed task: {seed_title}")
@@ -4644,6 +4738,18 @@ def run_project_candidate_detector():
         print_project_candidate(seed_title, result)
         log_project_candidate(seed_title, result)
         apply_project_candidate_writeback(seed_task, result, open_tasks, all_projects, active_projects)
+
+        # Do not emit the same cluster repeatedly from each member during one run.
+        selected_titles = {seed_title}
+        selected_titles.update(result.get("related_titles") or [])
+        selected_titles.update(
+            item.get("title") for item in (result.get("expanded_related_titles") or [])
+            if item.get("title")
+        )
+        for task in [seed_task] + list(open_tasks or []):
+            if get_title(task) in selected_titles:
+                claimed_task_ids.add(task.get("id"))
+
         increment_summary("project_candidates_detected")
         detected.append({
             "seed_title": seed_title,
