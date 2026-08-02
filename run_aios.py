@@ -2446,8 +2446,61 @@ def classify_effort(text):
     """Backward-compatible effort helper used during initial task creation."""
     return classify_effort_duration(text).get("effort")
 
+def parse_manual_project_tag(text):
+    """Extract an explicit manual project hint from a Brain Dump item.
+
+    Primary syntax:
+    - [Basement Recovery] Get flooring quote
+    - Get flooring quote [Basement Recovery]
+
+    A bracketed value is treated as a project hint only when it appears at the
+    beginning or end of the item. Known AIOS control flags such as [urgent] and
+    [JDI] remain normal task flags rather than becoming project hints.
+
+    Returns (clean_text, project_name). The hint is user intent and should not
+    remain in the final task title.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return raw, ""
+
+    reserved_flags = {
+        "jdi",
+        "just do it",
+        "urgent",
+        "asap",
+        "important",
+        "very important",
+        "high importance",
+    }
+
+    edge_patterns = [
+        re.compile(r"^\s*\[([^\[\]]+?)\]\s*(.*?)\s*$"),
+        re.compile(r"^\s*(.*?)\s*\[([^\[\]]+?)\]\s*$"),
+    ]
+
+    # Prefix: [Project Hint] Task title
+    match = edge_patterns[0].match(raw)
+    if match:
+        candidate = re.sub(r"\s+", " ", match.group(1)).strip(" -–—:|;\t")
+        remainder = match.group(2).strip()
+        if candidate and normalize(candidate) not in reserved_flags and remainder:
+            return remainder, candidate
+
+    # Suffix: Task title [Project Hint]
+    match = edge_patterns[1].match(raw)
+    if match:
+        remainder = match.group(1).strip()
+        candidate = re.sub(r"\s+", " ", match.group(2)).strip(" -–—:|;\t")
+        if candidate and normalize(candidate) not in reserved_flags and remainder:
+            return remainder, candidate
+
+    return raw, ""
+
+
 def parse_task_flags(text):
     original_text = text.strip()
+    text_without_project_tag, manual_project = parse_manual_project_tag(original_text)
 
     is_jdi = bool(
         re.search(r"\bJDI\b", original_text, flags=re.IGNORECASE)
@@ -2465,7 +2518,7 @@ def parse_task_flags(text):
         or re.search(r"\bhigh importance\b", original_text, flags=re.IGNORECASE)
     )
 
-    clean_title = original_text
+    clean_title = text_without_project_tag
 
     # Remove explicit execution / metadata flags. These are user-provided
     # control words, not part of the final task title.
@@ -2493,6 +2546,7 @@ def parse_task_flags(text):
         "jdi": is_jdi,
         "urgent": is_urgent,
         "important": is_important,
+        "manual_project": manual_project,
     }
 
 IMPORTANCE_HIGH_DOMAIN_PATTERNS = [
@@ -3887,6 +3941,32 @@ def run_importance_decision_tests():
     print(f"\nImportance decision results: {passed} passed, {failed} failed")
     return failed == 0
 
+def run_manual_project_tag_tests():
+    """Regression tests for low-friction Brain Dump project hints."""
+    cases = [
+        ("[Basement Recovery] Get flooring quote", "Get flooring quote", "Basement Recovery"),
+        ("Get flooring quote [Basement Recovery]", "Get flooring quote", "Basement Recovery"),
+        ("[basement] Call flooring contractor", "Call flooring contractor", "basement"),
+        ("JDI Call flooring contractor [Basement Recovery]", "Call flooring contractor", "Basement Recovery"),
+        ("[urgent] Call flooring contractor", "Call flooring contractor", ""),
+        ("Call flooring contractor [important]", "Call flooring contractor", ""),
+        ("Discuss [Basement Recovery] naming", "Discuss Basement Recovery naming", ""),
+        ("Buy milk", "Buy milk", ""),
+    ]
+    ok = True
+    for raw, expected_title, expected_project in cases:
+        parsed = parse_task_flags(raw)
+        actual_title = parsed.get("clean_title")
+        actual_project = parsed.get("manual_project")
+        passed = actual_title == expected_title and actual_project == expected_project
+        print(
+            f"{'PASS' if passed else 'FAIL'} manual project hint: {raw!r} "
+            f"-> title={actual_title!r}, project={actual_project!r}"
+        )
+        ok = ok and passed
+    return ok
+
+
 def run_task_classification_tests():
     """Run all local task tests. Safe: no AI calls and no Notion writes."""
     action_ok = run_action_rewrite_tests()
@@ -3899,6 +3979,7 @@ def run_task_classification_tests():
     non_task_ok = run_non_task_routing_tests()
     effort_duration_ok = run_effort_duration_decision_tests()
     importance_ok = run_importance_decision_tests()
+    manual_project_tag_ok = run_manual_project_tag_tests()
 
     all_ok = (
         action_ok
@@ -3911,6 +3992,7 @@ def run_task_classification_tests():
         and non_task_ok
         and effort_duration_ok
         and importance_ok
+        and manual_project_tag_ok
     )
     print("\n✅ All task classification tests passed" if all_ok else "\n❌ Some task classification tests failed")
     return all_ok
@@ -4830,11 +4912,28 @@ def has_property(task, property_name):
 
 
 def get_task_id_set(tasks):
-    """Return non-empty Notion page IDs from a list of task/page-like objects."""
+    """Return non-empty Notion page IDs from task/page-like objects.
+
+    Execution Engine V2 returns BNA winners as ranked-item dictionaries with the
+    Notion page stored under ``item["task"]`` rather than as raw page objects.
+    Quick Win surfacing consumes both shapes, so normalize IDs here before any
+    overlap checks.
+    """
     ids = set()
-    for task in tasks or []:
-        if isinstance(task, dict) and task.get("id"):
-            ids.add(task["id"])
+    for item in tasks or []:
+        if not isinstance(item, dict):
+            continue
+
+        # Raw Notion page payload shape.
+        if item.get("id"):
+            ids.add(item["id"])
+            continue
+
+        # Execution Engine ranked-item shape: {"task": <Notion page>, ...}.
+        nested_task = item.get("task")
+        if isinstance(nested_task, dict) and nested_task.get("id"):
+            ids.add(nested_task["id"])
+
     return ids
 
 
@@ -4941,37 +5040,58 @@ def refresh_surfaced_quick_wins(open_tasks, bna_tasks=None, limit=None):
         limit=limit,
     )
     selected_ids = get_task_id_set(selected)
+    bna_ids = get_task_id_set(bna_tasks)
 
     changed = 0
+    quick_win_overlap_cleared = 0
     for task in open_tasks:
-        if not has_property(task, SURFACED_QUICK_WIN_PROPERTY):
-            continue
-
         props = task.get("properties", {}) or {}
-        current = get_checkbox_value(props, SURFACED_QUICK_WIN_PROPERTY)
-        desired = task.get("id") in selected_ids
+        task_id = task.get("id")
 
-        if current == desired:
+        updates = {}
+
+        # Governance rule: a task may not be both Best Next Action and Quick Win.
+        # Earlier versions only excluded BNA winners from the capped
+        # `Surfaced Quick Win` lane, while leaving the underlying `Quick Win`
+        # eligibility checkbox set. That still allowed Notion views filtering on
+        # `Quick Win` to show the same task in both sections. Clear the eligibility
+        # flag for active BNA winners so both old and new Quick Win views agree.
+        if (
+            task_id in bna_ids
+            and has_property(task, QUICK_WIN_PROPERTY)
+            and get_checkbox_value(props, QUICK_WIN_PROPERTY)
+        ):
+            updates[QUICK_WIN_PROPERTY] = {"checkbox": False}
+
+        if has_property(task, SURFACED_QUICK_WIN_PROPERTY):
+            current = get_checkbox_value(props, SURFACED_QUICK_WIN_PROPERTY)
+            desired = task_id in selected_ids
+            if current != desired:
+                updates[SURFACED_QUICK_WIN_PROPERTY] = {"checkbox": desired}
+
+        if not updates:
             continue
 
         try:
-            update_notion_page(
-                task["id"],
-                {
-                    SURFACED_QUICK_WIN_PROPERTY: {
-                        "checkbox": desired
-                    }
-                },
-            )
+            update_notion_page(task["id"], updates)
             changed += 1
-            increment_summary("surfaced_quick_win_updates")
-            print(f"Updated Surfaced Quick Win: {get_title(task)} → {desired}")
+            if QUICK_WIN_PROPERTY in updates:
+                quick_win_overlap_cleared += 1
+                increment_summary("quick_win_updates")
+                print(f"Cleared Quick Win on BNA overlap: {get_title(task)}")
+            if SURFACED_QUICK_WIN_PROPERTY in updates:
+                increment_summary("surfaced_quick_win_updates")
+                print(
+                    f"Updated Surfaced Quick Win: {get_title(task)} → "
+                    f"{updates[SURFACED_QUICK_WIN_PROPERTY]['checkbox']}"
+                )
         except Exception as e:
             increment_summary("errors")
-            print(f"ERROR updating Surfaced Quick Win: {get_title(task)}")
+            print(f"ERROR updating Quick Win surfacing metadata: {get_title(task)}")
             print(e)
 
-    print(f"Surfaced Quick Win updates: {changed}")
+    print(f"Quick Win/BNA overlaps cleared: {quick_win_overlap_cleared}")
+    print(f"Surfaced Quick Win reconciliation updates: {changed}")
     return selected
 
 
@@ -6477,7 +6597,7 @@ def review_possible_duplicate_items(possible_matches):
 
     return reviewed_possible_items, possible_items_to_create_anyway
 
-def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None):
+def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
     """Create one task page in Notion.
 
     If parent_task_id is supplied, the new task is linked to that page through
@@ -6518,7 +6638,10 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
             "important": effective_is_important,
             "parent_task_id": parent_task_id,
             "step_order": step_order,
+            "manual_project": manual_project,
         }
+        if manual_project:
+            print(f"[DRY RUN] Would set Suggested Project (manual): {manual_project}")
         created_tasks.append(dry_run_task)
         increment_summary("tasks_created")
         if parent_task_id:
@@ -6548,6 +6671,9 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
             "Just Do It": {"checkbox": is_jdi},
         },
     }
+
+    if manual_project:
+        payload["properties"][SUGGESTED_PROJECT_PROPERTY] = _notion_rich_text(manual_project)
 
     if parent_task_id:
         payload["properties"][PARENT_TASK_PROPERTY] = {
@@ -6642,7 +6768,7 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
     )
     return None
 
-def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None):
+def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
     """Create one task, then apply AI metadata and Quick Win updates."""
     page = create_notion_task(
         task_title,
@@ -6652,6 +6778,7 @@ def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_importa
         due_date=due_date,
         parent_task_id=parent_task_id,
         step_order=step_order,
+        manual_project=manual_project,
     )
 
     if not page:
@@ -6663,7 +6790,7 @@ def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_importa
 
 
 
-def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None):
+def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, manual_project=""):
     """Create a parent task and linked child tasks for a breakdown item.
 
     The parent task keeps the original high-level title. Each generated subtask is
@@ -6688,6 +6815,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
                 is_urgent=is_urgent,
                 is_important=is_important,
                 due_date=due_date,
+                manual_project=manual_project,
             )
             return [page] if page else []
 
@@ -6703,6 +6831,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
+            manual_project=manual_project,
         )
 
         if not parent_page:
@@ -6721,6 +6850,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
                 due_date=due_date,
                 parent_task_id=parent_task_id,
                 step_order=step_order,
+                manual_project=manual_project,
             )
 
             if page:
@@ -6736,6 +6866,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
+            manual_project=manual_project,
         )
 
         if page:
@@ -6798,6 +6929,10 @@ def process_task_item(item):
     is_jdi = parsed["jdi"]
     is_urgent = parsed["urgent"]
     is_important = parsed.get("important", False)
+    manual_project = parsed.get("manual_project", "")
+
+    if manual_project:
+        print(f"Manual project hint: {original_title} → {manual_project}")
 
     if decision == "breakdown":
         task_pages_created = create_breakdown_tasks(
@@ -6806,6 +6941,7 @@ def process_task_item(item):
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
+            manual_project=manual_project,
         )
     elif decision == "clarify":
         if not task_title.lower().startswith("clarify next action:"):
@@ -6817,6 +6953,7 @@ def process_task_item(item):
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
+            manual_project=manual_project,
         )
         task_pages_created = [page] if page else []
     else:
@@ -6827,6 +6964,7 @@ def process_task_item(item):
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
+            manual_project=manual_project,
         )
         task_pages_created = [page] if page else []
 
@@ -7278,11 +7416,75 @@ def is_high_urgency(task):
     return get_select_or_status_name(props, "Urgency") == "High Urgency"
 
 
-def determine_execution_strategy(execution_task):
-    """Determine the operational execution strategy for a task."""
+def _task_text(execution_task):
+    """Return normalized task text for lightweight pattern inference."""
+    title = get_task_title(execution_task) or ""
+    props = execution_task.get("properties", {}) or {}
+    project = ""
+    for key in ("Project", "Suggested Project", "Area", "Context"):
+        try:
+            project = get_select_name(props, key) or project
+        except Exception:
+            pass
+    return f"{title} {project}".strip().lower()
 
-    title = get_task_title(execution_task).lower()
-    props = execution_task.get("properties", {})
+
+def is_simple_executable_task(execution_task):
+    """Return True when the title is already a clear, single-step action.
+
+    These tasks do not benefit from AI-generated execution guidance. Showing
+    extra advice for them tends to create generic or awkward text such as
+    "do the smallest complete version...".
+    """
+
+    title = (get_task_title(execution_task) or "").strip()
+    if not title:
+        return False
+
+    lowered = title.lower()
+
+    # Keep technical/change-management work eligible for generated guidance.
+    # A broad "check" task is often simple, but AIOS/runtime/code words usually
+    # indicate diagnostic work where guidance can still help.
+    complex_markers = [
+        "aios", "script", "package", "install", "deploy", "debug", "diagnose",
+        "investigate", "troubleshoot", "review", "logs", "telemetry",
+        "master plan", "release", "migration", "rollback", "smoke test",
+        "database", "firestore", "code", "execution ranking", "execution rankings",
+        "runtime", "evaluator", "metadata", "governance", "notion",
+    ]
+    if any(marker in lowered for marker in complex_markers):
+        return False
+
+    # Direct household/admin actions generally already contain their own first
+    # move. Guidance for these tends to be generic or actively silly.
+    simple_starts = (
+        "book ", "schedule ", "pay ", "renew ", "call ", "email ",
+        "message ", "send ", "submit ", "order ", "buy ", "pick up ",
+        "drop off ", "return ", "cancel ", "confirm ", "rsvp ",
+        "download ", "upload ", "print ", "scan ", "file ", "check ",
+        "look up ", "find ", "reply ", "reply to ", "text ",
+    )
+
+    if lowered.startswith(simple_starts):
+        return True
+
+    simple_contains = (
+        "appointment", "maintenance appointment", "health claim", "health claims",
+        "mileage", "audible", "invoice", "receipt", "license", "licence",
+        "reservation", "booking",
+    )
+    if any(marker in lowered for marker in simple_contains) and len(title.split()) <= 12:
+        return True
+
+    return False
+
+
+def determine_execution_strategy(execution_task):
+    """Infer a broad work pattern without assuming communications or stakeholders."""
+
+    text = _task_text(execution_task)
+    props = execution_task.get("properties", {}) or {}
 
     effort = get_select_name(props, "Effort")
     duration = get_select_name(props, "Duration")
@@ -7290,20 +7492,29 @@ def determine_execution_strategy(execution_task):
     if is_breakdown_step(execution_task):
         return "workflow_unblock"
 
-    if any(word in title for word in ["inspect", "check", "review", "audit"]):
-        return "diagnostic_pass"
+    if is_simple_executable_task(execution_task):
+        return "simple_executable"
 
-    if any(word in title for word in ["repair", "fix", "replace"]):
-        return "repair_batch"
+    if any(word in text for word in ["install", "deploy", "package", "script", "update script", "migration", "release", "version", "smoke test"]):
+        return "implementation_change"
 
-    if any(word in title for word in ["email", "message", "call", "reply", "send"]):
-        return "coordination_batch"
+    if any(word in text for word in ["diagnose", "debug", "troubleshoot", "inspect", "check", "review", "audit", "investigate", "why", "logs", "telemetry"]):
+        return "investigation"
 
-    if any(word in title for word in ["write", "draft", "slides", "workshop", "plan", "design"]):
-        return "deep_work"
+    if any(word in text for word in ["fix", "repair", "replace", "resolve", "correct", "cleanup bug", "bug"]):
+        return "repair"
 
-    if any(word in title for word in ["clean", "organize", "sort", "tidy"]):
-        return "cleanup_sweep"
+    if any(word in text for word in ["write", "draft", "document", "notes", "release notes", "master plan", "post", "email draft"]):
+        return "writing_documentation"
+
+    if any(word in text for word in ["plan", "design", "map out", "outline", "workshop", "schedule", "coordinate"]):
+        return "planning"
+
+    if any(word in text for word in ["email", "message", "call", "reply", "send", "contact"]):
+        return "communication"
+
+    if any(word in text for word in ["clean", "organize", "sort", "tidy", "archive", "delete", "remove"]):
+        return "cleanup"
 
     if duration in ["5 min", "10 min", "15 min"]:
         return "quick_closure"
@@ -7313,40 +7524,97 @@ def determine_execution_strategy(execution_task):
 
     return "single_pass"
 
-def generate_execution_guidance(strategy, execution_task):
-    """Generate deterministic operational guidance."""
 
-    guidance = {
-        "diagnostic_pass": (
-            "Do a complete inspection pass before touching anything so you can batch decisions and avoid reopening the same work multiple times."
-        ),
-        "repair_batch": (
-            "Identify all required fixes first, then complete repairs in a single coordinated pass while tools and materials are already out."
-        ),
-        "coordination_batch": (
-            "Handle all related communication in one session to reduce follow-up overhead and context switching later."
-        ),
-        "deep_work": (
-            "Protect uninterrupted work time for this before reactive tasks begin consuming attention."
-        ),
-        "workflow_unblock": (
-            "Complete this first so downstream tasks can move forward without additional coordination delays."
-        ),
-        "cleanup_sweep": (
-            "Batch similar cleanup and reset actions together so the entire area can be fully closed in one pass."
-        ),
-        "quick_closure": (
-            "Finish this now to fully close the loop and remove it from mental overhead."
-        ),
-        "protected_work_block": (
-            "Treat this as a dedicated work block rather than trying to squeeze it between smaller operational tasks."
-        ),
-        "single_pass": (
-            "Complete this in one deliberate pass so the loop is fully closed and does not require re-entry."
-        ),
+def _strip_leading_action(title):
+    """Return a compact object phrase from a task title for generated guidance.
+
+    The returned phrase is normalized enough to avoid awkward combinations like
+    "current updated script" when guidance prepends words such as "current".
+    """
+    cleaned = (title or "this task").strip()
+    lowered = cleaned.lower()
+    for prefix in (
+        "install ", "deploy ", "update ", "review ", "check ", "inspect ",
+        "diagnose ", "debug ", "troubleshoot ", "fix ", "repair ", "replace ",
+        "write ", "draft ", "create ", "prepare ", "plan ", "design ",
+        "clean ", "organize ", "delete ", "remove ", "send ", "reply to ",
+    ):
+        if lowered.startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip() or cleaned
+            lowered = cleaned.lower()
+            break
+
+    for modifier in ("updated ", "new ", "replacement ", "revised "):
+        if lowered.startswith(modifier):
+            cleaned = cleaned[len(modifier):].strip() or cleaned
+            break
+
+    return cleaned
+
+
+def generate_execution_guidance(strategy, execution_task):
+    """Generate task-specific, deterministic execution guidance.
+
+    This intentionally avoids hard-coded guidance for individual tasks. It uses a
+    broad task pattern plus the task title to produce a concrete first move and a
+    simple completion cue.
+    """
+
+    title = get_task_title(execution_task) or "this task"
+    target = _strip_leading_action(title)
+
+    first_moves = {
+        "simple_executable": "",
+        "implementation_change": f"Locate the current {target}, the updated or replacement version, and the install or rollback instructions before changing anything.",
+        "investigation": f"Start by reproducing or locating the specific symptom for {target}, then gather the relevant logs, inputs, and code path before making a change.",
+        "repair": f"Identify the exact failure point for {target} and confirm the smallest safe fix before editing related pieces.",
+        "writing_documentation": f"Open the current source material for {target} and mark the sections that need to change before rewriting anything.",
+        "planning": f"List the required decisions for {target} first, then turn those decisions into the next concrete step.",
+        "communication": f"Confirm the recipient, purpose, and one desired outcome for {target} before writing or sending anything.",
+        "workflow_unblock": f"Find the downstream work currently blocked by {target} and complete the smallest step that clears that blockage.",
+        "cleanup": f"Identify the exact set of items included in {target} and separate keep, change, and remove decisions before acting.",
+        "quick_closure": f"Do the smallest complete version of {target} now so it can be closed without another pass.",
+        "protected_work_block": f"Define the first deliverable for {target} and protect a focused block long enough to produce it.",
+        "single_pass": f"Clarify the next physical or digital action for {target}, then complete that step before switching contexts.",
     }
 
-    return guidance.get(strategy, guidance["single_pass"])
+    success_looks_like = {
+        "simple_executable": "",
+        "implementation_change": "The update is installed, rollback remains available, and a basic verification or smoke test passes.",
+        "investigation": "The cause is identified well enough that the next fix is obvious or the task can be converted into a specific follow-up.",
+        "repair": "The failing behavior is corrected and the affected path has been checked once after the change.",
+        "writing_documentation": "A usable draft or updated document exists and only refinement remains.",
+        "planning": "The next concrete action is clear enough to execute without re-planning.",
+        "communication": "The message is sent or ready to send, and the expected response or next step is clear.",
+        "workflow_unblock": "The blocked downstream work can proceed without waiting on this item.",
+        "cleanup": "The target area or list is reduced to only items that still need intentional follow-up.",
+        "quick_closure": "The task is fully closed and no reminder or re-entry is needed.",
+        "protected_work_block": "A meaningful chunk is completed, not merely opened or skimmed.",
+        "single_pass": "The next concrete step is completed and the task is either closed or clearly advanced.",
+    }
+
+    risks = {
+        "implementation_change": "Skipping verification after the change or updating the wrong version.",
+        "investigation": "Changing code before the symptom and code path are confirmed.",
+        "repair": "Expanding the fix beyond the smallest safe correction.",
+        "writing_documentation": "Rewriting before confirming what actually changed.",
+        "planning": "Staying in planning mode after the next executable step is already clear.",
+        "communication": "Sending a message before the desired outcome is clear.",
+        "workflow_unblock": "Solving more than needed instead of clearing the immediate blocker.",
+        "cleanup": "Mixing cleanup with redesign and creating a larger project than intended.",
+    }
+
+    suppress_guidance = strategy == "simple_executable"
+
+    guidance = {
+        "first_move": first_moves.get(strategy, first_moves["single_pass"]),
+        "success_looks_like": success_looks_like.get(strategy, success_looks_like["single_pass"]),
+        "risk_to_watch": risks.get(strategy, ""),
+        "strategy": strategy,
+        "suppress_guidance": suppress_guidance,
+    }
+
+    return guidance
 
 def build_execution_dashboard_summary(execution_task):
 
@@ -7354,7 +7622,13 @@ def build_execution_dashboard_summary(execution_task):
         return {
             "execution_task": None,
             "reasons": [],
-            "approach": "No active Best Next Action selected."
+            "guidance": {
+                "first_move": "No active Best Next Action selected.",
+                "success_looks_like": "",
+                "risk_to_watch": "",
+                "strategy": "none",
+                "suppress_guidance": True,
+            }
         }
 
     reasons = []
@@ -7375,7 +7649,7 @@ def build_execution_dashboard_summary(execution_task):
 
     strategy = determine_execution_strategy(execution_task)
 
-    approach = generate_execution_guidance(
+    guidance = generate_execution_guidance(
         strategy,
         execution_task,
     )
@@ -7383,7 +7657,7 @@ def build_execution_dashboard_summary(execution_task):
     return {
         "execution_task": execution_task,
         "reasons": reasons,
-        "approach": approach,
+        "guidance": guidance,
     }
 
 def replace_dashboard_blocks(block_id, dashboard_data):
@@ -7415,7 +7689,11 @@ def replace_dashboard_blocks(block_id, dashboard_data):
 
     execution_task = dashboard_data["execution_task"]
     reasons = dashboard_data["reasons"]
-    approach = dashboard_data["approach"]
+    guidance = dashboard_data.get("guidance") or {}
+    suppress_guidance = bool(guidance.get("suppress_guidance"))
+    first_move = guidance.get("first_move") or "Clarify the next concrete action and complete it before switching contexts."
+    success_looks_like = guidance.get("success_looks_like") or "The task is clearly advanced or closed."
+    risk_to_watch = guidance.get("risk_to_watch") or ""
 
     payload = {
         "children": [
@@ -7468,28 +7746,73 @@ def replace_dashboard_blocks(block_id, dashboard_data):
             }
         })
 
-    payload["children"].extend([
-        {
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": {
-                "rich_text": [{
-                    "type": "text",
-                    "text": {"content": "Suggested approach"}
-                }]
-            }
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{
-                    "type": "text",
-                    "text": {"content": approach}
-                }]
-            }
-        },
-    ])
+    if not suppress_guidance:
+        payload["children"].extend([
+            {
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": "Suggested First Move"}
+                    }]
+                }
+            },
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": first_move}
+                    }]
+                }
+            },
+            {
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": "Success Looks Like"}
+                    }]
+                }
+            },
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": success_looks_like}
+                    }]
+                }
+            },
+        ])
+
+    if risk_to_watch and not suppress_guidance:
+        payload["children"].extend([
+            {
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": "Risk to Watch"}
+                    }]
+                }
+            },
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": risk_to_watch}
+                    }]
+                }
+            },
+        ])
 
     response = requests.patch(
         children_url,

@@ -3932,6 +3932,74 @@ def set_project_relation_if_safe(task, project, suggested_project, match_score, 
     return False
 
 
+def apply_manual_project_intent(seed_task, project_name, open_tasks, all_projects, active_projects):
+    """Honor an explicit Brain Dump project hint as user intent.
+
+    Manual intent is authoritative for naming. Tasks carrying the same Suggested
+    Project value are grouped for write-back. Existing active projects are linked
+    directly; missing projects become inactive review stubs. No fuzzy project
+    rename is performed on the manual name.
+    """
+    project_name = str(project_name or "").strip()
+    if not seed_task or not project_name:
+        return 0
+
+    exact_project = find_project_by_name(project_name, all_projects)
+    active_exact = exact_project if exact_project and is_active_project(exact_project) else None
+
+    if exact_project is None:
+        create_inactive_project_stub_if_missing(
+            project_name,
+            existing_projects=all_projects,
+            source_reason="Explicit project hint in Brain Dump.",
+        )
+
+    tagged_tasks = []
+    seen_ids = set()
+    for task in [seed_task] + list(open_tasks or []):
+        if not task or task.get("id") in seen_ids:
+            continue
+        suggested = get_rich_text_plain_value(
+            task.get("properties", {}),
+            SUGGESTED_PROJECT_PROPERTY,
+        )
+        if normalize(suggested) != normalize(project_name):
+            continue
+        seen_ids.add(task.get("id"))
+        tagged_tasks.append(task)
+
+    updated_count = 0
+    for task in tagged_tasks:
+        if active_exact:
+            if set_project_relation_if_safe(
+                task,
+                active_exact,
+                project_name,
+                1.0,
+                "Explicit project hint matched an existing active project exactly.",
+            ):
+                updated_count += 1
+        else:
+            increment_summary("project_relation_skipped")
+
+    print(
+        f"Manual project intent applied: {project_name} → "
+        f"{len(tagged_tasks)} tagged task(s); "
+        f"active_exact_match={'yes' if active_exact else 'no'}"
+    )
+    log_ai_processing_decision(
+        original=get_title(seed_task),
+        final_task=get_title(seed_task),
+        action="Project Tagged",
+        reason=f"Explicit Brain Dump project hint: {project_name}",
+        review_needed=active_exact is None,
+        confidence=1.0,
+        source="Brain Dump",
+        suggested_project=project_name,
+    )
+    return updated_count
+
+
 def apply_project_candidate_writeback(seed_task, result, open_tasks, all_projects, active_projects):
     """Apply Suggested Project and, when safe, the real Project relation.
 
@@ -4149,6 +4217,36 @@ def run_project_candidate_detector():
         seed_title = get_title(seed_task)
 
         print(f"[TRACE] Seed task: {seed_title}")
+
+        manual_project = get_rich_text_plain_value(
+            seed_task.get("properties", {}),
+            SUGGESTED_PROJECT_PROPERTY,
+        )
+        if manual_project:
+            print(
+                f"[MANUAL PROJECT INTENT] {seed_title} → {manual_project}; "
+                "manual naming takes precedence over AI project emergence."
+            )
+            apply_manual_project_intent(
+                seed_task,
+                manual_project,
+                open_tasks,
+                all_projects,
+                active_projects,
+            )
+            detected.append({
+                "seed_title": seed_title,
+                "result": {
+                    "should_group": True,
+                    "project_name": manual_project,
+                    "confidence": 1.0,
+                    "reason": "Explicit Brain Dump project hint.",
+                    "related_titles": [],
+                    "manual_project": True,
+                },
+            })
+            continue
+
         related_candidates = find_related_task_candidates(seed_task, open_tasks)
 
         if len(related_candidates) < globals().get('PROJECT_CANDIDATE_MIN_RELATED_TASKS', 1):
