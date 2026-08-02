@@ -921,13 +921,41 @@ def get_archive_sibling_parent_id():
     return BRAIN_DUMP_PAGE_ID
 
 def find_first_synced_block(parent_block_id):
+    """Return the synced block that actually contains Brain Dump task items.
+
+    Historically AIOS selected the first synced block on the page. That is
+    fragile when Notion leaves an empty/stale synced block ahead of the real
+    Brain Dump source. Prefer a synced block with at least one supported,
+    non-empty task block; fall back to the first synced block for compatibility.
+    """
     blocks = get_block_children(parent_block_id)
+    synced_blocks = [block for block in blocks if block.get("type") == "synced_block"]
 
-    for block in blocks:
-        if block.get("type") == "synced_block":
-            return block.get("id")
+    if not synced_blocks:
+        return None
 
-    return None
+    first_id = synced_blocks[0].get("id")
+    print(f"Brain Dump synced blocks found: {len(synced_blocks)}")
+
+    for index, block in enumerate(synced_blocks, start=1):
+        block_id = block.get("id")
+        if not block_id:
+            continue
+        children = get_block_children(block_id)
+        candidate_count = 0
+        for child in children:
+            if child.get("type") not in BRAIN_DUMP_TASK_BLOCK_TYPES:
+                continue
+            if get_block_text(child):
+                candidate_count += 1
+        print(f"  Synced block {index}: {block_id} — {candidate_count} candidate item(s)")
+        if candidate_count:
+            if block_id != first_id:
+                print(f"Brain Dump source fallback: using content-bearing synced block {block_id}")
+            return block_id
+
+    print("WARNING: no synced block on the Brain Dump page contains eligible task text")
+    return first_id
 
 
 def get_block_age_seconds(block):

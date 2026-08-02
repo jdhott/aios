@@ -4313,7 +4313,10 @@ Tasks:
         data = parse_json_object(raw)
         projects = data.get("projects") or [] if isinstance(data, dict) else []
     except Exception as exc:
-        print(f"Existing-task project discovery AI error: {exc}")
+        message = str(exc)
+        print(f"Existing-task project discovery AI error: {message}")
+        if "insufficient_quota" in message or "no credits remaining" in message.lower():
+            print("[PROJECT EMERGENCE] BLOCKED: OpenAI API credit balance is exhausted. Semantic discovery cannot run until API credits are available.")
         return []
 
     accepted = []
