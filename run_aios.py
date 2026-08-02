@@ -6719,6 +6719,11 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
 
     if response.ok:
         page = response.json()
+        # Runtime-only provenance: distinguish an explicit Brain Dump [project hint]
+        # from Suggested Project values later written by AI project emergence.
+        # This key is never persisted to Notion.
+        if manual_project:
+            page["_manual_project_hint"] = manual_project
         created_tasks.append(page)
         increment_summary("tasks_created")
         if parent_task_id:

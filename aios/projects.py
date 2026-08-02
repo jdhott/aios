@@ -33,8 +33,9 @@ RUN_PROJECT_STUB_CREATION = False
 PROJECT_RELATION_WRITEBACK_RAW = None
 PROJECT_CANDIDATE_MIN_RELATED_TASKS = 1
 RUN_EXISTING_TASK_PROJECT_DISCOVERY = os.getenv("RUN_EXISTING_TASK_PROJECT_DISCOVERY", "true").strip().lower() in {"1", "true", "yes", "on"}
-PROJECT_DISCOVERY_SCAN_LIMIT = int(os.getenv("PROJECT_DISCOVERY_SCAN_LIMIT", "50"))
+PROJECT_DISCOVERY_SCAN_LIMIT = int(os.getenv("PROJECT_DISCOVERY_SCAN_LIMIT", "100"))
 PROJECT_REVIEW_LINK_STUBS = os.getenv("PROJECT_REVIEW_LINK_STUBS", "true").strip().lower() in {"1", "true", "yes", "on"}
+PROJECT_DISCOVERY_MIN_CONFIDENCE = float(os.getenv("PROJECT_DISCOVERY_MIN_CONFIDENCE", "0.70"))
 
 # ============================================================
 # B2 RUNTIME PERFORMANCE FLAGS
@@ -4008,37 +4009,38 @@ def set_project_relation_if_safe(task, project, suggested_project, match_score, 
 
 
 def apply_manual_project_intent(seed_task, project_name, open_tasks, all_projects, active_projects):
-    """Honor an explicit Brain Dump project hint as user intent.
+    """Honor an explicit Brain Dump [project hint] as authoritative user intent.
 
-    Manual intent is authoritative for naming. Tasks carrying the same Suggested
-    Project value are grouped for write-back. Existing active projects are linked
-    directly; missing projects become inactive review stubs. No fuzzy project
-    rename is performed on the manual name.
+    M1.3 keeps manual intent separate from AI Suggested Project values. Tasks
+    carrying the same explicit hint in the current run share one review project.
+    Existing project rows are reused; a newly created inactive stub is appended
+    to the in-memory project list immediately so later tagged tasks cannot create
+    duplicates during the same run.
     """
     project_name = str(project_name or "").strip()
     if not seed_task or not project_name:
         return 0
 
     exact_project = find_project_by_name(project_name, all_projects)
-    active_exact = exact_project if exact_project and is_active_project(exact_project) else None
-
     if exact_project is None:
-        create_inactive_project_stub_if_missing(
+        exact_project = create_inactive_project_stub_if_missing(
             project_name,
             existing_projects=all_projects,
             source_reason="Explicit project hint in Brain Dump.",
         )
+        if exact_project:
+            all_projects.append(exact_project)
+
+    active_exact = exact_project if exact_project and is_active_project(exact_project) else None
+    review_project = exact_project if exact_project and not is_active_project(exact_project) else None
 
     tagged_tasks = []
     seen_ids = set()
-    for task in [seed_task] + list(open_tasks or []):
+    for task in [seed_task] + list(globals().get("created_tasks", [])):
         if not task or task.get("id") in seen_ids:
             continue
-        suggested = get_rich_text_plain_value(
-            task.get("properties", {}),
-            SUGGESTED_PROJECT_PROPERTY,
-        )
-        if normalize(suggested) != normalize(project_name):
+        explicit_hint = str(task.get("_manual_project_hint") or "").strip()
+        if normalize(explicit_hint) != normalize(project_name):
             continue
         seen_ids.add(task.get("id"))
         tagged_tasks.append(task)
@@ -4054,13 +4056,14 @@ def apply_manual_project_intent(seed_task, project_name, open_tasks, all_project
                 "Explicit project hint matched an existing active project exactly.",
             ):
                 updated_count += 1
-        else:
-            increment_summary("project_relation_skipped")
+        elif review_project:
+            if set_review_project_relation_if_empty(task, review_project, project_name):
+                updated_count += 1
 
     print(
         f"Manual project intent applied: {project_name} → "
         f"{len(tagged_tasks)} tagged task(s); "
-        f"active_exact_match={'yes' if active_exact else 'no'}"
+        f"project_match={'active' if active_exact else 'review' if review_project else 'none'}"
     )
     log_ai_processing_decision(
         original=get_title(seed_task),
@@ -4208,6 +4211,158 @@ print(
 )
 
 
+
+def get_tasks_for_existing_project_discovery():
+    """Fetch a broad set of open tasks for one batch emergence pass."""
+    limit = max(10, min(globals().get("PROJECT_DISCOVERY_SCAN_LIMIT", 100), 100))
+    filter_payload = {
+        "and": [
+            {"property": "Open Loop", "checkbox": {"equals": True}},
+            {"property": "Done", "checkbox": {"equals": False}},
+            {"property": "Archived", "checkbox": {"equals": False}},
+        ]
+    }
+    tasks = query_tasks_database(
+        filter_payload=filter_payload,
+        sorts=[{"timestamp": "last_edited_time", "direction": "descending"}],
+        page_size=limit,
+    )
+    eligible = []
+    for task in tasks or []:
+        if task_has_project_relation(task) or get_parent_task_id(task):
+            continue
+        title = get_title(task)
+        if not title or title.lower().startswith("clarify next action:"):
+            continue
+        if get_rich_text_plain_value(task.get("properties", {}), SUGGESTED_PROJECT_PROPERTY):
+            continue
+        eligible.append(task)
+    return eligible
+
+
+def ask_ai_existing_project_clusters(tasks):
+    """Partition existing unprojected tasks into zero or more outcome projects."""
+    if len(tasks or []) < 2:
+        return []
+
+    keyed = []
+    task_by_key = {}
+    for i, task in enumerate(tasks, start=1):
+        key = f"T{i:03d}"
+        keyed.append(f"{key} | {get_title(task)}")
+        task_by_key[key] = task
+
+    task_lines = "\n".join(keyed)
+    prompt = f"""Find emerging projects among the existing open tasks below.
+
+Return ONLY raw JSON with this shape:
+{{
+  "projects": [
+    {{
+      "project_name": "...",
+      "confidence": 0.0,
+      "reason": "...",
+      "member_keys": ["T001", "T002"]
+    }}
+  ]
+}}
+
+Rules:
+- A project is a set of 2 or more tasks that work toward one concrete outcome, deliverable, commitment, or coordinated change.
+- Projects may be finite and small. Do NOT require an ongoing or durable area of responsibility.
+- Semantic relationship matters more than shared words.
+- Shared topic/location alone is not enough. Look for a common outcome, workflow, or dependency.
+- Partition selectively: some related-looking tasks may belong; others may not.
+- You may return zero, one, or multiple projects.
+- Do not force every task into a project.
+- A task may belong to at most one proposed project in this pass.
+- Prefer specific natural project names such as "Pantry Shelving" rather than vague names such as "Pantry".
+- Do not invent tasks or facts. member_keys must come only from the list.
+- Strong example: Measure pantry for shelves + Buy shelves for pantry + Install shelves in pantry => Pantry Shelving.
+- Weak example: Clean pantry + Replace pantry light bulb + Check expiry dates => usually separate tasks unless there is clear evidence of one coordinated outcome.
+
+Tasks:
+{task_lines}
+"""
+    try:
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        raw = getattr(response, "output_text", "") or ""
+        data = parse_json_object(raw)
+        projects = data.get("projects") or [] if isinstance(data, dict) else []
+    except Exception as exc:
+        print(f"Existing-task project discovery AI error: {exc}")
+        return []
+
+    accepted = []
+    used_keys = set()
+    for item in projects:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("project_name") or "").strip()
+        try:
+            confidence = float(item.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        keys = []
+        for key in item.get("member_keys") or []:
+            if key in task_by_key and key not in used_keys and key not in keys:
+                keys.append(key)
+        if not name or confidence < globals().get("PROJECT_DISCOVERY_MIN_CONFIDENCE", 0.70) or len(keys) < 2:
+            continue
+        used_keys.update(keys)
+        accepted.append({
+            "project_name": name,
+            "confidence": confidence,
+            "reason": str(item.get("reason") or "").strip(),
+            "tasks": [task_by_key[key] for key in keys],
+        })
+    return accepted
+
+
+def run_existing_task_project_discovery(all_projects, active_projects):
+    """Run one review-only batch discovery pass over existing unprojected tasks."""
+    if not globals().get("RUN_EXISTING_TASK_PROJECT_DISCOVERY", True):
+        return []
+
+    tasks = get_tasks_for_existing_project_discovery()
+    print(f"[PROJECT EMERGENCE] Existing unprojected tasks eligible: {len(tasks)}")
+    if len(tasks) < 2:
+        return []
+
+    clusters = ask_ai_existing_project_clusters(tasks)
+    if not clusters:
+        print("[PROJECT EMERGENCE] No review-worthy existing-task clusters found.")
+        return []
+
+    results = []
+    for cluster in clusters:
+        name = cluster["project_name"]
+        existing = find_project_by_name(name, all_projects)
+        active = existing if existing and is_active_project(existing) else None
+        review = existing if existing and not is_active_project(existing) else None
+        if existing is None:
+            review = create_inactive_project_stub_if_missing(
+                name,
+                existing_projects=all_projects,
+                source_reason=f"Existing-task project emergence: {cluster.get('reason', '')}",
+            )
+            if review:
+                all_projects.append(review)
+
+        print(f"[PROJECT EMERGENCE] Suggested: {name} ({cluster['confidence']:.2f})")
+        for task in cluster["tasks"]:
+            title = get_title(task)
+            update_suggested_project_if_needed(task, name, source="Project Emergence")
+            if active:
+                set_project_relation_if_safe(task, active, name, 1.0, "Existing-task project emergence matched an active project exactly.")
+            elif review:
+                set_review_project_relation_if_empty(task, review, name)
+            print(f"  - {title}")
+
+        increment_summary("project_candidates_detected")
+        results.append(cluster)
+    return results
+
 def run_project_candidate_detector():
     """Detect likely project groupings for tasks created in this run.
 
@@ -4243,16 +4398,8 @@ def run_project_candidate_detector():
     source_tasks = get_project_candidate_source_tasks()
     open_tasks = get_open_tasks_for_project_candidate_scan()
 
-    # M1.2 retroactive emergence: existing unprojected tasks can seed project
-    # discovery even when no new Brain Dump item was created in this run.
-    if globals().get("RUN_EXISTING_TASK_PROJECT_DISCOVERY", True):
-        existing_sources = get_existing_unprojected_tasks_for_discovery(open_tasks)
-        seen_ids = {task.get("id") for task in source_tasks}
-        source_tasks.extend(task for task in existing_sources if task.get("id") not in seen_ids)
-
-    if not source_tasks:
-        print("Project candidate detector: no eligible new or existing unprojected tasks to review.")
-        return []
+    # M1.3: retroactive discovery is a separate batch partition pass. The legacy
+    # seed detector remains available for newly created tasks only.
     operational_context_tasks = (
         build_operational_context_task_set(
             open_tasks
@@ -4267,7 +4414,7 @@ def run_project_candidate_detector():
         seed_task="Telemetry Runtime Validation",
         notes="B2 telemetry pipeline test event",
     )
-    print(f"Reviewing {len(source_tasks)} new/existing unprojected top-level task(s).")
+    print(f"Reviewing {len(source_tasks)} newly created top-level task(s).")
     print(
         "Project relation write-back:",
         "enabled" if RUN_PROJECT_RELATION_WRITEBACK else "disabled",
@@ -4312,10 +4459,7 @@ def run_project_candidate_detector():
 
         print(f"[TRACE] Seed task: {seed_title}")
 
-        manual_project = get_rich_text_plain_value(
-            seed_task.get("properties", {}),
-            SUGGESTED_PROJECT_PROPERTY,
-        )
+        manual_project = str(seed_task.get("_manual_project_hint") or "").strip()
         if manual_project:
             print(
                 f"[MANUAL PROJECT INTENT] {seed_title} → {manual_project}; "
@@ -4328,6 +4472,9 @@ def run_project_candidate_detector():
                 all_projects,
                 active_projects,
             )
+            for task in source_tasks:
+                if normalize(str(task.get("_manual_project_hint") or "")) == normalize(manual_project):
+                    claimed_task_ids.add(task.get("id"))
             detected.append({
                 "seed_title": seed_title,
                 "result": {
@@ -4755,6 +4902,10 @@ def run_project_candidate_detector():
             "seed_title": seed_title,
             "result": result,
         })
+
+    emergence_results = run_existing_task_project_discovery(all_projects, active_projects)
+    if emergence_results:
+        detected.extend({"seed_title": "Existing Task Batch", "result": item} for item in emergence_results)
 
     if not detected:
         print("Project candidate detector: no review-worthy candidates found.")
