@@ -36,6 +36,8 @@ RUN_EXISTING_TASK_PROJECT_DISCOVERY = os.getenv("RUN_EXISTING_TASK_PROJECT_DISCO
 PROJECT_DISCOVERY_SCAN_LIMIT = int(os.getenv("PROJECT_DISCOVERY_SCAN_LIMIT", "100"))
 PROJECT_REVIEW_LINK_STUBS = os.getenv("PROJECT_REVIEW_LINK_STUBS", "true").strip().lower() in {"1", "true", "yes", "on"}
 PROJECT_DISCOVERY_MIN_CONFIDENCE = float(os.getenv("PROJECT_DISCOVERY_MIN_CONFIDENCE", "0.70"))
+PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS = int(os.getenv("PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS", "5"))
+PROJECT_DISCOVERY_MAX_NEW_PER_RUN = int(os.getenv("PROJECT_DISCOVERY_MAX_NEW_PER_RUN", "5"))
 
 # ============================================================
 # B2 RUNTIME PERFORMANCE FLAGS
@@ -4257,8 +4259,9 @@ def get_tasks_for_existing_project_discovery():
         title = get_title(task)
         if not title or title.lower().startswith("clarify next action:"):
             continue
-        if get_rich_text_plain_value(task.get("properties", {}), SUGGESTED_PROJECT_PROPERTY):
-            continue
+        # Suggested Project is staging metadata, not a reservation. A task is
+        # reserved only by an actual Project relation. This means deleting a
+        # rejected review project releases its tasks for future discovery.
         eligible.append(task)
     return eligible
 
@@ -4346,14 +4349,19 @@ Return ONLY raw JSON with this shape:
       "project_name": "...",
       "confidence": 0.0,
       "reason": "...",
+      "finished_outcome": "...",
+      "outcome_unfinished": true,
       "member_keys": ["T001", "T002"]
     }}
   ]
 }}
 
 Rules:
-- A project is a set of 2 or more tasks that work toward one concrete outcome, deliverable, commitment, or coordinated change.
+- A project is a set of 2 or more tasks that work toward one concrete, FINITE, UNFINISHED outcome, deliverable, commitment, or coordinated change.
+- You must be able to state what "Done" looks like. If there is no recognizable completion point, do not propose a project.
+- The outcome must still be unfinished. Do not reconstruct projects whose outcome is already complete.
 - Projects may be finite and small. Do NOT require an ongoing or durable area of responsibility.
+- Ongoing areas, maintenance themes, research topics, or collections of similar chores are NOT projects unless the listed tasks clearly converge on a finite outcome.
 - Semantic relationship matters more than shared words.
 - Shared topic/location alone is not enough. Look for a common outcome, workflow, or dependency.
 - Partition selectively: some related-looking tasks may belong; others may not.
@@ -4390,20 +4398,66 @@ Tasks:
             confidence = float(item.get("confidence") or 0.0)
         except (TypeError, ValueError):
             confidence = 0.0
+        finished_outcome = str(item.get("finished_outcome") or "").strip()
+        outcome_unfinished = item.get("outcome_unfinished") is True
         keys = []
         for key in item.get("member_keys") or []:
             if key in task_by_key and key not in used_keys and key not in keys:
                 keys.append(key)
-        if not name or confidence < globals().get("PROJECT_DISCOVERY_MIN_CONFIDENCE", 0.70) or len(keys) < 2:
+        if (
+            not name
+            or confidence < globals().get("PROJECT_DISCOVERY_MIN_CONFIDENCE", 0.70)
+            or len(keys) < 2
+            or not finished_outcome
+            or not outcome_unfinished
+        ):
             continue
         used_keys.update(keys)
         accepted.append({
             "project_name": name,
             "confidence": confidence,
             "reason": str(item.get("reason") or "").strip(),
+            "finished_outcome": finished_outcome,
+            "outcome_unfinished": outcome_unfinished,
             "tasks": [task_by_key[key] for key in keys],
         })
     return accepted
+
+
+def count_outstanding_project_reviews(all_projects):
+    """Count inactive projects that currently reserve open tasks for emergence review.
+
+    We identify review projects conservatively: an open task must have both a
+    Project relation to an inactive project and a Suggested Project value that
+    matches that project's current name. Ordinary Someday projects therefore do
+    not consume the emergence review budget.
+    """
+    inactive_by_id = {
+        p.get("id"): p for p in (all_projects or [])
+        if p.get("id") and not is_active_project(p)
+    }
+    if not inactive_by_id:
+        return 0
+
+    filter_payload = {
+        "and": [
+            {"property": "Open Loop", "checkbox": {"equals": True}},
+            {"property": "Done", "checkbox": {"equals": False}},
+            {"property": "Archived", "checkbox": {"equals": False}},
+        ]
+    }
+    tasks = query_tasks_database(filter_payload=filter_payload, page_size=100)
+    review_ids = set()
+    for task in tasks or []:
+        suggested = get_rich_text_plain_value(task.get("properties", {}), SUGGESTED_PROJECT_PROPERTY)
+        if not suggested:
+            continue
+        relations = ((task.get("properties", {}) or {}).get(TASK_PROJECT_RELATION_PROPERTY, {}) or {}).get("relation") or []
+        for rel in relations:
+            project = inactive_by_id.get(rel.get("id"))
+            if project and normalize(get_title(project)) == normalize(suggested):
+                review_ids.add(project.get("id"))
+    return len(review_ids)
 
 
 def run_existing_task_project_discovery(all_projects, active_projects):
@@ -4411,6 +4465,16 @@ def run_existing_task_project_discovery(all_projects, active_projects):
     if not globals().get("RUN_EXISTING_TASK_PROJECT_DISCOVERY", True):
         return []
 
+    outstanding = count_outstanding_project_reviews(all_projects)
+    max_reviews = max(1, globals().get("PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS", 5))
+    if outstanding >= max_reviews:
+        print(
+            f"[PROJECT EMERGENCE] Review queue full: {outstanding}/{max_reviews} "
+            "unreviewed emerging projects. Discovery paused until projects are activated or deleted."
+        )
+        return []
+
+    slots = max_reviews - outstanding
     tasks = get_tasks_for_existing_project_discovery()
     print(f"[PROJECT EMERGENCE] Existing unprojected tasks eligible: {len(tasks)}")
     if len(tasks) < 2:
@@ -4422,6 +4486,9 @@ def run_existing_task_project_discovery(all_projects, active_projects):
         return []
 
     results = []
+    max_new = max(1, globals().get("PROJECT_DISCOVERY_MAX_NEW_PER_RUN", 5))
+    clusters = clusters[:min(slots, max_new)]
+    print(f"[PROJECT EMERGENCE] Review capacity: {outstanding}/{max_reviews}; creating at most {len(clusters)} candidate(s) this run.")
     for cluster in clusters:
         name = cluster["project_name"]
         existing = find_project_by_name(name, all_projects)
@@ -4437,6 +4504,7 @@ def run_existing_task_project_discovery(all_projects, active_projects):
                 all_projects.append(review)
 
         print(f"[PROJECT EMERGENCE] Suggested: {name} ({cluster['confidence']:.2f})")
+        print(f"  Finished outcome: {cluster.get('finished_outcome')}")
         for task in cluster["tasks"]:
             title = get_title(task)
             update_suggested_project_if_needed(task, name, source="Project Emergence")
