@@ -506,7 +506,13 @@ def is_project_candidate_source_task(task):
         return False
 
     title = get_title(task)
-    if not title or title.lower().startswith("clarify next action:"):
+    if not title:
+        return False
+
+    # Explicit Brain Dump project intent must still be processed even if an
+    # unrelated classifier routed the task to clarification. This guarantees
+    # the review Project relation is created from authoritative user intent.
+    if title.lower().startswith("clarify next action:") and not str(task.get("_manual_project_hint") or "").strip():
         return False
 
     # Subtasks already belong to a sequence under a parent task, so do not use
@@ -4171,6 +4177,23 @@ def run_project_relation_writeback_tests():
                 PROJECT_ACTIVE_PROPERTY: {"type": "checkbox", "checkbox": active},
             },
         }
+
+    manual_clarification_task = {
+        "id": "manual-clarify",
+        "_manual_project_hint": "Basement Recovery",
+        "properties": {
+            TASK_TITLE_PROPERTY: {
+                "type": "title",
+                "title": [{"plain_text": "Clarify next action: Move furniture from furnace room"}],
+            }
+        },
+    }
+
+    manual_source_ok = is_project_candidate_source_task(manual_clarification_task)
+    print(
+        ("PASS" if manual_source_ok else "FAIL"),
+        "manual project hint remains eligible even if clarification wrapper exists",
+    )
 
     projects = [
         fake_project("p1", "Bakery Operations and Supplies", status="Active", active=False, status_shape="select"),

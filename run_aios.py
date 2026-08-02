@@ -1631,6 +1631,8 @@ ATOMIC_ACTION_VERBS = [
     "renew",
     "pair",
     "connect",
+    "move",
+    "relocate",
 ]
 
 def is_atomic_action(title):
@@ -1642,6 +1644,7 @@ def is_atomic_action(title):
     - Call dentist office
     - Email school about bread order
     - Change furnace filter
+    - Move furniture from furnace room
 
     These may be short or imperfect, but a reasonable person can start them
     without extra clarification, so the automation should create a normal task.
@@ -3554,6 +3557,7 @@ TASK_DECISION_TEST_CASES = [
     {"input": "Conduct photo shoot for Khorasan focaccia recipe", "prepared": "Conduct photo shoot for Khorasan focaccia recipe", "expected_decision": "keep"},
     {"input": "Brainstorm list of enhancements for AIOS", "prepared": "Brainstorm list of enhancements for AIOS", "expected_decision": "keep"},
     {"input": "Refill container of bench flour", "prepared": "Refill container of bench flour", "expected_decision": "keep"},
+    {"input": "Move furniture from furnace room", "prepared": "Move furniture from furnace room", "expected_decision": "keep"},
     {"input": "Tidy house for Luz", "prepared": "Tidy house for Luz", "expected_decision": "keep"},
     {"input": "Bulk up starter for workshop", "prepared": "Bulk up starter for workshop", "expected_decision": "keep"},
     {"input": "Grind coffee beans - caf", "prepared": "Grind coffee beans - caf", "expected_decision": "keep"},
