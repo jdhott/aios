@@ -4263,6 +4263,67 @@ def get_tasks_for_existing_project_discovery():
     return eligible
 
 
+def parse_json_object(raw):
+    """Parse the first JSON object from an AI response.
+
+    The Responses API normally returns raw JSON when prompted, but models may
+    occasionally wrap it in markdown fences or brief surrounding text. This
+    helper is deliberately shared by project-emergence callers so JSON parsing
+    cannot depend on a local helper defined in another detector path.
+    """
+    import json
+
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("AI returned an empty response")
+
+    # Strip a simple fenced-code wrapper when present.
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    # Fast path: entire response is JSON.
+    try:
+        value = json.loads(text)
+        if isinstance(value, dict):
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: find the first balanced JSON object rather than using a greedy
+    # regex, which can overrun if the response contains extra braces.
+    start = text.find("{")
+    if start < 0:
+        raise ValueError(f"AI returned no JSON object: {text[:200]}")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        ch = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                value = json.loads(text[start:index + 1])
+                if not isinstance(value, dict):
+                    raise ValueError("AI JSON response was not an object")
+                return value
+
+    raise ValueError(f"AI returned an unterminated JSON object: {text[:200]}")
+
+
 def ask_ai_existing_project_clusters(tasks):
     """Partition existing unprojected tasks into zero or more outcome projects."""
     if len(tasks or []) < 2:
