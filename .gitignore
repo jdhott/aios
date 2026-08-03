@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+.aios_runtime.lock
+
+cron.log
+log.txt
+logs/
+
+.aios_*_backup*/
+.last_*_backup*
+aios_*_backup*/
+
+aios_clarification_*/
