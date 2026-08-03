@@ -13,3 +13,5 @@ logs/
 aios_*_backup*/
 
 aios_clarification_*/
+
+.env
