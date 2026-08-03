@@ -785,15 +785,17 @@ NOT_QUICK_WIN_WORDS = {
 CLARIFY_STATUS = "Needs Clarification"
 READY_STATUS = "Ready"
 
-GENERATE_MORE_COMMAND = "⚙️ Generate more options"
-ADD_OWN_OPTION_COMMAND = "✏️ Add your own checkbox above, then check it"
+GENERATE_MORE_COMMAND = "⚙️ Generate more options"  # legacy pages only
+ADD_OWN_OPTION_COMMAND = "✏️ Add your own checkbox above, then check it"  # legacy pages only
+ASK_TARGETED_QUESTION_COMMAND = "❓ Ask me one targeted question"
+USE_SUGGESTION_PREFIX = "✅ Use this clarification: "
 
 CLARIFY_HEADER = "🔍 Clarify next action"
 CHOOSE_PROMPT = "💡 Choose the first action you would take:"
 ANALYTICAL_CHOOSE_PROMPT = "💡 Choose the first outcome-producing step:"
 DEFINE_PROMPT = "💡 Answer one question to define this task:"
-CLARIFICATION_ANALYTICAL_MODE_VERSION = "clarification-last-resort-placeholder-guard-a1.2"
-print("=== CLARIFICATION ANALYTICAL MODE A1.2 ACTIVE ===")
+CLARIFICATION_ANALYTICAL_MODE_VERSION = "clarification-proposal-first-v2.0"
+print("=== CLARIFICATION PROPOSAL-FIRST V2.0 ACTIVE ===")
 
 # In[11]:
 
@@ -5353,10 +5355,8 @@ def is_command_checkbox(text):
     return (
         GENERATE_MORE_COMMAND in text
         or ADD_OWN_OPTION_COMMAND in text
+        or ASK_TARGETED_QUESTION_COMMAND in text
     )
-
-# In[50]:
-
 
 
 def clarification_mode_reason(task_title):
@@ -5458,6 +5458,16 @@ def clean_clarification_suggestions(raw_suggestions, mode, task_title):
     return cleaned[:limit]
 
 def append_clarification_blocks(page_id, original_task, suggestions):
+    """Render a proposal-first clarification UI in Notion.
+
+    The first checkbox contains the AI's proposed clarified task. The user may
+    edit that checkbox text directly before checking it, so the checked text is
+    always the answer AIOS consumes. A separate command requests one targeted
+    question only when the proposal is not useful.
+    """
+    proposal = suggestions[0].strip() if suggestions else original_task.strip()
+    proposal_text = f"{USE_SUGGESTION_PREFIX}{proposal}"
+
     children = [
         {
             "object": "block",
@@ -5477,46 +5487,37 @@ def append_clarification_blocks(page_id, original_task, suggestions):
             "object": "block",
             "type": "paragraph",
             "paragraph": {
-                "rich_text": [
-                    {
-                        "type": "text",
-                        "text": {
-                            "content": clarification_prompt_for_mode(original_task)
-                        }
-                    }
-                ]
+                "rich_text": [{"type": "text", "text": {"content": "AIOS suggests this clearer next action:"}}]
+            },
+        },
+        {
+            "object": "block",
+            "type": "to_do",
+            "to_do": {
+                "rich_text": [{"type": "text", "text": {"content": proposal_text}}],
+                "checked": False,
+            },
+        },
+        {
+            "object": "block",
+            "type": "callout",
+            "callout": {
+                "icon": {"type": "emoji", "emoji": "✏️"},
+                "rich_text": [{
+                    "type": "text",
+                    "text": {"content": "To change it, edit the checkbox text above, then check it. AIOS uses the exact checked text."},
+                }],
+            },
+        },
+        {
+            "object": "block",
+            "type": "to_do",
+            "to_do": {
+                "rich_text": [{"type": "text", "text": {"content": ASK_TARGETED_QUESTION_COMMAND}}],
+                "checked": False,
             },
         },
     ]
-
-    for suggestion in suggestions:
-        children.append({
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": suggestion}}],
-                "checked": False,
-            },
-        })
-
-    children.extend([
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": ADD_OWN_OPTION_COMMAND}}],
-                "checked": False,
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": GENERATE_MORE_COMMAND}}],
-                "checked": False,
-            },
-        },
-    ])
 
     response = requests.patch(
         f"https://api.notion.com/v1/blocks/{page_id}/children",
@@ -5527,7 +5528,7 @@ def append_clarification_blocks(page_id, original_task, suggestions):
 
     if response.ok:
         increment_summary("clarification_blocks_added")
-        print("Added clarification blocks")
+        print("Added proposal-first clarification blocks")
         return response.json()
 
     increment_summary("errors")
@@ -5535,7 +5536,6 @@ def append_clarification_blocks(page_id, original_task, suggestions):
     print(response.status_code, response.text)
     return None
 
-# In[51]:
 
 def get_checked_clarification_action(page_id):
     blocks = get_block_children(page_id)
@@ -5572,123 +5572,87 @@ def get_checked_clarification_action(page_id):
 # In[52]:
 
 def generate_clarification_suggestions(task_title):
+    """Generate one strong clarified-task proposal.
+
+    The list return type is retained for backward compatibility with callers
+    and older package code, but proposal-first V2 intentionally returns only
+    one suggestion.
+    """
     mode, reason = clarification_mode_reason(task_title)
     print(f"[Clarification] version={CLARIFICATION_ANALYTICAL_MODE_VERSION}; mode={mode}; reason={reason}; task={task_title}")
 
-    if mode == "define_context":
-        prompt = f"""
-This task needs more context before it can become a clear next action.
-
-Generate 3–4 clarification questions that would help define a real next action.
+    prompt = f"""
+Rewrite the task below as one clear, useful next action.
 
 Rules:
-- Each line must be a short question
-- Focus on WHO, WHAT, or CONTEXT
-- Do not ask clarification questions for clear setup/process/creative tasks; those should be broken down instead
-- Do not suggest actions like email, call, or text
-- Do not include numbering or bullets
-- No extra text
-
-Task: {task_title}
-"""
-    elif mode == "analytical":
-        prompt = f"""
-Rewrite this analytical or audit-oriented task into outcome-producing first-step options.
-
-Goal:
-Generate options that let a knowledgeable human begin evaluating the work itself, not merely gather files or open tools.
-
-Rules:
-- Generate only distinct, meaningful options (2–4 total)
-- Each option must produce an evaluative outcome, finding, discrepancy, anomaly, or decision
-- Prefer review, compare, validate, identify, inspect, verify, sample, or document when appropriate
-- Do NOT split a combined evaluation into separate options for each field or keyword
-- Do NOT suggest merely accessing, retrieving, downloading, opening, preparing, or creating a spreadsheet unless the task explicitly asks for that artifact
-- Do NOT ask the user to gather prerequisites when the task already states the artifact or scope
-- Start with a verb
-- Be immediately executable
-- Keep each option under 14 words
-- Do not include numbering or bullets
-- No extra text
-
-Good examples:
-Review the top-ranked tasks for obvious scoring anomalies
-Compare top-ranked tasks against their underlying metadata
-Identify rankings that appear inconsistent with Urgency, Importance, or Due Date
-Document the first ranking discrepancy found
-
-Task: {task_title}
-"""
-    else:
-        prompt = f"""
-Rewrite this task into a small set of clear, concrete next actions.
-
-Rules:
-- Generate only distinct, meaningful options (2–4 total)
-- Do NOT repeat the same action across multiple channels
-- Each option must be one concrete physical action only
-- Do not combine actions with “and,” “then,” “after,” or multiple verbs
-- Start with a verb
-- Be immediately executable
-- Do not add details not present in the task
-- Avoid vague phrases like "figure out", "handle", "deal with"
-- Prefer common, realistic actions
-- Avoid unlikely options
-- Do not send creative/design tasks here when the object is clear; those should be broken down instead
-- Keep each option under 12 words
-- Do not include numbering or bullets
-- No extra text
+- Preserve the user's intent; do not invent facts, people, deadlines, tools, or constraints
+- Make the outcome or decision clearer
+- Prefer a concrete action the user can recognize and accept
+- Do not turn it into a question
+- Do not explain your reasoning
+- Use one sentence only
+- Keep it concise, normally under 20 words
+- If the task is analytical, make the first evaluative outcome explicit
+- If the task is broad, clarify the decision or planning outcome without guessing missing specifics
 
 Task: {task_title}
 """
 
     try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt
-        )
-
-        output = response.output_text.strip()
-
-        raw_suggestions = [
-            line.strip("- ").strip()
-            for line in output.splitlines()
-            if line.strip()
-        ]
-        suggestions = clean_clarification_suggestions(raw_suggestions, mode, task_title)
-
-        print(f"[Clarification] suggestions_generated={len(suggestions)}; raw={len(raw_suggestions)}; mode={mode}")
-        return suggestions
-
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        proposal = response.output_text.strip().strip('"').strip()
+        proposal = proposal.splitlines()[0].strip("-•0123456789. ").strip()
+        if not proposal:
+            return []
+        print("[Clarification] proposal_generated=1")
+        return [proposal]
     except Exception as e:
-        print("AI suggestion generation failed:", e)
+        print("AI clarification proposal generation failed:", e)
         return []
 
 
-# In[53]:
+def generate_targeted_clarification_question(task_title):
+    """Generate exactly one high-leverage question for a rejected proposal."""
+    prompt = f"""
+Ask exactly one concise question whose answer would let you rewrite this task
+as a clear next action.
+
+Rules:
+- Ask only for the single most important missing fact
+- Do not provide options
+- Do not ask multiple questions
+- Keep it under 14 words
+- End with a question mark
+- No explanation or extra text
+
+Task: {task_title}
+"""
+    try:
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        question = response.output_text.strip().splitlines()[0].strip("-•0123456789. ").strip()
+        if question and not question.endswith("?"):
+            question += "?"
+        return question
+    except Exception as e:
+        print("AI targeted clarification question failed:", e)
+        return "What important detail is missing from this task?"
+
 
 def get_existing_clarification_suggestions(page_id):
+    """Return non-command checkbox text, stripping the V2 display prefix."""
     blocks = get_block_children(page_id)
-
     suggestions = []
-
     for block in blocks:
         if block.get("type") != "to_do":
             continue
-
         text = get_block_text(block)
-
-        if not text:
+        if not text or is_command_checkbox(text):
             continue
-
-        if is_command_checkbox(text):
-            continue
-
+        if text.startswith(USE_SUGGESTION_PREFIX):
+            text = text[len(USE_SUGGESTION_PREFIX):].strip()
         suggestions.append(text)
-
     return suggestions
 
-# In[54]:
 
 def generate_more_clarification_suggestions(task_title, existing_suggestions):
     existing_text = "\n".join(f"- {s}" for s in existing_suggestions)
@@ -5871,100 +5835,121 @@ def update_clarification_title(page_id, clarification_text):
 # In[59]:
 
 def process_clarification_selection(page):
-    """Resolve checked clarification choices.
+    """Resolve proposal-first clarification choices.
 
-    Important behaviour:
-    - Command checkboxes still run their command flows.
-    - Selected questions for structurally vague tasks keep clarification open.
-    - Selected action checkboxes are re-normalized before the task is marked ready.
-      This lets user-added options go through the usual cleanup, date stripping,
-      JDI flag handling, and Quick Win / metadata passes.
+    Users accept the proposal by checking it, or edit that checkbox text before
+    checking it. The exact checked text becomes the candidate task. If the user
+    requests a question, AIOS replaces the proposal UI with one targeted prompt
+    and an explicit answer placeholder checkbox that the user edits and checks.
+    Legacy clarification pages remain readable.
     """
     selection = get_checked_clarification_action(page["id"])
-
     if not selection:
         return False
 
     text = selection["text"].strip()
-
-    if text == GENERATE_MORE_COMMAND:
-        title = get_title(page)
-        original_title = title.replace("Clarify next action:", "").strip()
-
-        existing = get_existing_clarification_suggestions(page["id"])
-
-        new = generate_more_clarification_suggestions(
-            original_title,
-            existing,
-        )
-
-        if not new:
-            print("No new suggestions generated")
-            return False
-
-        all_suggestions = existing + new
-
-        rebuild_clarification_blocks(
-            page["id"],
-            original_title,
-            all_suggestions,
-        )
-
-        return True
-
-    if text == ADD_OWN_OPTION_COMMAND:
-        print("Add your own option selected; add a checkbox above it, then check your new option")
-        return False
-
     title = get_title(page)
     original_title = title.replace("Clarify next action:", "").strip()
 
-    if clarification_route(original_title, allow_ai=True) == "define_context" and text.endswith("?"):
-        print("Question selected for structurally vague task → keeping clarification open")
-
-        new_title = f"{original_title} → {text}"
-        update_clarification_title(page["id"], new_title)
-
-        combined_context = f"{original_title}\nClarify: {text}"
-        suggestions = generate_clarification_suggestions(combined_context)
-
-        rebuild_clarification_blocks(
-            page["id"],
-            combined_context,
-            suggestions,
+    if text == ASK_TARGETED_QUESTION_COMMAND:
+        question = generate_targeted_clarification_question(original_title)
+        clear_page_children(page["id"])
+        children = [
+            {
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {"rich_text": [{"type": "text", "text": {"content": CLARIFY_HEADER}}]},
+            },
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"Original: {original_title}"}}]},
+            },
+            {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {"rich_text": [{"type": "text", "text": {"content": question}}]},
+            },
+            {
+                "object": "block",
+                "type": "to_do",
+                "to_do": {
+                    "rich_text": [{"type": "text", "text": {"content": f"{USE_SUGGESTION_PREFIX}[type your answer here]"}}],
+                    "checked": False,
+                },
+            },
+            {
+                "object": "block",
+                "type": "callout",
+                "callout": {
+                    "icon": {"type": "emoji", "emoji": "✏️"},
+                    "rich_text": [{"type": "text", "text": {"content": "Replace the placeholder with your answer, then check it."}}],
+                },
+            },
+        ]
+        response = requests.patch(
+            f"https://api.notion.com/v1/blocks/{page['id']}/children",
+            headers=headers,
+            json={"children": children},
+            timeout=30,
         )
+        if response.ok:
+            print("Added one targeted clarification question")
+            return True
+        increment_summary("errors")
+        print("ERROR adding targeted clarification question")
+        print(response.status_code, response.text)
+        return False
 
+    # Legacy command support.
+    if text == GENERATE_MORE_COMMAND:
+        suggestions = generate_clarification_suggestions(original_title)
+        rebuild_clarification_blocks(page["id"], original_title, suggestions)
+        return True
+    if text == ADD_OWN_OPTION_COMMAND:
+        print("Legacy add-own-option selected; edit a proposal checkbox and check it instead")
+        return False
+
+    if text.startswith(USE_SUGGESTION_PREFIX):
+        text = text[len(USE_SUGGESTION_PREFIX):].strip()
+
+    if not text or text == "[type your answer here]":
+        print("Clarification answer placeholder is still empty")
+        return False
+
+    # If this was an answer to a targeted question rather than a full task,
+    # combine it with the original task and let AI propose the final wording.
+    blocks = get_block_children(page["id"])
+    has_targeted_question_ui = any(
+        block.get("type") == "callout"
+        and "Replace the placeholder" in get_block_text(block)
+        for block in blocks
+    )
+    if has_targeted_question_ui:
+        combined = f"Original task: {original_title}\nUser clarification: {text}"
+        proposals = generate_clarification_suggestions(combined)
+        if not proposals:
+            return False
+        rebuild_clarification_blocks(page["id"], original_title, proposals)
+        print("Used clarification answer to generate a revised proposal")
         return True
 
-    # Re-run the user's selected action through the same title-preparation path
-    # used by new inbox items. This is especially important for user-added
-    # clarification options, because they may include JDI flags, date words, or
-    # still be too vague to become a Ready task.
     parsed, cleaned_title, due_date = prepare_task_title({"text": text})
-
     if cleaned_title.lower().startswith("clarify next action:"):
-        print("Selected option still needs clarification → keeping clarification open")
         base_title = strip_due_date_phrases(parsed["clean_title"]) or parsed["clean_title"]
         update_clarification_title(page["id"], base_title)
-        suggestions = generate_clarification_suggestions(base_title)
-        rebuild_clarification_blocks(
-            page["id"],
-            base_title,
-            suggestions,
-        )
+        rebuild_clarification_blocks(page["id"], base_title, generate_clarification_suggestions(base_title))
         return True
 
     increment_summary("clarification_selections_resolved")
     print("Clarification resolved →", cleaned_title)
     updated_page = update_task_from_selection(
-        page["id"],
-        cleaned_title,
+        page["id"], cleaned_title,
         is_jdi=parsed["jdi"],
         is_urgent=parsed["urgent"],
         is_important=parsed.get("important", False),
         due_date=due_date,
     )
-
     if not updated_page:
         return False
 
@@ -5972,24 +5957,16 @@ def process_clarification_selection(page):
         original=original_title,
         final_task=cleaned_title,
         action="Created",
-        reason="User selected a clarification option; task marked Ready.",
+        reason="User accepted or edited the AI clarification proposal; task marked Ready.",
         review_needed=False,
         confidence=1.0,
         source="Clarification",
     )
-
-    # Run the same post-create enrichment passes used by normal task creation.
     updated_page = update_missing_metadata_if_confident(updated_page)
     update_quick_win_if_needed(updated_page)
-
     clear_page_children(page["id"])
-
     return True
 
-# ## 9. Duplicate and possible-match handling
-# 
-
-# In[60]:
 
 def token_similarity(a, b):
     set_a = set(words_in(normalize(a)))
