@@ -126,7 +126,20 @@ def append_clarification_blocks(page_id, original_task, suggestions):
     edit that checkbox text directly before checking it, so the checked text is
     always the answer AIOS consumes. A separate command requests one targeted
     question only when the proposal is not useful.
+
+    This function is intentionally idempotent: if a clarification UI is already
+    present on the page, do not append a second copy. Rebuild flows clear the
+    existing children first, then call this function.
     """
+    existing_blocks = get_block_children(page_id)
+    if any(
+        block.get("type") == "heading_3"
+        and get_block_text(block) == CLARIFY_HEADER
+        for block in existing_blocks
+    ):
+        print("Clarification UI already present; skipping duplicate append")
+        return {"results": existing_blocks}
+
     proposal = suggestions[0].strip() if suggestions else original_task.strip()
     proposal_text = f"{USE_SUGGESTION_PREFIX}{proposal}"
 
@@ -406,6 +419,22 @@ Existing suggestions:
 # In[55]:
 
 
+def prepare_accepted_clarification_title(text):
+    """Normalize a human-accepted clarification without re-routing it.
+
+    Once the user explicitly checks a proposed clarification (or edits that
+    checkbox and checks it), the choice is authoritative. We still parse flags,
+    separate due-date metadata, strip due-date wording from the title, and
+    restore preferred proper nouns, but we deliberately do not call the normal
+    task-preparation/clarification router again.
+    """
+    parsed = parse_task_flags(text)
+    due_date = extract_due_date(text)
+    cleaned_title = strip_due_date_phrases(parsed["clean_title"]) or parsed["clean_title"]
+    cleaned_title = restore_preferred_proper_nouns(cleaned_title.strip())
+    return parsed, cleaned_title, due_date
+
+
 def update_task_from_selection(page_id, new_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None):
     properties = {
         "Task Name": {
@@ -607,12 +636,14 @@ def process_clarification_selection(page):
         print("Used clarification answer to generate a revised proposal")
         return True
 
-    parsed, cleaned_title, due_date = prepare_task_title({"text": text})
-    if cleaned_title.lower().startswith("clarify next action:"):
-        base_title = strip_due_date_phrases(parsed["clean_title"]) or parsed["clean_title"]
-        update_clarification_title(page["id"], base_title)
-        rebuild_clarification_blocks(page["id"], base_title, generate_clarification_suggestions(base_title))
-        return True
+    # Human acceptance is authoritative. Do not send the accepted wording back
+    # through prepare_task_title(), because that function may decide the task
+    # still needs clarification and create an endless clarification loop.
+    parsed, cleaned_title, due_date = prepare_accepted_clarification_title(text)
+
+    if not cleaned_title:
+        print("Accepted clarification produced an empty task title")
+        return False
 
     increment_summary("clarification_selections_resolved")
     print("Clarification resolved →", cleaned_title)
