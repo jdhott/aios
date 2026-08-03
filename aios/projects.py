@@ -38,6 +38,8 @@ PROJECT_REVIEW_LINK_STUBS = os.getenv("PROJECT_REVIEW_LINK_STUBS", "true").strip
 PROJECT_DISCOVERY_MIN_CONFIDENCE = float(os.getenv("PROJECT_DISCOVERY_MIN_CONFIDENCE", "0.70"))
 PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS = int(os.getenv("PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS", "5"))
 PROJECT_DISCOVERY_MAX_NEW_PER_RUN = int(os.getenv("PROJECT_DISCOVERY_MAX_NEW_PER_RUN", "5"))
+PROJECT_INCREMENTAL_AFFINITY_MIN_CONFIDENCE = float(os.getenv("PROJECT_INCREMENTAL_AFFINITY_MIN_CONFIDENCE", "0.82"))
+RUN_PROJECT_INCREMENTAL_AFFINITY = os.getenv("RUN_PROJECT_INCREMENTAL_AFFINITY", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 # ============================================================
 # B2 RUNTIME PERFORMANCE FLAGS
@@ -4518,6 +4520,237 @@ def run_existing_task_project_discovery(all_projects, active_projects):
         results.append(cluster)
     return results
 
+
+def set_suggested_project_canonical(task, project_name):
+    """Synchronize Suggested Project to the canonical related Project name.
+
+    Once AIOS establishes a real Project relation, the relation is authoritative.
+    This helper intentionally replaces stale staging text rather than preserving
+    a competing historical suggestion.
+    """
+    project_name = str(project_name or "").strip()
+    if not task or not project_name or task.get("dry_run"):
+        return False
+
+    props = task.get("properties", {}) or {}
+    current = get_rich_text_plain_value(props, SUGGESTED_PROJECT_PROPERTY)
+    if current == project_name:
+        return False
+    if TEST_MODE or DRY_RUN:
+        print(f"[DRY RUN] Would sync Suggested Project: {get_title(task)} → {project_name}")
+        return False
+
+    response = requests.patch(
+        f"https://api.notion.com/v1/pages/{task['id']}",
+        headers=headers,
+        json={"properties": {SUGGESTED_PROJECT_PROPERTY: _notion_rich_text(project_name)}},
+        timeout=30,
+    )
+    if response.ok:
+        increment_summary("suggested_project_updates")
+        print(f"Synced Suggested Project to canonical relation: {get_title(task)} → {project_name}")
+        # Keep the local object coherent for later passes in the same run.
+        props[SUGGESTED_PROJECT_PROPERTY] = _notion_rich_text(project_name)
+        return True
+
+    increment_summary("errors")
+    print("ERROR syncing Suggested Project:", get_title(task))
+    print(response.status_code, response.text)
+    return False
+
+
+def _mark_local_project_relation(task, project):
+    """Keep an in-memory task coherent after a successful Project relation write."""
+    if not task or not project:
+        return
+    props = task.setdefault("properties", {})
+    props[TASK_PROJECT_RELATION_PROPERTY] = {
+        "type": "relation",
+        "relation": [{"id": project.get("id")}],
+    }
+
+
+def build_incremental_project_contexts(all_projects, open_tasks):
+    """Build active/review project contexts using names plus current member tasks.
+
+    Active projects are always eligible. Inactive projects are eligible only
+    when at least one open task is already related to them; this treats emerged
+    review projects as candidates without reopening every unrelated Someday row.
+    """
+    projects_by_id = {
+        project.get("id"): project for project in (all_projects or [])
+        if project.get("id") and get_title(project)
+    }
+    members = {project_id: [] for project_id in projects_by_id}
+
+    for task in open_tasks or []:
+        title = get_title(task)
+        if not title:
+            continue
+        for project_id in get_relation_ids(task.get("properties", {}), TASK_PROJECT_RELATION_PROPERTY):
+            if project_id in members:
+                members[project_id].append(title)
+
+    contexts = []
+    for project_id, project in projects_by_id.items():
+        member_titles = members.get(project_id) or []
+        active = is_active_project(project)
+        if not active and not member_titles:
+            continue
+        contexts.append({
+            "project": project,
+            "project_name": get_title(project),
+            "active": active,
+            "member_titles": member_titles[:20],
+        })
+    return contexts
+
+
+def ask_ai_incremental_project_affinity(tasks, project_contexts):
+    """Match newly created untagged tasks to existing active/review projects."""
+    tasks = [task for task in (tasks or []) if task and not task_has_project_relation(task)]
+    if not tasks or not project_contexts:
+        return []
+
+    task_by_key = {}
+    task_lines = []
+    for i, task in enumerate(tasks, start=1):
+        key = f"T{i:03d}"
+        task_by_key[key] = task
+        task_lines.append(f"{key} | {get_title(task)}")
+
+    project_by_key = {}
+    project_lines = []
+    for i, context in enumerate(project_contexts, start=1):
+        key = f"P{i:03d}"
+        project_by_key[key] = context
+        members = "; ".join(context.get("member_titles") or []) or "(no current open members)"
+        state = "ACTIVE" if context.get("active") else "REVIEW"
+        project_lines.append(
+            f"{key} | {state} | {context['project_name']} | current tasks: {members}"
+        )
+
+    prompt = f"""Match NEW tasks to EXISTING projects when the fit is strong.
+
+Return ONLY raw JSON:
+{{
+  "matches": [
+    {{
+      "task_key": "T001",
+      "project_key": "P001",
+      "confidence": 0.0,
+      "reason": "..."
+    }}
+  ]
+}}
+
+Rules:
+- Existing projects have priority over inventing a new project.
+- Evaluate the project's actual meaning using BOTH its name and its current member tasks.
+- A new task should match when it contributes to the same finite outcome, deliverable, or coordinated body of work.
+- Shared words or broad topic similarity alone are not enough.
+- A task may match at most one project.
+- Omit uncertain matches. Do not force every task into a project.
+- Review-stage projects are legitimate destinations: adding the relation means "proposed member for review", not automatic activation.
+- Prefer a specific project whose current member tasks establish the same intent.
+- Example: a new task about refilling Red Fife flour can belong to an existing flour-stock management project when its members are about flour inventory/refilling/usage.
+
+NEW TASKS:
+{chr(10).join(task_lines)}
+
+EXISTING PROJECTS:
+{chr(10).join(project_lines)}
+"""
+    try:
+        response = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        data = parse_json_object(getattr(response, "output_text", "") or "")
+    except Exception as exc:
+        print(f"[PROJECT AFFINITY] AI error: {exc}")
+        return []
+
+    accepted = []
+    used_tasks = set()
+    threshold = globals().get("PROJECT_INCREMENTAL_AFFINITY_MIN_CONFIDENCE", 0.82)
+    for item in (data.get("matches") or []):
+        if not isinstance(item, dict):
+            continue
+        task_key = item.get("task_key")
+        project_key = item.get("project_key")
+        if task_key in used_tasks or task_key not in task_by_key or project_key not in project_by_key:
+            continue
+        try:
+            confidence = float(item.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < threshold:
+            continue
+        used_tasks.add(task_key)
+        accepted.append({
+            "task": task_by_key[task_key],
+            "context": project_by_key[project_key],
+            "confidence": confidence,
+            "reason": str(item.get("reason") or "").strip(),
+        })
+    return accepted
+
+
+def run_incremental_project_affinity(source_tasks, all_projects, active_projects, open_tasks):
+    """Attach newly created tasks to an existing project before new emergence."""
+    if not globals().get("RUN_PROJECT_INCREMENTAL_AFFINITY", True):
+        return set()
+
+    candidates = [
+        task for task in (source_tasks or [])
+        if not str(task.get("_manual_project_hint") or "").strip()
+        and not task_has_project_relation(task)
+    ]
+    if not candidates:
+        return set()
+
+    contexts = build_incremental_project_contexts(all_projects, open_tasks)
+    print(
+        f"[PROJECT AFFINITY] Checking {len(candidates)} new task(s) against "
+        f"{len(contexts)} active/review project(s)."
+    )
+    matches = ask_ai_incremental_project_affinity(candidates, contexts)
+    matched_ids = set()
+
+    for match in matches:
+        task = match["task"]
+        context = match["context"]
+        project = context["project"]
+        project_name = context["project_name"]
+        confidence = match["confidence"]
+        reason = match["reason"]
+
+        print(
+            f"[PROJECT AFFINITY] Match: {get_title(task)} → {project_name} "
+            f"({confidence:.2f})"
+        )
+        relation_set = False
+        if context["active"]:
+            relation_set = set_project_relation_if_safe(
+                task, project, project_name, confidence,
+                f"Incremental project affinity. {reason}"
+            )
+        else:
+            relation_set = set_review_project_relation_if_empty(
+                task, project, project_name
+            )
+
+        if relation_set:
+            _mark_local_project_relation(task, project)
+            set_suggested_project_canonical(task, project_name)
+            matched_ids.add(task.get("id"))
+
+    if matches and not matched_ids:
+        print("[PROJECT AFFINITY] Matches were proposed but no relations were written.")
+    elif not matches:
+        print("[PROJECT AFFINITY] No strong existing-project matches for new tasks.")
+
+    return matched_ids
+
+
 def run_project_candidate_detector():
     """Detect likely project groupings for tasks created in this run.
 
@@ -4585,6 +4818,15 @@ def run_project_candidate_detector():
         active_projects = []
         print("Project relation write-back and project stub creation are disabled; Suggested Project will still be written.")
 
+    # M1.8: before asking whether a new task implies a NEW project, ask whether
+    # it belongs to an existing active or review-stage project.
+    affinity_matched_ids = run_incremental_project_affinity(
+        source_tasks,
+        all_projects,
+        active_projects,
+        open_tasks,
+    )
+
     operational_memory = build_operational_memory_from_tasks(
         operational_context_tasks
     )
@@ -4608,7 +4850,7 @@ def run_project_candidate_detector():
     claimed_task_ids = set()
 
     for seed_task in source_tasks:
-        if seed_task.get("id") in claimed_task_ids:
+        if seed_task.get("id") in claimed_task_ids or seed_task.get("id") in affinity_matched_ids:
             continue
         seed_title = get_title(seed_task)
 
