@@ -65,6 +65,7 @@ print("=== AIOS CLEAN CUTOVER v3 ===")
 print("__file__ =", __file__)
 
 from execution_engine_v2 import rebuild_execution_state
+from aios.storage.execution_task_source import get_supabase_execution_tasks
 
 try:
     from core.evaluator import evaluate_task
@@ -138,6 +139,25 @@ TEST_ONLY = (
 
 if TEST_ONLY:
     TEST_MODE = True
+
+# -----------------------------------------------------------------------------
+# Datastore migration control
+# -----------------------------------------------------------------------------
+# During the staged Supabase cutover, only the authoritative Execution Engine
+# task read honours this setting. All other reads and all writes remain on
+# Notion until their migration stages are explicitly implemented and tested.
+AIOS_DATASTORE = (
+    os.getenv("AIOS_DATASTORE", "notion")
+    .strip()
+    .lower()
+)
+
+if AIOS_DATASTORE not in {"notion", "supabase"}:
+    raise ValueError(
+        "AIOS_DATASTORE must be 'notion' or 'supabase'"
+    )
+
+print(f"[Datastore] Configured datastore: {AIOS_DATASTORE}")
 
 # In TEST_ONLY mode, avoid requiring production secrets because no external API
 # calls are made. In normal modes, keep failing fast if required env vars are missing.
@@ -7277,22 +7297,52 @@ else:
     # New execution engine (authoritative)
     execution_engine_success = False
     try:
-        all_open_tasks = query_tasks_database(
-            filter_payload={
-                "and": [
-                    {
-                        "property": "Done",
-                        "checkbox": {
-                            "equals": False
+        if AIOS_DATASTORE == "supabase":
+            print(
+                "[Execution Engine] Reading execution population from Supabase"
+            )
+
+            # Temporary hybrid migration phase:
+            # durable task data comes from Supabase, while current mutable
+            # execution/presentation state is fetched through AIOS's existing
+            # working Notion query path.
+            notion_execution_state_tasks = query_tasks_database(
+                filter_payload={
+                    "and": [
+                        {
+                            "property": "Done",
+                            "checkbox": {
+                                "equals": False
+                            }
                         }
-                    }
-                ]
-            }
-        )
+                    ]
+                }
+            )
+
+            all_open_tasks = get_supabase_execution_tasks(
+                notion_execution_state_tasks=notion_execution_state_tasks
+            )
+        else:
+            print(
+                "[Execution Engine] Reading execution population from Notion"
+            )
+            all_open_tasks = query_tasks_database(
+                filter_payload={
+                    "and": [
+                        {
+                            "property": "Done",
+                            "checkbox": {
+                                "equals": False
+                            }
+                        }
+                    ]
+                }
+            )
 
         print(f"[Execution Engine] Full task set for reconciliation: {len(all_open_tasks)}")
 
         global EXECUTION_ENGINE_WINNERS
+        EXECUTION_ENGINE_WINNERS = []
 
         EXECUTION_ENGINE_WINNERS = rebuild_execution_state(
             open_tasks=all_open_tasks,
