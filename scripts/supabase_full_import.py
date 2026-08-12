@@ -12,6 +12,9 @@ Dry run:
 Full write:
     python -m scripts.supabase_full_import --write
 
+Reconciliation only:
+    python -m scripts.supabase_full_import --reconcile-only
+
 The migration:
 
 1. Reads all Notion Projects and Tasks.
@@ -156,43 +159,43 @@ def print_source_statistics(
     print("=" * 72)
 
     print(
-        f"Projects:                 "
+        f"Projects:                  "
         f"{stats['projects']}"
     )
 
     print(
-        f"Tasks:                    "
+        f"Tasks:                     "
         f"{stats['tasks']}"
     )
 
     print(
-        f"Open tasks:               "
+        f"Open tasks:                "
         f"{stats['open_tasks']}"
     )
 
     print(
-        f"Task -> Project links:    "
+        f"Task -> Project links:     "
         f"{stats['project_links']}"
     )
 
     print(
-        f"Parent Task links:        "
+        f"Parent Task links:         "
         f"{stats['parent_links']}"
     )
 
     print(
-        f"Suggested Project values: "
+        f"Suggested Project values:  "
         f"{stats['suggested_projects']}"
     )
 
     print(
-        f"Tasks with legacy data:   "
+        f"Tasks with legacy data:    "
         f"{stats['metadata_tasks']}"
     )
 
     print(
-        f"Projects with legacy data:"
-        f" {stats['metadata_projects']}"
+        f"Projects with legacy data: "
+        f"{stats['metadata_projects']}"
     )
 
 
@@ -465,6 +468,8 @@ def reconcile(
         .get_all_projects()
     )
 
+    # TaskRepository now paginates, so this returns
+    # the complete dataset rather than stopping at 1,000.
     tasks = (
         task_repository
         .get_all_tasks()
@@ -636,6 +641,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        help=(
+            "Skip migration writes and only compare "
+            "the current Supabase dataset to Notion."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -647,11 +661,26 @@ def main() -> None:
 
     args = parse_args()
 
+    if (
+        args.write
+        and args.reconcile_only
+    ):
+        raise ValueError(
+            "Choose either --write or --reconcile-only, "
+            "not both."
+        )
+
     print("=" * 72)
     print("AIOS FULL SUPABASE MIGRATION")
     print("=" * 72)
 
-    if args.write:
+    if args.reconcile_only:
+
+        print(
+            "MODE: RECONCILIATION ONLY"
+        )
+
+    elif args.write:
 
         print(
             "MODE: FULL WRITE TO SUPABASE"
@@ -681,7 +710,11 @@ def main() -> None:
         stats
     )
 
-    if not args.write:
+    # Plain dry run.
+    if (
+        not args.write
+        and not args.reconcile_only
+    ):
 
         print(
             "\nDRY RUN COMPLETE."
@@ -699,6 +732,17 @@ def main() -> None:
             "  python -m "
             "scripts.supabase_full_import "
             "--write"
+        )
+
+        print(
+            "\nTo validate the current "
+            "Supabase dataset only:"
+        )
+
+        print(
+            "  python -m "
+            "scripts.supabase_full_import "
+            "--reconcile-only"
         )
 
         return
@@ -719,6 +763,26 @@ def main() -> None:
         "Supabase connection successful."
     )
 
+    # Reconciliation-only mode.
+    if args.reconcile_only:
+
+        reconcile(
+            project_repository,
+            task_repository,
+            stats,
+        )
+
+        print("\n" + "=" * 72)
+        print("RECONCILIATION COMPLETED")
+        print("=" * 72)
+
+        print(
+            "\nNo Supabase records were changed."
+        )
+
+        return
+
+    # Full-write mode.
     project_map = migrate_projects(
         project_repository,
         projects,

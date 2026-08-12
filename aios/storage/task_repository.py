@@ -21,10 +21,19 @@ class TaskRepository:
     Supabase persistence layer for AIOS tasks.
 
     Converts Supabase rows into datastore-neutral Task models.
+
+    Collection reads are paginated because Supabase/PostgREST may
+    limit the number of rows returned by a single request.
     """
+
+    PAGE_SIZE = 1000
 
     def __init__(self, store: SupabaseStore):
         self.store = store
+
+    # ------------------------------------------------------------------
+    # Row conversion
+    # ------------------------------------------------------------------
 
     def row_to_task(
         self,
@@ -77,18 +86,47 @@ class TaskRepository:
             ),
         )
 
+    # ------------------------------------------------------------------
+    # Reads
+    # ------------------------------------------------------------------
+
     def get_all_tasks(self) -> list[Task]:
-        response = (
-            self.store.client
-            .table("tasks")
-            .select("*")
-            .order("created_at")
-            .execute()
-        )
+        """
+        Return every task in Supabase.
+
+        Results are fetched in pages so datasets larger than the
+        Supabase/PostgREST per-request limit are not truncated.
+        """
+
+        rows: list[dict[str, Any]] = []
+
+        start = 0
+
+        while True:
+            response = (
+                self.store.client
+                .table("tasks")
+                .select("*")
+                .order("created_at")
+                .range(
+                    start,
+                    start + self.PAGE_SIZE - 1,
+                )
+                .execute()
+            )
+
+            batch = response.data or []
+
+            rows.extend(batch)
+
+            if len(batch) < self.PAGE_SIZE:
+                break
+
+            start += self.PAGE_SIZE
 
         return [
             self.row_to_task(row)
-            for row in (response.data or [])
+            for row in rows
         ]
 
     def get_task(
@@ -135,20 +173,51 @@ class TaskRepository:
         return self.row_to_task(rows[0])
 
     def get_open_tasks(self) -> list[Task]:
-        response = (
-            self.store.client
-            .table("tasks")
-            .select("*")
-            .eq("is_open", True)
-            .eq("is_done", False)
-            .eq("is_archived", False)
-            .order("created_at")
-            .execute()
-        )
+        """
+        Return all currently eligible open tasks.
+
+        Open-task semantics intentionally preserve the current AIOS
+        definition:
+
+            is_open = True
+            is_done = False
+            is_archived = False
+
+        Results are paginated.
+        """
+
+        rows: list[dict[str, Any]] = []
+
+        start = 0
+
+        while True:
+            response = (
+                self.store.client
+                .table("tasks")
+                .select("*")
+                .eq("is_open", True)
+                .eq("is_done", False)
+                .eq("is_archived", False)
+                .order("created_at")
+                .range(
+                    start,
+                    start + self.PAGE_SIZE - 1,
+                )
+                .execute()
+            )
+
+            batch = response.data or []
+
+            rows.extend(batch)
+
+            if len(batch) < self.PAGE_SIZE:
+                break
+
+            start += self.PAGE_SIZE
 
         return [
             self.row_to_task(row)
-            for row in (response.data or [])
+            for row in rows
         ]
 
     def count_tasks(self) -> int:
@@ -163,6 +232,10 @@ class TaskRepository:
         )
 
         return response.count or 0
+
+    # ------------------------------------------------------------------
+    # Writes
+    # ------------------------------------------------------------------
 
     def upsert_task(
         self,
