@@ -20,9 +20,7 @@ class TaskRepository:
     """
     Supabase persistence layer for AIOS tasks.
 
-    This repository converts database rows into datastore-neutral
-    AIOS Task models so the rest of AIOS does not need to know
-    about Supabase table structure.
+    Converts Supabase rows into datastore-neutral Task models.
     """
 
     def __init__(self, store: SupabaseStore):
@@ -35,50 +33,38 @@ class TaskRepository:
         return Task(
             id=row["id"],
             legacy_notion_id=row.get("legacy_notion_id"),
-
             title=row.get("title") or "(Untitled Task)",
-
             is_open=row.get("is_open", True),
             is_done=row.get("is_done", False),
             is_archived=row.get("is_archived", False),
-
             status=row.get("status"),
-
             importance=row.get("importance"),
             urgency=row.get("urgency"),
             effort=row.get("effort"),
             duration=row.get("duration"),
-
             due_at=parse_datetime(
                 row.get("due_at")
             ),
-
             defer_until=parse_datetime(
                 row.get("defer_until")
             ),
-
             is_just_do_it=row.get(
                 "is_just_do_it",
                 False,
             ),
-
             is_quick_win=row.get(
                 "is_quick_win",
                 False,
             ),
-
             project_id=row.get("project_id"),
             parent_task_id=row.get("parent_task_id"),
             step_order=row.get("step_order"),
-
             created_at=parse_datetime(
                 row.get("created_at")
             ),
-
             updated_at=parse_datetime(
                 row.get("updated_at")
             ),
-
             completed_at=parse_datetime(
                 row.get("completed_at")
             ),
@@ -170,3 +156,84 @@ class TaskRepository:
         )
 
         return response.count or 0
+
+    def upsert_task(
+        self,
+        task: Task,
+    ) -> Task:
+        payload = {
+            "legacy_notion_id": task.legacy_notion_id,
+            "title": task.title,
+            "is_open": task.is_open,
+            "is_done": task.is_done,
+            "is_archived": task.is_archived,
+            "status": task.status,
+            "importance": task.importance,
+            "urgency": task.urgency,
+            "effort": task.effort,
+            "duration": task.duration,
+            "due_at": (
+                task.due_at.isoformat()
+                if task.due_at
+                else None
+            ),
+            "defer_until": (
+                task.defer_until.isoformat()
+                if task.defer_until
+                else None
+            ),
+            "is_just_do_it": task.is_just_do_it,
+            "is_quick_win": task.is_quick_win,
+            "project_id": task.project_id,
+            "parent_task_id": task.parent_task_id,
+            "step_order": task.step_order,
+            "created_at": (
+                task.created_at.isoformat()
+                if task.created_at
+                else None
+            ),
+            "updated_at": (
+                task.updated_at.isoformat()
+                if task.updated_at
+                else None
+            ),
+            "completed_at": (
+                task.completed_at.isoformat()
+                if task.completed_at
+                else None
+            ),
+        }
+
+        response = (
+            self.store.client
+            .table("tasks")
+            .upsert(
+                payload,
+                on_conflict="legacy_notion_id",
+            )
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError(
+                f"Failed to upsert task: {task.title}"
+            )
+
+        return self.row_to_task(
+            response.data[0]
+        )
+
+    def update_parent_task(
+        self,
+        task_id: str,
+        parent_task_id: Optional[str],
+    ) -> None:
+        (
+            self.store.client
+            .table("tasks")
+            .update({
+                "parent_task_id": parent_task_id,
+            })
+            .eq("id", task_id)
+            .execute()
+        )
