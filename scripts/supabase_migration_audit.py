@@ -3,16 +3,24 @@ AIOS Supabase full-migration readiness audit.
 
 READ ONLY.
 
-This script examines every Notion Task and Project and reports:
+This script classifies Notion properties into:
 
-- all properties present in Notion
-- property types
-- how often each property is populated
-- which properties are currently mapped to the Supabase model
-- which populated properties are currently unmapped
-- tasks with multiple Project relations
-- tasks with multiple Parent Task relations
-- basic lifecycle-state inconsistencies
+1. CORE MAPPED
+   Stored directly in the new Supabase schema.
+
+2. LEGACY METADATA
+   Preserved inside legacy_metadata JSON.
+
+3. DERIVED / INTENTIONALLY EXCLUDED
+   Not migrated as task/project columns because they are:
+   - derived
+   - reverse relations
+   - execution outputs
+   - obsolete Notion workflow fields
+   - otherwise intentionally excluded
+
+Only populated properties that fall into none of those categories
+are treated as unresolved migration blockers.
 
 It does NOT modify Notion or Supabase.
 
@@ -34,10 +42,10 @@ from scripts.supabase_poc_import import (
 
 
 # ---------------------------------------------------------------------------
-# Properties intentionally represented in the current Supabase POC schema
+# Task property classification
 # ---------------------------------------------------------------------------
 
-MAPPED_TASK_PROPERTIES = {
+CORE_TASK_PROPERTIES = {
     "Task Name",
     "Open Loop",
     "Done",
@@ -51,16 +59,101 @@ MAPPED_TASK_PROPERTIES = {
     "Defer Until",
     "Just Do It",
     "Quick Win",
+    "Suggested Project",
     "Project",
     "Parent Task",
     "Step Order",
 }
 
 
-MAPPED_PROJECT_PROPERTIES = {
+LEGACY_TASK_PROPERTIES = {
+    "AI Generated",
+    "Do",
+    "Do Date",
+    "Duplicate",
+    "Duplicate notes",
+    "Priority",
+    "Reviewed",
+    "Start",
+    "End",
+    "Tags",
+    "Task Type",
+    "Who",
+}
+
+
+DERIVED_TASK_PROPERTIES = {
+    # AIOS execution state now belongs in execution history.
+    "Execution Rank",
+    "Execution Score",
+
+    # Current/legacy AI presentation or ranking state.
+    "Strong Candidate",
+    "Surfaced Quick Win",
+    "Focus",
+    "Focus Now",
+
+    # Reverse/derived relations.
+    "Sub Tasks",
+    "Has Open Subtasks",
+
+    # Notion-managed timestamps already mapped from page metadata.
+    "Create Date",
+    "Modified Date",
+
+    # Currently unused AI workflow properties.
+    "AI Confidence",
+    "AI Modified",
+    "Broken Down By AI",
+    "Clarified By AI",
+
+    # Currently unused relations / ontology fields.
+    "Goal",
+    "Knowledge Topic",
+    "Notes",
+    "Pillar",
+    "PiIlar Type",
+}
+
+
+# ---------------------------------------------------------------------------
+# Project property classification
+# ---------------------------------------------------------------------------
+
+CORE_PROJECT_PROPERTIES = {
     "Project Name",
     "Status",
     "Active",
+}
+
+
+LEGACY_PROJECT_PROPERTIES = {
+    "Area",
+    "Priority",
+    "Project Type",
+}
+
+
+DERIVED_PROJECT_PROPERTIES = {
+    # Notion rollups / reverse relations.
+    "Focus Now Tasks",
+    "Last Activity",
+    "Open Tasks",
+    "Task Relation",
+
+    # Notion-managed timestamp.
+    "Last Modified",
+
+    # Currently unused legacy/ontology properties.
+    "AI Locked",
+    "Areas",
+    "Notes",
+    "Notes DB",
+    "Outome",
+    "Related to Resources (Project)",
+    "Roles",
+    "Tags",
+    "User Created",
 }
 
 
@@ -71,6 +164,7 @@ MAPPED_PROJECT_PROPERTIES = {
 def property_is_populated(
     prop: dict[str, Any],
 ) -> bool:
+
     prop_type = prop.get("type")
 
     if prop_type == "title":
@@ -80,9 +174,6 @@ def property_is_populated(
         return bool(prop.get("rich_text"))
 
     if prop_type == "checkbox":
-        # False is still a meaningful stored value,
-        # but for migration auditing we only count True
-        # as materially populated.
         return prop.get("checkbox") is True
 
     if prop_type == "select":
@@ -119,41 +210,63 @@ def property_is_populated(
         return bool(prop.get("phone_number"))
 
     if prop_type == "formula":
-        value = prop.get("formula", {})
+        value = prop.get(
+            "formula",
+            {},
+        )
+
         formula_type = value.get("type")
 
         if formula_type:
-            return value.get(formula_type) is not None
+            return (
+                value.get(formula_type)
+                is not None
+            )
 
         return bool(value)
 
     if prop_type == "rollup":
-        return bool(prop.get("rollup"))
+        return bool(
+            prop.get("rollup")
+        )
 
     if prop_type == "created_time":
-        return bool(prop.get("created_time"))
+        return bool(
+            prop.get("created_time")
+        )
 
     if prop_type == "last_edited_time":
-        return bool(prop.get("last_edited_time"))
+        return bool(
+            prop.get("last_edited_time")
+        )
 
     if prop_type == "created_by":
-        return bool(prop.get("created_by"))
+        return bool(
+            prop.get("created_by")
+        )
 
     if prop_type == "last_edited_by":
-        return bool(prop.get("last_edited_by"))
+        return bool(
+            prop.get("last_edited_by")
+        )
 
-    # Unknown property types should be treated conservatively.
-    return bool(prop.get(prop_type))
+    return bool(
+        prop.get(prop_type)
+    )
 
 
 def relation_count(
     prop: dict[str, Any],
 ) -> int:
+
     if prop.get("type") != "relation":
         return 0
 
     return len(
-        prop.get("relation", [])
+        prop.get(
+            "relation",
+            [],
+        )
     )
 
 
@@ -161,12 +274,22 @@ def page_title(
     page: dict[str, Any],
     title_property: str,
 ) -> str:
+
     prop = (
-        page.get("properties", {})
-        .get(title_property, {})
+        page.get(
+            "properties",
+            {},
+        )
+        .get(
+            title_property,
+            {},
+        )
     )
 
-    values = prop.get("title", [])
+    values = prop.get(
+        "title",
+        [],
+    )
 
     text = "".join(
         item.get("plain_text", "")
@@ -177,23 +300,56 @@ def page_title(
 
 
 # ---------------------------------------------------------------------------
-# Generic database-property audit
+# Classification
+# ---------------------------------------------------------------------------
+
+def classify_property(
+    name: str,
+    core: set[str],
+    legacy: set[str],
+    derived: set[str],
+) -> str:
+
+    if name in core:
+        return "CORE"
+
+    if name in legacy:
+        return "LEGACY"
+
+    if name in derived:
+        return "DERIVED"
+
+    return "UNRESOLVED"
+
+
+# ---------------------------------------------------------------------------
+# Generic property audit
 # ---------------------------------------------------------------------------
 
 def audit_properties(
     pages: list[dict[str, Any]],
-    mapped_properties: set[str],
+    core_properties: set[str],
+    legacy_properties: set[str],
+    derived_properties: set[str],
     title_property: str,
     label: str,
-) -> None:
+) -> dict[str, int]:
 
-    types: dict[str, Counter[str]] = defaultdict(Counter)
+    types: dict[
+        str,
+        Counter[str],
+    ] = defaultdict(Counter)
+
     populated_counts: Counter[str] = Counter()
     presence_counts: Counter[str] = Counter()
 
-    examples: dict[str, list[str]] = defaultdict(list)
+    examples: dict[
+        str,
+        list[str],
+    ] = defaultdict(list)
 
     for page in pages:
+
         props = page.get(
             "properties",
             {},
@@ -205,6 +361,7 @@ def audit_properties(
         )
 
         for name, prop in props.items():
+
             presence_counts[name] += 1
 
             prop_type = (
@@ -215,17 +372,25 @@ def audit_properties(
             types[name][prop_type] += 1
 
             if property_is_populated(prop):
+
                 populated_counts[name] += 1
 
-                if len(examples[name]) < 3:
-                    examples[name].append(title)
+                if len(
+                    examples[name]
+                ) < 3:
+
+                    examples[name].append(
+                        title
+                    )
 
     property_names = sorted(
         presence_counts.keys()
     )
 
     print("\n" + "=" * 80)
-    print(f"{label.upper()} PROPERTY AUDIT")
+    print(
+        f"{label.upper()} PROPERTY AUDIT"
+    )
     print("=" * 80)
 
     print(
@@ -233,16 +398,24 @@ def audit_properties(
     )
 
     print(
-        f"Properties found: {len(property_names)}"
+        f"Properties found: "
+        f"{len(property_names)}"
     )
 
     print("\nAll properties:")
 
+    unresolved_populated: dict[
+        str,
+        int,
+    ] = {}
+
     for name in property_names:
-        mapped = (
-            "MAPPED"
-            if name in mapped_properties
-            else "UNMAPPED"
+
+        classification = classify_property(
+            name,
+            core_properties,
+            legacy_properties,
+            derived_properties,
         )
 
         type_text = ", ".join(
@@ -252,54 +425,65 @@ def audit_properties(
         )
 
         print(
-            f"  {mapped:8} "
+            f"  {classification:10} "
             f"{name:<30} "
             f"populated={populated_counts[name]:>4} "
             f"present={presence_counts[name]:>4} "
             f"type={type_text}"
         )
 
-    populated_unmapped = [
-        name
-        for name in property_names
         if (
-            name not in mapped_properties
+            classification == "UNRESOLVED"
             and populated_counts[name] > 0
-        )
-    ]
+        ):
+            unresolved_populated[name] = (
+                populated_counts[name]
+            )
 
-    print("\nPopulated but currently unmapped:")
+    print(
+        "\nPopulated unresolved properties:"
+    )
 
-    if not populated_unmapped:
+    if not unresolved_populated:
         print("  None")
 
     else:
-        for name in populated_unmapped:
+
+        for (
+            name,
+            count,
+        ) in unresolved_populated.items():
+
             print(
                 f"  - {name}: "
-                f"{populated_counts[name]} records"
+                f"{count} records"
             )
 
             for example in examples[name]:
                 print(
-                    f"      example: {example}"
+                    f"      example: "
+                    f"{example}"
                 )
+
+    return unresolved_populated
 
 
 # ---------------------------------------------------------------------------
-# Task-specific integrity checks
+# Task relationship audit
 # ---------------------------------------------------------------------------
 
 def audit_task_relationships(
     pages: list[dict[str, Any]],
-) -> None:
+) -> tuple[int, int]:
 
     multi_project = []
     multi_parent = []
+
     project_relations = 0
     parent_relations = 0
 
     for page in pages:
+
         props = page.get(
             "properties",
             {},
@@ -370,46 +554,20 @@ def audit_task_relationships(
         f"{len(multi_parent)}"
     )
 
-    if multi_project:
-        print(
-            "\nWARNING: Multiple-project tasks:"
-        )
-
-        for title, count in multi_project[:20]:
-            print(
-                f"  - {title} ({count} projects)"
-            )
-
-        if len(multi_project) > 20:
-            print(
-                f"  ... plus "
-                f"{len(multi_project) - 20} more"
-            )
-
-    if multi_parent:
-        print(
-            "\nWARNING: Multiple-parent tasks:"
-        )
-
-        for title, count in multi_parent[:20]:
-            print(
-                f"  - {title} ({count} parents)"
-            )
-
-        if len(multi_parent) > 20:
-            print(
-                f"  ... plus "
-                f"{len(multi_parent) - 20} more"
-            )
+    return (
+        len(multi_project),
+        len(multi_parent),
+    )
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle consistency audit
+# Task lifecycle audit
 # ---------------------------------------------------------------------------
 
 def checkbox_value(
     prop: dict[str, Any],
 ) -> bool:
+
     return (
         prop.get("type") == "checkbox"
         and prop.get("checkbox") is True
@@ -420,19 +578,13 @@ def audit_task_lifecycle(
     pages: list[dict[str, Any]],
 ) -> None:
 
-    contradictions = []
-
     state_counts = Counter()
 
     for page in pages:
+
         props = page.get(
             "properties",
             {},
-        )
-
-        title = page_title(
-            page,
-            "Task Name",
         )
 
         is_open = checkbox_value(
@@ -464,29 +616,23 @@ def audit_task_lifecycle(
             )
         ] += 1
 
-        # This is the most obvious contradictory state.
-        if is_open and is_done:
-            contradictions.append(
-                (
-                    title,
-                    is_open,
-                    is_done,
-                    is_archived,
-                )
-            )
-
     print("\n" + "=" * 80)
     print("TASK LIFECYCLE AUDIT")
     print("=" * 80)
 
     print(
-        "Observed Open / Done / Archived combinations:"
+        "Observed Open / Done / "
+        "Archived combinations:"
     )
 
-    for state, count in sorted(
+    for (
+        state,
+        count,
+    ) in sorted(
         state_counts.items(),
         key=lambda item: -item[1],
     ):
+
         print(
             f"  Open={state[0]:<5} "
             f"Done={state[1]:<5} "
@@ -495,72 +641,9 @@ def audit_task_lifecycle(
         )
 
     print(
-        "\nOpen=True AND Done=True: "
-        f"{len(contradictions)}"
-    )
-
-    if contradictions:
-        print(
-            "\nTasks with contradictory open/done state:"
-        )
-
-        for item in contradictions[:20]:
-            print(
-                f"  - {item[0]}"
-            )
-
-        if len(contradictions) > 20:
-            print(
-                f"  ... plus "
-                f"{len(contradictions) - 20} more"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Migration readiness summary
-# ---------------------------------------------------------------------------
-
-def populated_unmapped_properties(
-    pages: list[dict[str, Any]],
-    mapped_properties: set[str],
-) -> dict[str, int]:
-
-    counts: Counter[str] = Counter()
-
-    for page in pages:
-        props = page.get(
-            "properties",
-            {},
-        )
-
-        for name, prop in props.items():
-
-            if name in mapped_properties:
-                continue
-
-            if property_is_populated(prop):
-                counts[name] += 1
-
-    return dict(counts)
-
-
-def count_multi_relations(
-    pages: list[dict[str, Any]],
-    property_name: str,
-) -> int:
-
-    return sum(
-        1
-        for page in pages
-        if relation_count(
-            page.get(
-                "properties",
-                {},
-            ).get(
-                property_name,
-                {},
-            )
-        ) > 1
+        "\nNote: Open Loop and Done are "
+        "preserved independently for "
+        "migration parity."
     )
 
 
@@ -571,7 +654,10 @@ def count_multi_relations(
 def main() -> None:
 
     print("=" * 80)
-    print("AIOS SUPABASE FULL-MIGRATION READINESS AUDIT")
+    print(
+        "AIOS SUPABASE "
+        "FULL-MIGRATION READINESS AUDIT"
+    )
     print("=" * 80)
 
     print(
@@ -579,7 +665,9 @@ def main() -> None:
         "Supabase records will be changed."
     )
 
-    print("\nReading Projects from Notion...")
+    print(
+        "\nReading Projects from Notion..."
+    )
 
     projects = query_database(
         PROJECTS_DATABASE_ID
@@ -589,7 +677,9 @@ def main() -> None:
         f"Projects read: {len(projects)}"
     )
 
-    print("\nReading Tasks from Notion...")
+    print(
+        "\nReading Tasks from Notion..."
+    )
 
     tasks = query_database(
         TASKS_DATABASE_ID
@@ -599,21 +689,32 @@ def main() -> None:
         f"Tasks read: {len(tasks)}"
     )
 
-    audit_properties(
-        projects,
-        MAPPED_PROJECT_PROPERTIES,
-        "Project Name",
-        "Projects",
+    unresolved_projects = (
+        audit_properties(
+            projects,
+            CORE_PROJECT_PROPERTIES,
+            LEGACY_PROJECT_PROPERTIES,
+            DERIVED_PROJECT_PROPERTIES,
+            "Project Name",
+            "Projects",
+        )
     )
 
-    audit_properties(
-        tasks,
-        MAPPED_TASK_PROPERTIES,
-        "Task Name",
-        "Tasks",
+    unresolved_tasks = (
+        audit_properties(
+            tasks,
+            CORE_TASK_PROPERTIES,
+            LEGACY_TASK_PROPERTIES,
+            DERIVED_TASK_PROPERTIES,
+            "Task Name",
+            "Tasks",
+        )
     )
 
-    audit_task_relationships(
+    (
+        multi_project_count,
+        multi_parent_count,
+    ) = audit_task_relationships(
         tasks
     )
 
@@ -621,46 +722,18 @@ def main() -> None:
         tasks
     )
 
-    task_unmapped = (
-        populated_unmapped_properties(
-            tasks,
-            MAPPED_TASK_PROPERTIES,
-        )
-    )
-
-    project_unmapped = (
-        populated_unmapped_properties(
-            projects,
-            MAPPED_PROJECT_PROPERTIES,
-        )
-    )
-
-    multi_project_count = (
-        count_multi_relations(
-            tasks,
-            "Project",
-        )
-    )
-
-    multi_parent_count = (
-        count_multi_relations(
-            tasks,
-            "Parent Task",
-        )
-    )
-
     blockers = []
 
-    if task_unmapped:
+    if unresolved_tasks:
         blockers.append(
             "Tasks contain populated "
-            "unmapped properties."
+            "unresolved properties."
         )
 
-    if project_unmapped:
+    if unresolved_projects:
         blockers.append(
             "Projects contain populated "
-            "unmapped properties."
+            "unresolved properties."
         )
 
     if multi_project_count:
@@ -680,39 +753,40 @@ def main() -> None:
     print("=" * 80)
 
     print(
-        f"Projects examined:       "
+        f"Projects examined:        "
         f"{len(projects)}"
     )
 
     print(
-        f"Tasks examined:          "
+        f"Tasks examined:           "
         f"{len(tasks)}"
     )
 
     print(
-        f"Unmapped task fields:    "
-        f"{len(task_unmapped)}"
+        f"Unresolved task fields:   "
+        f"{len(unresolved_tasks)}"
     )
 
     print(
-        f"Unmapped project fields: "
-        f"{len(project_unmapped)}"
+        f"Unresolved project fields:"
+        f" {len(unresolved_projects)}"
     )
 
     print(
-        f"Multi-project tasks:     "
+        f"Multi-project tasks:      "
         f"{multi_project_count}"
     )
 
     print(
-        f"Multi-parent tasks:      "
+        f"Multi-parent tasks:       "
         f"{multi_parent_count}"
     )
 
     if blockers:
+
         print(
-            "\nRESULT: REVIEW REQUIRED BEFORE "
-            "FULL MIGRATION"
+            "\nRESULT: REVIEW REQUIRED "
+            "BEFORE FULL MIGRATION"
         )
 
         print(
@@ -725,9 +799,10 @@ def main() -> None:
             )
 
     else:
+
         print(
-            "\nRESULT: SCHEMA READY FOR "
-            "FULL MIGRATION"
+            "\nRESULT: SCHEMA READY "
+            "FOR FULL MIGRATION"
         )
 
 
