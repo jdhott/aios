@@ -1,9 +1,9 @@
 """
 Write one execution POC run and its task evaluations to Supabase
-through ExecutionRepository.
+through TaskRepository + ExecutionRepository.
 
 This script:
-- reads the existing Supabase POC task sample
+- reads the existing Supabase POC task sample through TaskRepository
 - runs the current Execution Engine scoring logic
 - persists the run through ExecutionRepository
 - persists task evaluations through ExecutionRepository
@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from aios.storage.execution_repository import ExecutionRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.storage.task_repository import TaskRepository
 
 from scripts.supabase_execution_parity import (
     get_open_tasks,
     rank_tasks_like_execution_engine,
-    supabase_row_to_engine_task,
+    task_model_to_engine_task,
 )
 
 
@@ -30,29 +31,21 @@ def main() -> None:
     print("=" * 72)
 
     store = SupabaseStore()
-    repository = ExecutionRepository(store)
+    task_repository = TaskRepository(store)
+    execution_repository = ExecutionRepository(store)
 
-    print("\nReading current POC tasks from Supabase...")
+    print("\nReading current POC tasks through TaskRepository...")
 
-    # This direct task read is temporary.
-    # It will move into TaskRepository in the next milestone.
-    response = (
-        store.client
-        .table("tasks")
-        .select("*")
-        .execute()
-    )
+    tasks = task_repository.get_all_tasks()
 
-    rows = response.data or []
-
-    if not rows:
+    if not tasks:
         raise RuntimeError(
             "No POC tasks found in Supabase."
         )
 
     engine_tasks = [
-        supabase_row_to_engine_task(row)
-        for row in rows
+        task_model_to_engine_task(task)
+        for task in tasks
     ]
 
     open_tasks = get_open_tasks(
@@ -63,14 +56,14 @@ def main() -> None:
         open_tasks
     )
 
-    print(f"POC tasks found:      {len(rows)}")
+    print(f"POC tasks found:      {len(tasks)}")
     print(f"Open tasks:           {len(open_tasks)}")
     print(f"Eligible evaluations: {len(ranked)}")
 
-    print("\nCreating AIOS run through repository...")
+    print("\nCreating AIOS run through ExecutionRepository...")
 
-    run_id = repository.create_run(
-        "execution_repository_poc",
+    run_id = execution_repository.create_run(
+        "task_repository_execution_poc",
         tasks_scanned=len(open_tasks),
     )
 
@@ -78,9 +71,9 @@ def main() -> None:
 
     try:
         task_id_map = {
-            row["legacy_notion_id"]: row["id"]
-            for row in rows
-            if row.get("legacy_notion_id")
+            task.legacy_notion_id: task.id
+            for task in tasks
+            if task.legacy_notion_id
         }
 
         evaluations = []
@@ -122,31 +115,31 @@ def main() -> None:
 
         print(
             f"\nWriting {len(evaluations)} "
-            "evaluations through repository..."
+            "evaluations through ExecutionRepository..."
         )
 
-        repository.write_evaluations(
+        execution_repository.write_evaluations(
             run_id,
             evaluations,
         )
 
-        repository.complete_run(
+        execution_repository.complete_run(
             run_id
         )
 
     except Exception:
-        repository.fail_run(
+        execution_repository.fail_run(
             run_id
         )
         raise
 
     print("\nValidating repository results...")
 
-    run = repository.get_run(
+    run = execution_repository.get_run(
         run_id
     )
 
-    stored = repository.get_run_evaluations(
+    stored = execution_repository.get_run_evaluations(
         run_id
     )
 
@@ -193,8 +186,8 @@ def main() -> None:
         )
 
     print(
-        "\nRESULT: EXECUTION REPOSITORY "
-        "POC SUCCESSFUL"
+        "\nRESULT: TASK + EXECUTION "
+        "REPOSITORY POC SUCCESSFUL"
     )
 
     print(

@@ -3,8 +3,8 @@ AIOS Supabase execution parity test.
 
 Compares Execution Engine V2 results for the same task sample from:
 
-    1. Raw Notion task records
-    2. Supabase task rows converted into the legacy Notion-shaped payload
+1. Raw Notion task records
+2. Supabase Task models loaded through TaskRepository
 
 This script is READ ONLY.
 
@@ -25,6 +25,8 @@ import argparse
 from typing import Any
 
 from aios.storage.supabase_store import SupabaseStore
+from aios.storage.task_repository import TaskRepository
+
 from execution_engine_v2 import (
     EVALUATOR_AVAILABLE,
     evaluate_execution_scoring,
@@ -45,7 +47,7 @@ DEFAULT_BNA_LIMIT = 5
 
 
 # ---------------------------------------------------------------------------
-# Supabase -> legacy Execution Engine compatibility
+# Legacy Execution Engine compatibility helpers
 # ---------------------------------------------------------------------------
 
 def title_property(value: str) -> dict[str, Any]:
@@ -98,15 +100,112 @@ def number_property(value: int | float | None) -> dict[str, Any]:
     }
 
 
+def task_model_to_engine_task(task) -> dict[str, Any]:
+    """
+    Convert the datastore-neutral AIOS Task model into the temporary
+    Notion-shaped structure expected by the current Execution Engine V2.
+
+    This compatibility layer is temporary and will disappear once the
+    execution engine consumes Task models directly.
+    """
+
+    return {
+        "id": task.legacy_notion_id,
+        "_supabase_id": task.id,
+        "_source": "supabase",
+
+        "properties": {
+            "Task Name":
+                title_property(
+                    task.title
+                ),
+
+            "Open Loop":
+                checkbox_property(
+                    task.is_open
+                ),
+
+            "Done":
+                checkbox_property(
+                    task.is_done
+                ),
+
+            "Archived":
+                checkbox_property(
+                    task.is_archived
+                ),
+
+            "Status":
+                select_property(
+                    task.status
+                ),
+
+            "Importance":
+                select_property(
+                    task.importance
+                ),
+
+            "Urgency":
+                select_property(
+                    task.urgency
+                ),
+
+            "Effort":
+                select_property(
+                    task.effort
+                ),
+
+            "Duration":
+                select_property(
+                    task.duration
+                ),
+
+            "Due Date":
+                date_property(
+                    task.due_at.isoformat()
+                    if task.due_at
+                    else None
+                ),
+
+            "Defer Until":
+                date_property(
+                    task.defer_until.isoformat()
+                    if task.defer_until
+                    else None
+                ),
+
+            "Just Do It":
+                checkbox_property(
+                    task.is_just_do_it
+                ),
+
+            "Quick Win":
+                checkbox_property(
+                    task.is_quick_win
+                ),
+
+            # These no longer live on the task row in Supabase.
+            # They remain present here only because the legacy engine
+            # expects the properties to exist.
+            "Execution Score":
+                number_property(None),
+
+            "Execution Rank":
+                number_property(None),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legacy row compatibility helper
+#
+# Keep this for now because supabase_write_evaluations.py still imports it.
+# We will remove it when that script is converted to TaskRepository too.
+# ---------------------------------------------------------------------------
+
 def supabase_row_to_engine_task(
     row: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Convert a Supabase task row into the temporary Notion-shaped
-    payload expected by the current Execution Engine V2.
-
-    This compatibility layer is intentionally temporary.
-    """
 
     return {
         "id": row["legacy_notion_id"],
@@ -116,7 +215,8 @@ def supabase_row_to_engine_task(
         "properties": {
             "Task Name":
                 title_property(
-                    row.get("title") or "(Untitled Task)"
+                    row.get("title")
+                    or "(Untitled Task)"
                 ),
 
             "Open Loop":
@@ -171,17 +271,20 @@ def supabase_row_to_engine_task(
 
             "Just Do It":
                 checkbox_property(
-                    row.get("is_just_do_it", False)
+                    row.get(
+                        "is_just_do_it",
+                        False,
+                    )
                 ),
 
             "Quick Win":
                 checkbox_property(
-                    row.get("is_quick_win", False)
+                    row.get(
+                        "is_quick_win",
+                        False,
+                    )
                 ),
 
-            # These do not live on tasks in the new architecture,
-            # but the legacy engine checks for them during sparse-reset
-            # logic. They are intentionally empty here.
             "Execution Score":
                 number_property(None),
 
@@ -200,7 +303,7 @@ def rank_tasks_like_execution_engine(
 ) -> list[dict[str, Any]]:
     """
     Reproduce the scoring/ranking portion of rebuild_execution_state()
-    without calling its mutation, telemetry or persistence paths.
+    without calling mutation, telemetry or persistence paths.
 
     Uses the current Execution Engine V2 scoring functions themselves.
     """
@@ -215,7 +318,9 @@ def rank_tasks_like_execution_engine(
 
         title = extract_title(task)
 
-        orchestration = evaluate_execution_scoring(task)
+        orchestration = evaluate_execution_scoring(
+            task
+        )
 
         if EVALUATOR_AVAILABLE:
 
@@ -238,7 +343,9 @@ def rank_tasks_like_execution_engine(
                 else:
 
                     structurally_reasonable = (
-                        len(title.strip().split()) >= 3
+                        len(
+                            title.strip().split()
+                        ) >= 3
                     )
 
                     if structurally_reasonable:
@@ -274,7 +381,6 @@ def rank_tasks_like_execution_engine(
             ],
         })
 
-    # This matches the current Execution Engine V2 sorting.
     ranked.sort(
         key=lambda item: (
             -item["score"],
@@ -293,7 +399,7 @@ def rank_tasks_like_execution_engine(
 
 
 # ---------------------------------------------------------------------------
-# Fetch same sample from both systems
+# Fetch the same sample from both systems
 # ---------------------------------------------------------------------------
 
 def get_notion_sample(
@@ -339,25 +445,26 @@ def get_supabase_sample(
     notion_ids: set[str],
 ) -> list[dict[str, Any]]:
     """
-    Fetch the imported POC sample from Supabase.
+    Fetch the imported POC sample through TaskRepository.
+
+    Supabase table structure is intentionally hidden from this function.
     """
 
-    response = (
-        store.client
-        .table("tasks")
-        .select("*")
-        .in_(
-            "legacy_notion_id",
-            list(notion_ids),
-        )
-        .execute()
+    repository = TaskRepository(
+        store
     )
 
-    rows = response.data or []
+    tasks = repository.get_all_tasks()
+
+    selected = [
+        task
+        for task in tasks
+        if task.legacy_notion_id in notion_ids
+    ]
 
     return [
-        supabase_row_to_engine_task(row)
-        for row in rows
+        task_model_to_engine_task(task)
+        for task in selected
     ]
 
 
