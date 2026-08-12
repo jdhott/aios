@@ -56,9 +56,16 @@ class TaskRepository:
                 "is_quick_win",
                 False,
             ),
+            suggested_project=row.get(
+                "suggested_project"
+            ),
             project_id=row.get("project_id"),
             parent_task_id=row.get("parent_task_id"),
             step_order=row.get("step_order"),
+            legacy_metadata=(
+                row.get("legacy_metadata")
+                or {}
+            ),
             created_at=parse_datetime(
                 row.get("created_at")
             ),
@@ -184,9 +191,11 @@ class TaskRepository:
             ),
             "is_just_do_it": task.is_just_do_it,
             "is_quick_win": task.is_quick_win,
+            "suggested_project": task.suggested_project,
             "project_id": task.project_id,
             "parent_task_id": task.parent_task_id,
             "step_order": task.step_order,
+            "legacy_metadata": task.legacy_metadata,
             "created_at": (
                 task.created_at.isoformat()
                 if task.created_at

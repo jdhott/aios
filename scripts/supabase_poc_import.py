@@ -2,7 +2,7 @@
 Supabase migration proof of concept.
 
 Reads Projects and Tasks from the existing Notion databases and optionally
-writes a controlled sample into Supabase.
+writes a controlled sample into Supabase through the repository layer.
 
 DEFAULT BEHAVIOUR IS READ-ONLY.
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -29,7 +30,9 @@ import requests
 from dotenv import load_dotenv
 
 from aios.models import Project, Task
+from aios.storage.project_repository import ProjectRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.storage.task_repository import TaskRepository
 
 
 # ---------------------------------------------------------------------------
@@ -65,13 +68,20 @@ NOTION_HEADERS = {
 # Notion helpers
 # ---------------------------------------------------------------------------
 
-def query_database(database_id: str) -> list[dict[str, Any]]:
+def query_database(
+    database_id: str,
+) -> list[dict[str, Any]]:
     """Read every record from a Notion database."""
 
     if not database_id:
-        raise RuntimeError("Notion database ID is not configured.")
+        raise RuntimeError(
+            "Notion database ID is not configured."
+        )
 
-    url = f"https://api.notion.com/v1/databases/{database_id}/query"
+    url = (
+        f"https://api.notion.com/v1/databases/"
+        f"{database_id}/query"
+    )
 
     payload: dict[str, Any] = {
         "page_size": 100,
@@ -89,32 +99,48 @@ def query_database(database_id: str) -> list[dict[str, Any]]:
 
         if not response.ok:
             print("\nERROR querying Notion database")
-            print(f"Database: {database_id[:8]}...")
-            print(f"HTTP status: {response.status_code}")
+            print(
+                f"Database: {database_id[:8]}..."
+            )
+            print(
+                f"HTTP status: {response.status_code}"
+            )
             print(response.text)
+
             response.raise_for_status()
 
         data = response.json()
 
-        results.extend(data.get("results", []))
+        results.extend(
+            data.get("results", [])
+        )
 
         if not data.get("has_more"):
             break
 
-        payload["start_cursor"] = data["next_cursor"]
+        payload["start_cursor"] = (
+            data["next_cursor"]
+        )
 
     return results
 
 
-def plain_text(prop: dict[str, Any]) -> Optional[str]:
-    """Read text from a Notion title or rich_text property."""
+def plain_text(
+    prop: dict[str, Any],
+) -> Optional[str]:
+    """Read title or rich_text content."""
 
     prop_type = prop.get("type")
 
     if prop_type == "title":
         values = prop.get("title", [])
+
     elif prop_type == "rich_text":
-        values = prop.get("rich_text", [])
+        values = prop.get(
+            "rich_text",
+            [],
+        )
+
     else:
         return None
 
@@ -126,19 +152,27 @@ def plain_text(prop: dict[str, Any]) -> Optional[str]:
     return value or None
 
 
-def select_name(prop: dict[str, Any]) -> Optional[str]:
+def select_name(
+    prop: dict[str, Any],
+) -> Optional[str]:
     """Read a Notion select or status property."""
 
     prop_type = prop.get("type")
 
     if prop_type == "select":
         value = prop.get("select")
+
     elif prop_type == "status":
         value = prop.get("status")
+
     else:
         return None
 
-    return value.get("name") if value else None
+    return (
+        value.get("name")
+        if value
+        else None
+    )
 
 
 def checkbox_value(
@@ -150,11 +184,18 @@ def checkbox_value(
     if prop.get("type") != "checkbox":
         return default
 
-    return bool(prop.get("checkbox", default))
+    return bool(
+        prop.get(
+            "checkbox",
+            default,
+        )
+    )
 
 
-def date_value(prop: dict[str, Any]) -> Optional[datetime]:
-    """Read the start value from a Notion date property."""
+def date_value(
+    prop: dict[str, Any],
+) -> Optional[datetime]:
+    """Read a Notion date start value."""
 
     if prop.get("type") != "date":
         return None
@@ -170,11 +211,16 @@ def date_value(prop: dict[str, Any]) -> Optional[datetime]:
         return None
 
     return datetime.fromisoformat(
-        start.replace("Z", "+00:00")
+        start.replace(
+            "Z",
+            "+00:00",
+        )
     )
 
 
-def number_value(prop: dict[str, Any]) -> Optional[int]:
+def number_value(
+    prop: dict[str, Any],
+) -> Optional[int]:
     """Read a Notion number property."""
 
     if prop.get("type") != "number":
@@ -188,7 +234,9 @@ def number_value(prop: dict[str, Any]) -> Optional[int]:
     return int(value)
 
 
-def relation_ids(prop: dict[str, Any]) -> list[str]:
+def relation_ids(
+    prop: dict[str, Any],
+) -> list[str]:
     """Return related Notion page IDs."""
 
     if prop.get("type") != "relation":
@@ -196,40 +244,114 @@ def relation_ids(prop: dict[str, Any]) -> list[str]:
 
     return [
         item["id"]
-        for item in prop.get("relation", [])
+        for item in prop.get(
+            "relation",
+            [],
+        )
         if item.get("id")
     ]
 
 
+def multi_select_names(
+    prop: dict[str, Any],
+) -> list[str]:
+    """Read names from a Notion multi_select property."""
+
+    if prop.get("type") != "multi_select":
+        return []
+
+    return [
+        item.get("name")
+        for item in prop.get(
+            "multi_select",
+            [],
+        )
+        if item.get("name")
+    ]
+
+
+def optional_iso_date(
+    prop: dict[str, Any],
+) -> Optional[str]:
+    """Return a Notion date as an ISO string for legacy metadata."""
+
+    value = date_value(prop)
+
+    return (
+        value.isoformat()
+        if value
+        else None
+    )
+
+
 # ---------------------------------------------------------------------------
-# Translation: Notion -> AIOS domain models
+# Notion -> AIOS domain models
 # ---------------------------------------------------------------------------
 
 def notion_project_to_model(
     page: dict[str, Any],
 ) -> Project:
 
-    props = page.get("properties", {})
+    props = page.get(
+        "properties",
+        {},
+    )
+
+    legacy_metadata = {
+        "area": select_name(
+            props.get("Area", {})
+        ),
+        "priority": select_name(
+            props.get("Priority", {})
+        ),
+        "project_type": select_name(
+            props.get("Project Type", {})
+        ),
+    }
+
+    legacy_metadata = {
+        key: value
+        for key, value in legacy_metadata.items()
+        if value is not None
+    }
 
     return Project(
         id=page["id"],
         legacy_notion_id=page["id"],
+
         name=(
-            plain_text(props.get("Project Name", {}))
+            plain_text(
+                props.get(
+                    "Project Name",
+                    {},
+                )
+            )
             or "(Untitled Project)"
         ),
+
         status=select_name(
-            props.get("Status", {})
+            props.get(
+                "Status",
+                {},
+            )
         ),
+
         is_active=checkbox_value(
-            props.get("Active", {})
+            props.get(
+                "Active",
+                {},
+            )
         ),
+
+        legacy_metadata=legacy_metadata,
+
         created_at=datetime.fromisoformat(
             page["created_time"].replace(
                 "Z",
                 "+00:00",
             )
         ),
+
         updated_at=datetime.fromisoformat(
             page["last_edited_time"].replace(
                 "Z",
@@ -243,76 +365,211 @@ def notion_task_to_model(
     page: dict[str, Any],
 ) -> Task:
 
-    props = page.get("properties", {})
+    props = page.get(
+        "properties",
+        {},
+    )
 
     project_ids = relation_ids(
-        props.get("Project", {})
+        props.get(
+            "Project",
+            {},
+        )
     )
 
     parent_ids = relation_ids(
-        props.get("Parent Task", {})
+        props.get(
+            "Parent Task",
+            {},
+        )
     )
+
+    suggested_project = plain_text(
+        props.get(
+            "Suggested Project",
+            {},
+        )
+    )
+
+    legacy_metadata = {
+        "do": select_name(
+            props.get("Do", {})
+        ),
+
+        "do_date": optional_iso_date(
+            props.get("Do Date", {})
+        ),
+
+        "priority": select_name(
+            props.get("Priority", {})
+        ),
+
+        "task_type": select_name(
+            props.get("Task Type", {})
+        ),
+
+        "who": select_name(
+            props.get("Who", {})
+        ),
+
+        "tags": (
+            multi_select_names(
+                props.get("Tags", {})
+            )
+            or None
+        ),
+
+        "reviewed": (
+            True
+            if checkbox_value(
+                props.get("Reviewed", {})
+            )
+            else None
+        ),
+
+        "ai_generated": (
+            True
+            if checkbox_value(
+                props.get("AI Generated", {})
+            )
+            else None
+        ),
+
+        "duplicate": (
+            True
+            if checkbox_value(
+                props.get("Duplicate", {})
+            )
+            else None
+        ),
+
+        "duplicate_notes": plain_text(
+            props.get(
+                "Duplicate notes",
+                {},
+            )
+        ),
+
+        "start": optional_iso_date(
+            props.get("Start", {})
+        ),
+
+        "end": optional_iso_date(
+            props.get("End", {})
+        ),
+    }
+
+    legacy_metadata = {
+        key: value
+        for key, value in legacy_metadata.items()
+        if value not in (
+            None,
+            [],
+            {},
+        )
+    }
 
     return Task(
         id=page["id"],
         legacy_notion_id=page["id"],
 
         title=(
-            plain_text(props.get("Task Name", {}))
+            plain_text(
+                props.get(
+                    "Task Name",
+                    {},
+                )
+            )
             or "(Untitled Task)"
         ),
 
         is_open=checkbox_value(
-            props.get("Open Loop", {}),
+            props.get(
+                "Open Loop",
+                {},
+            ),
             True,
         ),
 
         is_done=checkbox_value(
-            props.get("Done", {})
+            props.get(
+                "Done",
+                {},
+            )
         ),
 
         is_archived=checkbox_value(
-            props.get("Archived", {})
+            props.get(
+                "Archived",
+                {},
+            )
         ),
 
         status=select_name(
-            props.get("Status", {})
+            props.get(
+                "Status",
+                {},
+            )
         ),
 
         importance=select_name(
-            props.get("Importance", {})
+            props.get(
+                "Importance",
+                {},
+            )
         ),
 
         urgency=select_name(
-            props.get("Urgency", {})
+            props.get(
+                "Urgency",
+                {},
+            )
         ),
 
         effort=select_name(
-            props.get("Effort", {})
+            props.get(
+                "Effort",
+                {},
+            )
         ),
 
         duration=select_name(
-            props.get("Duration", {})
+            props.get(
+                "Duration",
+                {},
+            )
         ),
 
         due_at=date_value(
-            props.get("Due Date", {})
+            props.get(
+                "Due Date",
+                {},
+            )
         ),
 
         defer_until=date_value(
-            props.get("Defer Until", {})
+            props.get(
+                "Defer Until",
+                {},
+            )
         ),
 
         is_just_do_it=checkbox_value(
-            props.get("Just Do It", {})
+            props.get(
+                "Just Do It",
+                {},
+            )
         ),
 
         is_quick_win=checkbox_value(
-            props.get("Quick Win", {})
+            props.get(
+                "Quick Win",
+                {},
+            )
         ),
 
-        # During extraction these are still Notion IDs.
-        # They are converted to Supabase UUIDs before writing.
+        suggested_project=suggested_project,
+
         project_id=(
             project_ids[0]
             if project_ids
@@ -326,8 +583,13 @@ def notion_task_to_model(
         ),
 
         step_order=number_value(
-            props.get("Step Order", {})
+            props.get(
+                "Step Order",
+                {},
+            )
         ),
+
+        legacy_metadata=legacy_metadata,
 
         created_at=datetime.fromisoformat(
             page["created_time"].replace(
@@ -353,11 +615,6 @@ def select_representative_tasks(
     tasks: list[Task],
     limit: int,
 ) -> list[Task]:
-    """
-    Select a deterministic cross-section of the task database.
-
-    The goal is coverage, not randomness.
-    """
 
     selected: list[Task] = []
     selected_ids: set[str] = set()
@@ -388,7 +645,6 @@ def select_representative_tasks(
             if added >= count:
                 return
 
-    # Open tasks attached to projects
     add_matching(
         lambda t:
             t.is_open
@@ -398,7 +654,6 @@ def select_representative_tasks(
         4,
     )
 
-    # Open unprojected tasks
     add_matching(
         lambda t:
             t.is_open
@@ -408,7 +663,6 @@ def select_representative_tasks(
         4,
     )
 
-    # Quick Wins
     add_matching(
         lambda t:
             t.is_quick_win
@@ -418,7 +672,6 @@ def select_representative_tasks(
         3,
     )
 
-    # Tasks with due dates
     add_matching(
         lambda t:
             t.due_at is not None
@@ -427,7 +680,6 @@ def select_representative_tasks(
         3,
     )
 
-    # Deferred tasks
     add_matching(
         lambda t:
             t.defer_until is not None
@@ -435,35 +687,30 @@ def select_representative_tasks(
         2,
     )
 
-    # Child/subtasks
     add_matching(
         lambda t:
             t.parent_task_id is not None,
         3,
     )
 
-    # Completed tasks
     add_matching(
         lambda t:
             t.is_done,
         2,
     )
 
-    # Archived tasks
     add_matching(
         lambda t:
             t.is_archived,
         2,
     )
 
-    # Just Do It tasks
     add_matching(
         lambda t:
             t.is_just_do_it,
         2,
     )
 
-    # Fill remaining slots with open tasks
     add_matching(
         lambda t:
             t.is_open
@@ -476,120 +723,57 @@ def select_representative_tasks(
 
 
 # ---------------------------------------------------------------------------
-# Supabase helpers
+# Repository-backed Supabase migration
 # ---------------------------------------------------------------------------
 
-def serialize_datetime(
-    value: Optional[datetime],
-) -> Optional[str]:
-
-    return (
-        value.isoformat()
-        if value is not None
-        else None
-    )
-
-
 def upsert_projects(
-    store: SupabaseStore,
+    repository: ProjectRepository,
     projects: list[Project],
 ) -> dict[str, str]:
-    """
-    Upsert all Notion projects.
 
-    Returns:
-        {
-            notion_project_id: supabase_project_uuid
-        }
-    """
+    print(
+        "\nWriting projects through "
+        "ProjectRepository..."
+    )
 
-    print("\nWriting projects to Supabase...")
-
-    for project in projects:
-
-        payload = {
-            "legacy_notion_id":
-                project.legacy_notion_id,
-
-            "name":
-                project.name,
-
-            "status":
-                project.status,
-
-            "is_active":
-                project.is_active,
-
-            "created_at":
-                serialize_datetime(
-                    project.created_at
-                ),
-
-            "updated_at":
-                serialize_datetime(
-                    project.updated_at
-                ),
-
-            "completed_at":
-                serialize_datetime(
-                    project.completed_at
-                ),
-        }
-
-        (
-            store.client
-            .table("projects")
-            .upsert(
-                payload,
-                on_conflict="legacy_notion_id",
-            )
-            .execute()
+    stored_projects = (
+        repository.upsert_projects(
+            projects
         )
-
-    # Fetch the authoritative Supabase UUID mapping.
-    response = (
-        store.client
-        .table("projects")
-        .select(
-            "id, legacy_notion_id"
-        )
-        .execute()
     )
 
     project_map: dict[str, str] = {}
 
-    for row in response.data or []:
+    for project in stored_projects:
 
-        notion_id = row.get(
-            "legacy_notion_id"
-        )
-
-        supabase_id = row.get("id")
-
-        if notion_id and supabase_id:
-            project_map[notion_id] = supabase_id
+        if (
+            project.legacy_notion_id
+            and project.id
+        ):
+            project_map[
+                project.legacy_notion_id
+            ] = project.id
 
     print(
-        f"Projects available in Supabase: "
-        f"{len(project_map)}"
+        "Projects available through repository: "
+        f"{repository.count_projects()}"
     )
 
     return project_map
 
 
 def upsert_sample_tasks(
-    store: SupabaseStore,
+    repository: TaskRepository,
     tasks: list[Task],
     project_map: dict[str, str],
 ) -> dict[str, str]:
-    """
-    Insert/update the POC task sample.
 
-    Parent relationships are intentionally omitted in this
-    first pass and added later.
-    """
+    print(
+        "\nWriting task sample through "
+        "TaskRepository..."
+    )
 
-    print("\nWriting task sample to Supabase...")
+    task_map: dict[str, str] = {}
 
     for task in tasks:
 
@@ -604,132 +788,39 @@ def upsert_sample_tasks(
 
             if not supabase_project_id:
                 print(
-                    "WARNING: Project mapping missing "
-                    f"for task {task.title!r}"
+                    "WARNING: Missing project "
+                    f"mapping for {task.title!r}"
                 )
 
-        payload = {
-            "legacy_notion_id":
-                task.legacy_notion_id,
-
-            "title":
-                task.title,
-
-            "is_open":
-                task.is_open,
-
-            "is_done":
-                task.is_done,
-
-            "is_archived":
-                task.is_archived,
-
-            "status":
-                task.status,
-
-            "importance":
-                task.importance,
-
-            "urgency":
-                task.urgency,
-
-            "effort":
-                task.effort,
-
-            "duration":
-                task.duration,
-
-            "due_at":
-                serialize_datetime(
-                    task.due_at
-                ),
-
-            "defer_until":
-                serialize_datetime(
-                    task.defer_until
-                ),
-
-            "is_just_do_it":
-                task.is_just_do_it,
-
-            "is_quick_win":
-                task.is_quick_win,
-
-            "project_id":
-                supabase_project_id,
-
-            # Added in second pass.
-            "parent_task_id":
-                None,
-
-            "step_order":
-                task.step_order,
-
-            "created_at":
-                serialize_datetime(
-                    task.created_at
-                ),
-
-            "updated_at":
-                serialize_datetime(
-                    task.updated_at
-                ),
-
-            "completed_at":
-                serialize_datetime(
-                    task.completed_at
-                ),
-        }
-
-        (
-            store.client
-            .table("tasks")
-            .upsert(
-                payload,
-                on_conflict="legacy_notion_id",
+        stored_task = (
+            repository.upsert_task(
+                replace(
+                    task,
+                    project_id=
+                        supabase_project_id,
+                    parent_task_id=None,
+                )
             )
-            .execute()
         )
 
-    response = (
-        store.client
-        .table("tasks")
-        .select(
-            "id, legacy_notion_id"
-        )
-        .execute()
-    )
-
-    task_map: dict[str, str] = {}
-
-    for row in response.data or []:
-
-        notion_id = row.get(
-            "legacy_notion_id"
-        )
-
-        supabase_id = row.get("id")
-
-        if notion_id and supabase_id:
-            task_map[notion_id] = supabase_id
+        if task.legacy_notion_id:
+            task_map[
+                task.legacy_notion_id
+            ] = stored_task.id
 
     print(
-        f"Tasks currently available in Supabase: "
-        f"{len(task_map)}"
+        "Tasks available through repository: "
+        f"{repository.count_tasks()}"
     )
 
     return task_map
 
 
 def apply_parent_relationships(
-    store: SupabaseStore,
+    repository: TaskRepository,
     tasks: list[Task],
     task_map: dict[str, str],
 ) -> int:
-    """
-    Add parent_task_id relationships where both parent
-    and child exist in the POC sample.
-    """
 
     updated = 0
 
@@ -738,8 +829,13 @@ def apply_parent_relationships(
         if not task.parent_task_id:
             continue
 
+        if not task.legacy_notion_id:
+            continue
+
         child_supabase_id = (
-            task_map.get(task.id)
+            task_map.get(
+                task.legacy_notion_id
+            )
         )
 
         parent_supabase_id = (
@@ -759,18 +855,9 @@ def apply_parent_relationships(
             )
             continue
 
-        (
-            store.client
-            .table("tasks")
-            .update({
-                "parent_task_id":
-                    parent_supabase_id
-            })
-            .eq(
-                "id",
-                child_supabase_id,
-            )
-            .execute()
+        repository.update_parent_task(
+            child_supabase_id,
+            parent_supabase_id,
         )
 
         updated += 1
@@ -779,7 +866,7 @@ def apply_parent_relationships(
 
 
 # ---------------------------------------------------------------------------
-# Validation
+# Reporting / validation
 # ---------------------------------------------------------------------------
 
 def print_dry_run_summary(
@@ -816,28 +903,63 @@ def print_dry_run_summary(
         if task.is_quick_win
     ]
 
+    suggested = [
+        task
+        for task in tasks
+        if task.suggested_project
+    ]
+
+    metadata_tasks = [
+        task
+        for task in tasks
+        if task.legacy_metadata
+    ]
+
     print("\nPOC summary:")
+
     print(
-        f"  Total projects:       {len(projects)}"
-    )
-    print(
-        f"  Total tasks:          {len(tasks)}"
-    )
-    print(
-        f"  Open tasks:           {len(open_tasks)}"
-    )
-    print(
-        f"  Tasks with projects:  {len(project_tasks)}"
-    )
-    print(
-        f"  Tasks with parents:   {len(parent_tasks)}"
-    )
-    print(
-        f"  Quick Win tasks:      {len(quick_wins)}"
+        f"  Total projects:       "
+        f"{len(projects)}"
     )
 
     print(
-        f"  POC task sample:      {len(sample)}"
+        f"  Total tasks:          "
+        f"{len(tasks)}"
+    )
+
+    print(
+        f"  Open tasks:           "
+        f"{len(open_tasks)}"
+    )
+
+    print(
+        f"  Tasks with projects:  "
+        f"{len(project_tasks)}"
+    )
+
+    print(
+        f"  Tasks with parents:   "
+        f"{len(parent_tasks)}"
+    )
+
+    print(
+        f"  Quick Win tasks:      "
+        f"{len(quick_wins)}"
+    )
+
+    print(
+        f"  Suggested projects:   "
+        f"{len(suggested)}"
+    )
+
+    print(
+        f"  Tasks with metadata:  "
+        f"{len(metadata_tasks)}"
+    )
+
+    print(
+        f"  POC task sample:      "
+        f"{len(sample)}"
     )
 
     print("\nSelected POC tasks:")
@@ -880,99 +1002,124 @@ def print_dry_run_summary(
         if task.defer_until:
             flags.append("deferred")
 
-        flag_text = ", ".join(flags)
+        if task.suggested_project:
+            flags.append("suggested-project")
+
+        if task.legacy_metadata:
+            flags.append("legacy-metadata")
 
         print(
             f"  {index:02d}. "
             f"{task.title} "
-            f"[{flag_text}]"
+            f"[{', '.join(flags)}]"
         )
 
 
 def validate_supabase(
-    store: SupabaseStore,
+    project_repository: ProjectRepository,
+    task_repository: TaskRepository,
     expected_projects: int,
     sample: list[Task],
 ) -> None:
 
-    projects_response = (
-        store.client
-        .table("projects")
-        .select(
-            "id, legacy_notion_id, name"
-        )
-        .execute()
+    projects = (
+        project_repository
+        .get_all_projects()
     )
 
-    tasks_response = (
-        store.client
-        .table("tasks")
-        .select(
-            (
-                "id, legacy_notion_id, title, "
-                "project_id, parent_task_id"
-            )
-        )
-        .execute()
-    )
-
-    supabase_projects = (
-        projects_response.data or []
-    )
-
-    supabase_tasks = (
-        tasks_response.data or []
+    tasks = (
+        task_repository
+        .get_all_tasks()
     )
 
     sample_notion_ids = {
-        task.id
+        task.legacy_notion_id
         for task in sample
+        if task.legacy_notion_id
     }
 
     imported_sample = [
-        row
-        for row in supabase_tasks
-        if row.get("legacy_notion_id")
+        task
+        for task in tasks
+        if task.legacy_notion_id
         in sample_notion_ids
     ]
 
     linked_projects = sum(
         1
-        for row in imported_sample
-        if row.get("project_id")
+        for task in imported_sample
+        if task.project_id
     )
 
     linked_parents = sum(
         1
-        for row in imported_sample
-        if row.get("parent_task_id")
+        for task in imported_sample
+        if task.parent_task_id
     )
 
-    print("\nSupabase validation:")
+    suggested_projects = sum(
+        1
+        for task in imported_sample
+        if task.suggested_project
+    )
+
+    metadata_tasks = sum(
+        1
+        for task in imported_sample
+        if task.legacy_metadata
+    )
+
+    print("\nRepository validation:")
+
     print(
         f"  Projects in Supabase: "
-        f"{len(supabase_projects)}"
+        f"{len(projects)}"
     )
+
     print(
         f"  Expected projects:    "
         f"{expected_projects}"
     )
+
     print(
         f"  Sample tasks found:   "
         f"{len(imported_sample)}"
     )
+
     print(
         f"  Expected sample:      "
         f"{len(sample)}"
     )
+
     print(
         f"  Project links:        "
         f"{linked_projects}"
     )
+
     print(
         f"  Parent links:         "
         f"{linked_parents}"
     )
+
+    print(
+        f"  Suggested projects:   "
+        f"{suggested_projects}"
+    )
+
+    print(
+        f"  Metadata-bearing:     "
+        f"{metadata_tasks}"
+    )
+
+    if len(projects) != expected_projects:
+        raise RuntimeError(
+            "Project count mismatch."
+        )
+
+    if len(imported_sample) != len(sample):
+        raise RuntimeError(
+            "Sample task count mismatch."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -983,7 +1130,8 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         description=(
-            "AIOS Notion -> Supabase migration POC"
+            "AIOS Notion -> Supabase "
+            "repository migration POC"
         )
     )
 
@@ -991,7 +1139,7 @@ def parse_args() -> argparse.Namespace:
         "--write",
         action="store_true",
         help=(
-            "Actually write the POC data to Supabase. "
+            "Actually write POC data to Supabase. "
             "Without this flag the script is read-only."
         ),
     )
@@ -1001,8 +1149,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=25,
         help=(
-            "Maximum number of representative tasks "
-            "to import. Default: 25."
+            "Maximum number of representative "
+            "tasks to import. Default: 25."
         ),
     )
 
@@ -1024,11 +1172,13 @@ def main() -> None:
 
     if args.write:
         print(
-            "MODE: CONTROLLED WRITE TO SUPABASE"
+            "MODE: REPOSITORY-BACKED "
+            "CONTROLLED WRITE"
         )
     else:
         print(
-            "MODE: DRY RUN — NO SUPABASE WRITES"
+            "MODE: DRY RUN — "
+            "NO SUPABASE WRITES"
         )
 
     print(
@@ -1093,72 +1243,60 @@ def main() -> None:
         )
 
         print(
-            "\nNo Supabase records were changed."
-        )
-
-        print(
-            "\nWhen ready, run:"
-        )
-
-        print(
-            "  python -m "
-            "scripts.supabase_poc_import "
-            "--write"
+            "No Supabase records were changed."
         )
 
         return
 
-    print(
-        "\nConnecting to Supabase..."
-    )
+    print("\nConnecting to Supabase...")
 
     store = SupabaseStore()
 
-    health = store.health_check()
+    project_repository = (
+        ProjectRepository(store)
+    )
 
-    print(
-        f"Supabase connection: {health}"
+    task_repository = (
+        TaskRepository(store)
     )
 
     project_map = upsert_projects(
-        store,
+        project_repository,
         projects,
     )
 
     task_map = upsert_sample_tasks(
-        store,
+        task_repository,
         sample,
         project_map,
     )
 
-    parent_count = apply_parent_relationships(
-        store,
-        sample,
-        task_map,
+    parent_count = (
+        apply_parent_relationships(
+            task_repository,
+            sample,
+            task_map,
+        )
     )
 
     print(
-        f"\nParent relationships applied: "
+        "\nParent relationships applied: "
         f"{parent_count}"
     )
 
     validate_supabase(
-        store,
+        project_repository,
+        task_repository,
         expected_projects=len(projects),
         sample=sample,
     )
 
     print("\n" + "=" * 64)
-    print("POC WRITE COMPLETED")
+    print("REPOSITORY POC WRITE COMPLETED")
     print("=" * 64)
 
     print(
         "\nNotion was not modified."
-    )
-
-    print(
-        "Review the projects and tasks tables "
-        "in Supabase before proceeding."
     )
 
 

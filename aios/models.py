@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -11,6 +11,10 @@ class Project:
     legacy_notion_id: Optional[str] = None
     status: Optional[str] = None
     is_active: bool = False
+
+    legacy_metadata: dict[str, Any] = field(
+        default_factory=dict
+    )
 
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -41,9 +45,15 @@ class Task:
     is_just_do_it: bool = False
     is_quick_win: bool = False
 
+    suggested_project: Optional[str] = None
+
     project_id: Optional[str] = None
     parent_task_id: Optional[str] = None
     step_order: Optional[int] = None
+
+    legacy_metadata: dict[str, Any] = field(
+        default_factory=dict
+    )
 
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

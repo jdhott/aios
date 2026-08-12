@@ -36,6 +36,10 @@ class ProjectRepository:
             name=row.get("name") or "(Untitled Project)",
             status=row.get("status"),
             is_active=row.get("is_active", False),
+            legacy_metadata=(
+                row.get("legacy_metadata")
+                or {}
+            ),
             created_at=parse_datetime(
                 row.get("created_at")
             ),
@@ -141,6 +145,7 @@ class ProjectRepository:
             "name": project.name,
             "status": project.status,
             "is_active": project.is_active,
+            "legacy_metadata": project.legacy_metadata,
             "created_at": (
                 project.created_at.isoformat()
                 if project.created_at
