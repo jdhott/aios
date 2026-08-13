@@ -5596,130 +5596,8 @@ def clean_clarification_suggestions(raw_suggestions, mode, task_title):
     limit = 5 if mode != "analytical" else 4
     return cleaned[:limit]
 
-def append_clarification_blocks(page_id, original_task, suggestions):
-    """Render a proposal-first clarification UI in Notion.
-
-    The first checkbox contains the AI's proposed clarified task. The user may
-    edit that checkbox text directly before checking it, so the checked text is
-    always the answer AIOS consumes. A separate command requests one targeted
-    question only when the proposal is not useful.
-
-    This function is intentionally idempotent: if a clarification UI is already
-    present on the page, do not append a second copy. Rebuild flows clear the
-    existing children first, then call this function.
-    """
-    existing_blocks = get_block_children(page_id)
-    if any(
-        block.get("type") == "heading_3"
-        and get_block_text(block) == CLARIFY_HEADER
-        for block in existing_blocks
-    ):
-        print("Clarification UI already present; skipping duplicate append")
-        return {"results": existing_blocks}
-
-    proposal = suggestions[0].strip() if suggestions else original_task.strip()
-    proposal_text = f"{USE_SUGGESTION_PREFIX}{proposal}"
-
-    children = [
-        {
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": {
-                "rich_text": [{"type": "text", "text": {"content": CLARIFY_HEADER}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": f"Original: {original_task}"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": "AIOS suggests this clearer next action:"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": proposal_text}}],
-                "checked": False,
-            },
-        },
-        {
-            "object": "block",
-            "type": "callout",
-            "callout": {
-                "icon": {"type": "emoji", "emoji": "✏️"},
-                "rich_text": [{
-                    "type": "text",
-                    "text": {"content": "To change it, edit the checkbox text above, then check it. AIOS uses the exact checked text."},
-                }],
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": ASK_TARGETED_QUESTION_COMMAND}}],
-                "checked": False,
-            },
-        },
-    ]
-
-    response = requests.patch(
-        f"https://api.notion.com/v1/blocks/{page_id}/children",
-        headers=headers,
-        json={"children": children},
-        timeout=30,
-    )
-
-    if response.ok:
-        increment_summary("clarification_blocks_added")
-        print("Added proposal-first clarification blocks")
-        return response.json()
-
-    increment_summary("errors")
-    print("ERROR adding clarification blocks")
-    print(response.status_code, response.text)
-    return None
 
 
-def get_checked_clarification_action(page_id):
-    blocks = get_block_children(page_id)
-
-    for block in blocks:
-        if block.get("type") != "to_do":
-            continue
-
-        todo = block.get("to_do", {})
-
-        if not todo.get("checked"):
-            continue
-
-        text = get_block_text(block)
-
-        if not text:
-            continue
-
-        if is_command_checkbox(text):
-            return {
-                "type": "command",
-                "text": text,
-                "block_id": block["id"],
-            }
-
-        return {
-            "type": "action",
-            "text": text,
-            "block_id": block["id"],
-        }
-
-    return None
 
 # In[52]:
 
@@ -5909,72 +5787,9 @@ def prepare_accepted_clarification_title(text):
     return parsed, cleaned_title, due_date
 
 
-def update_task_from_selection(page_id, new_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None):
-    lifecycle_updates = {
-        "Task Name": {
-            "title": [{"text": {"content": new_title}}]
-        },
-        "Status": {
-            "select": {"name": READY_STATUS}
-        },
-    }
-
-    metadata_updates = {
-        "Just Do It": {"checkbox": is_jdi},
-    }
-
-    if is_urgent:
-        metadata_updates["Urgency"] = {
-            "select": {"name": "High Urgency"}
-        }
-
-    if is_important:
-        metadata_updates["Importance"] = {
-            "select": {"name": "High Importance"}
-        }
-
-    if due_date:
-        metadata_updates["Due Date"] = {
-            "date": {"start": due_date.isoformat()}
-        }
-
-    try:
-        updated_task = update_task_lifecycle(
-            page_id,
-            lifecycle_updates,
-            datastore=AIOS_DATASTORE,
-            notion_update_fn=update_notion_page,
-        )
-
-        updated_task = update_task_metadata(
-            updated_task,
-            metadata_updates,
-            datastore=AIOS_DATASTORE,
-            notion_update_fn=update_notion_page,
-        )
-
-        print("Updated task →", new_title)
-        return updated_task
-
-    except Exception as exc:
-        increment_summary("errors")
-        print("ERROR updating task")
-        print(exc)
-        return None
 
 # In[56]:
 
-def clear_page_children(page_id):
-    blocks = get_block_children(page_id)
-
-    for block in blocks:
-        requests.delete(
-            f"https://api.notion.com/v1/blocks/{block['id']}",
-            headers=headers,
-            timeout=30,
-        )
-
-    print("Cleared clarification blocks")
 
 # In[57]:
 
@@ -5989,169 +5804,41 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 
 # In[58]:
 
-def update_clarification_title(page_id, clarification_text):
-    new_title = f"Clarify next action: {clarification_text}"
-
-    try:
-        update_task_lifecycle(
-            page_id,
-            {
-                "Task Name": {
-                    "title": [{"text": {"content": new_title}}]
-                },
-                "Status": {
-                    "select": {"name": CLARIFY_STATUS}
-                },
-            },
-            datastore=AIOS_DATASTORE,
-            notion_update_fn=update_notion_page,
-        )
-
-        print("Updated clarification title →", new_title)
-        return True
-
-    except Exception as exc:
-        increment_summary("errors")
-        print("ERROR updating clarification title")
-        print(exc)
-        return False
 
 # In[59]:
 
-def process_clarification_selection(page):
-    """Resolve proposal-first clarification choices.
 
-    Users accept the proposal by checking it, or edit that checkbox text before
-    checking it. The exact checked text becomes the candidate task. If the user
-    requests a question, AIOS replaces the proposal UI with one targeted prompt
-    and an explicit answer placeholder checkbox that the user edits and checks.
-    Legacy clarification pages remain readable.
-    """
-    selection = get_checked_clarification_action(page["id"])
-    if not selection:
-        return False
+# -------------------------------------------------------------------------
+# Canonical clarification workflow module
+# -------------------------------------------------------------------------
+# These six workflow/UI functions now live in aios.clarification. The module's
+# conservative configure hook receives the already-initialized runtime globals
+# so this refactor changes ownership, not behavior.
+from aios import clarification as clarification_helpers
 
-    text = selection["text"].strip()
-    title = get_title(page)
-    original_title = title.replace("Clarify next action:", "").strip()
+clarification_helpers.configure_clarification_module(globals())
 
-    if text == ASK_TARGETED_QUESTION_COMMAND:
-        question = generate_targeted_clarification_question(original_title)
-        clear_page_children(page["id"])
-        children = [
-            {
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {"rich_text": [{"type": "text", "text": {"content": CLARIFY_HEADER}}]},
-            },
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"Original: {original_title}"}}]},
-            },
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {"rich_text": [{"type": "text", "text": {"content": question}}]},
-            },
-            {
-                "object": "block",
-                "type": "to_do",
-                "to_do": {
-                    "rich_text": [{"type": "text", "text": {"content": f"{USE_SUGGESTION_PREFIX}[type your answer here]"}}],
-                    "checked": False,
-                },
-            },
-            {
-                "object": "block",
-                "type": "callout",
-                "callout": {
-                    "icon": {"type": "emoji", "emoji": "✏️"},
-                    "rich_text": [{"type": "text", "text": {"content": "Replace the placeholder with your answer, then check it."}}],
-                },
-            },
-        ]
-        response = requests.patch(
-            f"https://api.notion.com/v1/blocks/{page['id']}/children",
-            headers=headers,
-            json={"children": children},
-            timeout=30,
-        )
-        if response.ok:
-            print("Added one targeted clarification question")
-            return True
-        increment_summary("errors")
-        print("ERROR adding targeted clarification question")
-        print(response.status_code, response.text)
-        return False
+append_clarification_blocks = (
+    clarification_helpers.append_clarification_blocks
+)
+get_checked_clarification_action = (
+    clarification_helpers.get_checked_clarification_action
+)
+update_task_from_selection = (
+    clarification_helpers.update_task_from_selection
+)
+clear_page_children = (
+    clarification_helpers.clear_page_children
+)
+update_clarification_title = (
+    clarification_helpers.update_clarification_title
+)
+process_clarification_selection = (
+    clarification_helpers.process_clarification_selection
+)
 
-    # Legacy command support.
-    if text == GENERATE_MORE_COMMAND:
-        suggestions = generate_clarification_suggestions(original_title)
-        rebuild_clarification_blocks(page["id"], original_title, suggestions)
-        return True
-    if text == ADD_OWN_OPTION_COMMAND:
-        print("Legacy add-own-option selected; edit a proposal checkbox and check it instead")
-        return False
+print("[Clarification Module] Canonical workflow functions loaded from aios.clarification")
 
-    if text.startswith(USE_SUGGESTION_PREFIX):
-        text = text[len(USE_SUGGESTION_PREFIX):].strip()
-
-    if not text or text == "[type your answer here]":
-        print("Clarification answer placeholder is still empty")
-        return False
-
-    # If this was an answer to a targeted question rather than a full task,
-    # combine it with the original task and let AI propose the final wording.
-    blocks = get_block_children(page["id"])
-    has_targeted_question_ui = any(
-        block.get("type") == "callout"
-        and "Replace the placeholder" in get_block_text(block)
-        for block in blocks
-    )
-    if has_targeted_question_ui:
-        combined = f"Original task: {original_title}\nUser clarification: {text}"
-        proposals = generate_clarification_suggestions(combined)
-        if not proposals:
-            return False
-        rebuild_clarification_blocks(page["id"], original_title, proposals)
-        print("Used clarification answer to generate a revised proposal")
-        return True
-
-    # Human acceptance is authoritative. Do not send the accepted wording back
-    # through prepare_task_title(), because that function may decide the task
-    # still needs clarification and create an endless clarification loop.
-    parsed, cleaned_title, due_date = prepare_accepted_clarification_title(text)
-
-    if not cleaned_title:
-        print("Accepted clarification produced an empty task title")
-        return False
-
-    increment_summary("clarification_selections_resolved")
-    print("Clarification resolved →", cleaned_title)
-    updated_page = update_task_from_selection(
-        page["id"], cleaned_title,
-        is_jdi=parsed["jdi"],
-        is_urgent=parsed["urgent"],
-        is_important=parsed.get("important", False),
-        due_date=due_date,
-    )
-    if not updated_page:
-        return False
-
-    log_ai_processing_decision(
-        original=original_title,
-        final_task=cleaned_title,
-        action="Created",
-        reason="User accepted or edited the AI clarification proposal; task marked Ready.",
-        review_needed=False,
-        confidence=1.0,
-        source="Clarification",
-    )
-    updated_page = update_missing_metadata_if_confident(updated_page)
-    update_quick_win_if_needed(updated_page)
-    clear_page_children(page["id"])
-    return True
 
 
 def token_similarity(a, b):

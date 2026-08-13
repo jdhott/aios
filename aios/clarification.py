@@ -212,6 +212,7 @@ def append_clarification_blocks(page_id, original_task, suggestions):
     return None
 
 
+
 def get_checked_clarification_action(page_id):
     blocks = get_block_children(page_id)
 
@@ -243,6 +244,7 @@ def get_checked_clarification_action(page_id):
         }
 
     return None
+
 
 
 # In[52]:
@@ -436,40 +438,58 @@ def prepare_accepted_clarification_title(text):
 
 
 def update_task_from_selection(page_id, new_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None):
-    properties = {
+    lifecycle_updates = {
         "Task Name": {
             "title": [{"text": {"content": new_title}}]
         },
         "Status": {
             "select": {"name": READY_STATUS}
         },
+    }
+
+    metadata_updates = {
         "Just Do It": {"checkbox": is_jdi},
     }
 
     if is_urgent:
-        properties["Urgency"] = {"select": {"name": "High Urgency"}}
+        metadata_updates["Urgency"] = {
+            "select": {"name": "High Urgency"}
+        }
 
     if is_important:
-        properties["Importance"] = {"select": {"name": "High Importance"}}
+        metadata_updates["Importance"] = {
+            "select": {"name": "High Importance"}
+        }
 
     if due_date:
-        properties["Due Date"] = {"date": {"start": due_date.isoformat()}}
+        metadata_updates["Due Date"] = {
+            "date": {"start": due_date.isoformat()}
+        }
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=headers,
-        json={"properties": properties},
-        timeout=30,
-    )
+    try:
+        updated_task = update_task_lifecycle(
+            page_id,
+            lifecycle_updates,
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
+        updated_task = update_task_metadata(
+            updated_task,
+            metadata_updates,
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
+
         print("Updated task →", new_title)
-        return response.json()
+        return updated_task
 
-    increment_summary("errors")
-    print("ERROR updating task")
-    print(response.status_code, response.text)
-    return None
+    except Exception as exc:
+        increment_summary("errors")
+        print("ERROR updating task")
+        print(exc)
+        return None
+
 
 
 # In[56]:
@@ -486,6 +506,7 @@ def clear_page_children(page_id):
         )
 
     print("Cleared clarification blocks")
+
 
 
 # In[57]:
@@ -507,30 +528,30 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 def update_clarification_title(page_id, clarification_text):
     new_title = f"Clarify next action: {clarification_text}"
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=headers,
-        json={
-            "properties": {
+    try:
+        update_task_lifecycle(
+            page_id,
+            {
                 "Task Name": {
                     "title": [{"text": {"content": new_title}}]
                 },
                 "Status": {
                     "select": {"name": CLARIFY_STATUS}
-                }
-            }
-        },
-        timeout=30,
-    )
+                },
+            },
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
         print("Updated clarification title →", new_title)
         return True
 
-    increment_summary("errors")
-    print("ERROR updating clarification title")
-    print(response.status_code, response.text)
-    return False
+    except Exception as exc:
+        increment_summary("errors")
+        print("ERROR updating clarification title")
+        print(exc)
+        return False
+
 
 
 # In[59]:
@@ -670,4 +691,5 @@ def process_clarification_selection(page):
     update_quick_win_if_needed(updated_page)
     clear_page_children(page["id"])
     return True
+
 
