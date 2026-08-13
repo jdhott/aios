@@ -66,6 +66,7 @@ print("__file__ =", __file__)
 
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
+from aios.storage.execution_state_writer import build_execution_update_fn
 
 try:
     from core.evaluator import evaluate_task
@@ -7328,7 +7329,10 @@ else:
 
         EXECUTION_ENGINE_WINNERS = rebuild_execution_state(
             open_tasks=all_open_tasks,
-            update_fn=update_notion_page,
+            update_fn=build_execution_update_fn(
+                notion_update_fn=update_notion_page,
+                datastore=AIOS_DATASTORE,
+            ),
         )
 
         execution_engine_success = True
