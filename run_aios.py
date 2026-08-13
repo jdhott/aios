@@ -180,6 +180,14 @@ if AIOS_DATASTORE not in {"notion", "supabase"}:
 
 print(f"[Datastore] Configured datastore: {AIOS_DATASTORE}")
 
+# Observational-only audit of actual Notion mutations during Supabase-mode runs.
+if AIOS_DATASTORE == "supabase":
+    try:
+        from core.storage.supabase_authority_audit import install_supabase_authority_audit
+        install_supabase_authority_audit(AIOS_DATASTORE)
+    except Exception as exc:
+        print(f"[Supabase Authority Audit] Bootstrap failed: {exc}")
+
 # In TEST_ONLY mode, avoid requiring production secrets because no external API
 # calls are made. In normal modes, keep failing fast if required env vars are missing.
 if TEST_ONLY:
