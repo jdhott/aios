@@ -219,57 +219,51 @@ def build_execution_update_fn(
 
 class QuickWinSupabaseWriter(_SupabaseExecutionStateBase):
     """
-    Supabase-primary Quick Win presentation writer.
+    Supabase-only Quick Win reconciliation writer.
 
-    Surfaced Quick Win is written ONLY to Supabase.
+    When AIOS_DATASTORE=supabase:
+      - Surfaced Quick Win is written to task_execution_state.
+      - Quick Win eligibility is written to tasks.is_quick_win.
+      - No Notion write occurs for either field.
 
-    The underlying Quick Win eligibility checkbox is still task metadata
-    that has not yet been migrated to a Supabase write path. If the
-    reconciliation needs to clear Quick Win on a BNA overlap, that one
-    task-metadata mutation is still sent to Notion.
-
-    Therefore this class removes the Notion *execution-state* mirror while
-    preserving the separate, not-yet-migrated Quick Win task-metadata write.
+    This removes the final execution-adjacent Notion task mutation from
+    the Quick Win reconciliation path.
     """
-
-    def __init__(
-        self,
-        notion_update_fn: ExecutionUpdateFn,
-    ):
-        super().__init__()
-        self.notion_update_fn = notion_update_fn
 
     def __call__(
         self,
         notion_task_id: str,
         properties: dict[str, Any],
     ):
+        supabase_task_id = self._supabase_task_id(
+            notion_task_id
+        )
+
         surfaced_value, has_surfaced = _extract_checkbox_property(
             properties,
             "Surfaced Quick Win",
         )
 
         if has_surfaced:
-            supabase_task_id = self._supabase_task_id(
-                notion_task_id
-            )
-
             self._execution_repository.set_surfaced_quick_win(
                 supabase_task_id,
                 bool(surfaced_value),
             )
 
-        # Quick Win itself is eligibility/task metadata, not current
-        # execution-state. Keep that isolated Notion mutation until task
-        # metadata writes are migrated.
-        quick_win_property = properties.get("Quick Win")
+        quick_win_value, has_quick_win = _extract_checkbox_property(
+            properties,
+            "Quick Win",
+        )
 
-        if isinstance(quick_win_property, dict):
-            return self.notion_update_fn(
-                notion_task_id,
-                {
-                    "Quick Win": quick_win_property,
-                },
+        if has_quick_win:
+            (
+                self._store.client
+                .table("tasks")
+                .update({
+                    "is_quick_win": bool(quick_win_value),
+                })
+                .eq("id", supabase_task_id)
+                .execute()
             )
 
         return None
@@ -285,8 +279,9 @@ def build_quick_win_update_fn(
         Original Notion-only Quick Win reconciliation.
 
     supabase:
-        Surfaced Quick Win -> Supabase only.
-        Quick Win eligibility -> Notion only, if a mutation is required.
+        Surfaced Quick Win -> Supabase task_execution_state.
+        Quick Win eligibility -> Supabase tasks.is_quick_win.
+        No Notion write occurs.
     """
 
     normalized = datastore.strip().lower()
@@ -304,10 +299,8 @@ def build_quick_win_update_fn(
 
     print(
         "[Quick Win State Write] "
-        "Surfaced Quick Win writes are Supabase-only; "
-        "underlying Quick Win eligibility remains Notion-backed"
+        "Surfaced Quick Win and Quick Win eligibility writes "
+        "are Supabase-only"
     )
 
-    return QuickWinSupabaseWriter(
-        notion_update_fn
-    )
+    return QuickWinSupabaseWriter()
