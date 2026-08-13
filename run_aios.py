@@ -70,6 +70,7 @@ from aios.storage.execution_state_writer import (
     build_execution_update_fn,
     build_quick_win_update_fn,
 )
+from aios.storage.task_metadata_writer import update_task_metadata
 
 try:
     from core.evaluator import evaluate_task
@@ -4858,20 +4859,18 @@ def update_quick_win_if_needed(task):
     if current_quick_win == new_quick_win:
         return False
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={
-            "properties": {
+    try:
+        update_task_metadata(
+            task,
+            {
                 "Quick Win": {
                     "checkbox": new_quick_win
                 }
-            }
-        },
-        timeout=30,
-    )
+            },
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
         increment_summary("quick_win_updates")
         title = get_title(task)
         print(f"Updated Quick Win: {title} → {new_quick_win}")
@@ -4889,9 +4888,10 @@ def update_quick_win_if_needed(task):
         )
         return True
 
-    print("ERROR updating Quick Win:", get_title(task))
-    print(response.status_code, response.text)
-    return False
+    except Exception as exc:
+        print("ERROR updating Quick Win:", get_title(task))
+        print(exc)
+        return False
 
 # In[45]:
 
@@ -5350,27 +5350,27 @@ def update_missing_metadata_if_confident(
     if not updates:
         return task
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{task['id']}",
-        headers=headers,
-        json={"properties": updates},
-        timeout=30,
-    )
+    try:
+        updated_task = update_task_metadata(
+            task,
+            updates,
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
         increment_summary("metadata_updates")
         if "Importance" in updates:
             increment_summary("importance_updates")
-        updated_task = response.json()
         print(f"Updated metadata: {title} → {updates}")
         if "Importance" in changed_metadata:
             print(f"Importance: {title} → {changed_metadata['Importance']['value']}")
         log_metadata_update(title, changed_metadata, preserved_metadata)
         return updated_task
 
-    print("ERROR updating metadata:", title)
-    print(response.status_code, response.text)
-    return task
+    except Exception as exc:
+        print("ERROR updating metadata:", title)
+        print(exc)
+        return task
 
 # ## 8. Clarification flow
 # 
@@ -6447,20 +6447,17 @@ if RUN_TASK_CREATION_PIPELINE:
             }
 
         if explicit_updates:
-            task_id = task["id"]
+            try:
+                updated_task = update_task_metadata(
+                    task,
+                    explicit_updates,
+                    datastore=AIOS_DATASTORE,
+                    notion_update_fn=update_notion_page,
+                )
 
-            response = requests.patch(
-                f"https://api.notion.com/v1/pages/{task_id}",
-                headers=headers,
-                json={"properties": explicit_updates},
-                timeout=30,
-            )
-
-            if response.ok:
                 increment_summary("matched_items_updated")
                 if should_update_importance:
                     increment_summary("importance_updates")
-                updated_task = response.json()
                 print("Updated explicit metadata on existing task:", parsed["clean_title"], "→", explicit_updates)
                 if changed_metadata:
                     log_metadata_update(get_title(updated_task), changed_metadata)
@@ -6482,7 +6479,8 @@ if RUN_TASK_CREATION_PIPELINE:
                 )
                 task = updated_task
                 updated_matched_items.append(item)
-            else:
+
+            except Exception as exc:
                 print("ERROR updating existing task:", parsed["clean_title"])
                 print(response.status_code, response.text)
 
