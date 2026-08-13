@@ -1,7 +1,8 @@
 #!/bin/bash
+set -e
 
 echo "Running AIOS at $(date)"
 
-cd /Users/John/LocalProjects/aios || exit 1
+cd "$HOME/LocalProjects/aios"
 
-/Users/John/LocalProjects/aios/venv/bin/python /Users/John/LocalProjects/aios/run_aios.py
+exec ./.venv/bin/python run_aios.py

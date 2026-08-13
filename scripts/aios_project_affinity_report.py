@@ -618,7 +618,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception as exc:
         print(f"[Project Cognition] D2 database resolution/query failed: {exc}", file=sys.stderr)
         print("[Project Cognition] Useful diagnostic command:", file=sys.stderr)
-        print("  ./venv/bin/python scripts/aios_project_affinity_report.py --list-databases", file=sys.stderr)
+        print("  ./.venv/bin/python scripts/aios_project_affinity_report.py --list-databases", file=sys.stderr)
         return 2
 
     tasks = [

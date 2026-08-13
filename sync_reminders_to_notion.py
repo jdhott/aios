@@ -9,8 +9,8 @@ Expected .env values:
 - REMINDERS_BRAIN_DUMP_LIST optional, defaults to "Brain Dump"
 
 Recommended use:
-    ./venv/bin/python sync_reminders_to_notion.py --dry-run --debug-env
-    ./venv/bin/python sync_reminders_to_notion.py
+    ./.venv/bin/python sync_reminders_to_notion.py --dry-run --debug-env
+    ./.venv/bin/python sync_reminders_to_notion.py
 """
 
 import os
