@@ -5545,134 +5545,20 @@ def get_match_title(match):
 
 # In[62]:
 
-def has_possible_duplicate_blocks(block_id):
-    children = get_block_children(block_id)
 
-    duplicate_headers = {
-        POSSIBLE_DUPLICATE_HEADER,
-        "🔍 Possible related task (low confidence)",
-    }
 
-    for block in children:
-        if get_block_text(block) in duplicate_headers:
-            return True
 
-    return False
+# -------------------------------------------------------------------------
+# Source-neutral duplicate-review interaction boundary
+# -------------------------------------------------------------------------
+from aios.notion import duplicate_review as duplicate_review_ui
 
-def append_possible_duplicate_blocks(item, matched_task, score):
-    if has_possible_duplicate_blocks(item["block_id"]):
-        return
+duplicate_review_ui.configure_duplicate_review_ui(globals())
 
-    existing_title = get_title(matched_task)
+inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
 
-    confidence = score_label(score)
+print("[Inbox Review UI] Notion duplicate-review interface configured")
 
-    header = POSSIBLE_DUPLICATE_HEADER
-    if confidence == "Low":
-        header = "🔍 Possible related task (low confidence)"
-
-    children = [
-        {
-            "object": "block",
-            "type": "heading_3",
-            "heading_3": {
-                "rich_text": [{"type": "text", "text": {"content": header}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": f"Original: {item['text']}"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": f"Possible match: {existing_title}"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [{"type": "text", "text": {"content": f"Confidence: {score_label(score)} ({score:.2f})"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": LINK_EXISTING_COMMAND}}],
-                "checked": False,
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": CREATE_ANYWAY_COMMAND}}],
-                "checked": False,
-            },
-        },
-        {
-            "object": "block",
-            "type": "to_do",
-            "to_do": {
-                "rich_text": [{"type": "text", "text": {"content": IGNORE_DUPLICATE_COMMAND}}],
-                "checked": False,
-            },
-        },
-    ]
-
-    response = requests.patch(
-        f"https://api.notion.com/v1/blocks/{item['block_id']}/children",
-        headers=headers,
-        json={"children": children},
-        timeout=30,
-    )
-
-    if response.ok:
-        increment_summary("possible_duplicate_blocks_added")
-        print("Added possible duplicate review blocks:", item["text"])
-        log_ai_processing_decision(
-            original=item["text"],
-            final_task=existing_title,
-            action="Duplicate",
-            reason=f"Possible duplicate match requires review; confidence {score_label(score)} ({score:.2f}).",
-            review_needed=True,
-            confidence=score,
-        )
-        return True
-
-    increment_summary("errors")
-    print("ERROR adding possible duplicate review blocks")
-    print(response.status_code, response.text)
-    return False
-
-def get_checked_possible_duplicate_action(item):
-    children = get_block_children(item["block_id"])
-
-    for block in children:
-        if block.get("type") != "to_do":
-            continue
-
-        todo = block.get("to_do", {})
-
-        if not todo.get("checked"):
-            continue
-
-        text = get_block_text(block)
-
-        if text in [
-            LINK_EXISTING_COMMAND,
-            CREATE_ANYWAY_COMMAND,
-            IGNORE_DUPLICATE_COMMAND,
-        ]:
-            return text
-
-    return None
 
 # In[63]:
 
@@ -5859,7 +5745,7 @@ if RUN_TASK_CREATION_PIPELINE:
         )
 
         if not DRY_RUN:
-            append_possible_duplicate_blocks(
+            inbox_review_ui.show_possible_duplicate(
                 match["item"],
                 match["task"],
                 match["score"],
@@ -6110,7 +5996,7 @@ def review_possible_duplicate_items(possible_matches):
 
     for match in possible_matches:
         item = match["item"]
-        action = get_checked_possible_duplicate_action(item)
+        action = inbox_review_ui.get_possible_duplicate_action(item)
 
         if not action:
             continue
