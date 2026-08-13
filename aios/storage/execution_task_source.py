@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from aios.models import Task
+from aios.storage.execution_repository import ExecutionRepository
 from aios.storage.supabase_store import SupabaseStore
 from aios.storage.task_repository import TaskRepository
 
@@ -10,20 +11,12 @@ from aios.storage.task_repository import TaskRepository
 def _title_property(value: str) -> dict[str, Any]:
     return {
         "type": "title",
-        "title": [
-            {
-                "plain_text": value,
-                "text": {"content": value},
-            }
-        ],
+        "title": [{"plain_text": value, "text": {"content": value}}],
     }
 
 
 def _select_property(value: Optional[str]) -> dict[str, Any]:
-    return {
-        "type": "select",
-        "select": {"name": value} if value else None,
-    }
+    return {"type": "select", "select": {"name": value} if value else None}
 
 
 def _checkbox_property(value: bool) -> dict[str, Any]:
@@ -31,59 +24,19 @@ def _checkbox_property(value: bool) -> dict[str, Any]:
 
 
 def _date_property(value) -> dict[str, Any]:
-    return {
-        "type": "date",
-        "date": {"start": value.isoformat()} if value else None,
-    }
+    return {"type": "date", "date": {"start": value.isoformat()} if value else None}
 
 
 def _number_property(value: Optional[int | float]) -> dict[str, Any]:
     return {"type": "number", "number": value}
 
 
-def _notion_number(props: dict[str, Any], name: str) -> Optional[int | float]:
-    prop = props.get(name, {})
-    if prop.get("type") != "number":
-        return None
-    return prop.get("number")
-
-
-def _notion_checkbox(props: dict[str, Any], name: str) -> bool:
-    prop = props.get(name, {})
-    if prop.get("type") != "checkbox":
-        return False
-    return prop.get("checkbox") is True
-
-
-def build_notion_execution_state(
-    notion_tasks: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Extract mutable execution/presentation state from caller-supplied Notion tasks."""
-    state: dict[str, dict[str, Any]] = {}
-
-    for page in notion_tasks:
-        notion_id = page.get("id")
-        if not notion_id:
-            continue
-
-        props = page.get("properties", {})
-        state[notion_id] = {
-            "execution_score": _notion_number(props, "Execution Score"),
-            "execution_rank": _notion_number(props, "Execution Rank"),
-            "best_next_action": _notion_checkbox(props, "Best Next Action"),
-            "surfaced_quick_win": _notion_checkbox(props, "Surfaced Quick Win"),
-        }
-
-    return state
-
-
 def task_to_legacy_execution_payload(
     task: Task,
     execution_state: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Convert a Supabase Task to the temporary Notion-shaped execution payload."""
+    """Convert Supabase task + current Supabase execution state to legacy engine payload."""
     execution_state = execution_state or {}
-
     return {
         "id": task.legacy_notion_id or task.id,
         "_supabase_id": task.id,
@@ -102,60 +55,46 @@ def task_to_legacy_execution_payload(
             "Defer Until": _date_property(task.defer_until),
             "Just Do It": _checkbox_property(task.is_just_do_it),
             "Quick Win": _checkbox_property(task.is_quick_win),
-            "Execution Score": _number_property(
-                execution_state.get("execution_score")
-            ),
-            "Execution Rank": _number_property(
-                execution_state.get("execution_rank")
-            ),
-            "Best Next Action": _checkbox_property(
-                bool(execution_state.get("best_next_action", False))
-            ),
-            "Surfaced Quick Win": _checkbox_property(
-                bool(execution_state.get("surfaced_quick_win", False))
-            ),
+            "Execution Score": _number_property(execution_state.get("execution_score")),
+            "Execution Rank": _number_property(execution_state.get("execution_rank")),
+            "Best Next Action": _checkbox_property(bool(execution_state.get("best_next_action", False))),
+            "Surfaced Quick Win": _checkbox_property(bool(execution_state.get("surfaced_quick_win", False))),
         },
     }
 
 
-def get_supabase_execution_tasks(
-    notion_execution_state_tasks: Optional[list[dict[str, Any]]] = None,
-) -> list[dict[str, Any]]:
+def get_supabase_execution_tasks() -> list[dict[str, Any]]:
     """
-    Load non-done task data from Supabase and overlay caller-supplied Notion
-    execution state. This module performs no direct Notion API access.
+    Return current execution reconciliation population using Supabase only.
+
+    tasks -> TaskRepository
+    task_execution_state -> ExecutionRepository
+    Population mirrors the current runtime query: Done = False.
     """
     print("[Execution Task Source] Loading durable task data from Supabase")
+    store = SupabaseStore()
+    task_repository = TaskRepository(store)
+    execution_repository = ExecutionRepository(store)
 
-    repository = TaskRepository(SupabaseStore())
-    all_tasks = repository.get_all_tasks()
-
+    all_tasks = task_repository.get_all_tasks()
     execution_population = [task for task in all_tasks if not task.is_done]
-
     print(
         "[Execution Task Source] "
         f"Supabase non-done task population: {len(execution_population)}"
     )
 
-    notion_state = build_notion_execution_state(
-        notion_execution_state_tasks or []
-    )
-
+    current_state = execution_repository.get_current_state()
     print(
         "[Execution Task Source] "
-        f"Caller-supplied Notion execution state: {len(notion_state)} task(s)"
+        f"Supabase current execution-state rows: {len(current_state)}"
     )
 
     payloads: list[dict[str, Any]] = []
-    missing_state = 0
-
+    state_hits = 0
     for task in execution_population:
-        notion_id = task.legacy_notion_id
-        state = notion_state.get(notion_id, {}) if notion_id else {}
-
-        if notion_id and notion_id not in notion_state:
-            missing_state += 1
-
+        state = current_state.get(task.id, {})
+        if state:
+            state_hits += 1
         payloads.append(task_to_legacy_execution_payload(task, state))
 
     print(
@@ -164,8 +103,6 @@ def get_supabase_execution_tasks(
     )
     print(
         "[Execution Task Source] "
-        "Supabase tasks missing caller-supplied Notion execution state: "
-        f"{missing_state}"
+        f"Execution population tasks with current Supabase state: {state_hits}"
     )
-
     return payloads

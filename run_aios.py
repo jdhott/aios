@@ -7302,26 +7302,8 @@ else:
                 "[Execution Engine] Reading execution population from Supabase"
             )
 
-            # Temporary hybrid migration phase:
-            # durable task data comes from Supabase, while current mutable
-            # execution/presentation state is fetched through AIOS's existing
-            # working Notion query path.
-            notion_execution_state_tasks = query_tasks_database(
-                filter_payload={
-                    "and": [
-                        {
-                            "property": "Done",
-                            "checkbox": {
-                                "equals": False
-                            }
-                        }
-                    ]
-                }
-            )
+            all_open_tasks = get_supabase_execution_tasks()
 
-            all_open_tasks = get_supabase_execution_tasks(
-                notion_execution_state_tasks=notion_execution_state_tasks
-            )
         else:
             print(
                 "[Execution Engine] Reading execution population from Notion"
