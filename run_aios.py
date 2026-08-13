@@ -160,15 +160,17 @@ if TEST_ONLY:
     TEST_MODE = True
 
 # -----------------------------------------------------------------------------
-# Datastore migration control
+# Datastore authority
 # -----------------------------------------------------------------------------
-# AIOS is in a staged Supabase cutover. When AIOS_DATASTORE=supabase,
-# authoritative task/project persistence and the migrated read paths use
-# Supabase compatibility adapters. Notion remains intentionally in use for
-# Brain Dump / clarification / dashboard presentation workflows and as the
-# explicit fallback when AIOS_DATASTORE=notion.
+# Supabase is the default authoritative datastore for AIOS task and project
+# state. Notion remains intentionally in use for Brain Dump, clarification,
+# review, archive/context, dashboard presentation, and selected telemetry /
+# logging workflows.
+#
+# Set AIOS_DATASTORE=notion explicitly only when the legacy Notion persistence
+# path is required for fallback or testing.
 AIOS_DATASTORE = (
-    os.getenv("AIOS_DATASTORE", "notion")
+    os.getenv("AIOS_DATASTORE", "supabase")
     .strip()
     .lower()
 )
