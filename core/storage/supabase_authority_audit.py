@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-VERSION = "supabase-authority-audit-v1.0.0"
+VERSION = "supabase-authority-audit-v1.0.1"
 _INSTALLED=False
 _ENABLED=False
 _EVENTS=[]
@@ -62,8 +62,14 @@ def classify_mutation(method,url,payload=None):
 
 def _record(method,url,payload=None):
     if not _ENABLED or 'api.notion.com/v1/' not in str(url): return
-    cat,detail=classify_mutation(method,url,payload)
-    _EVENTS.append(AuditEvent(str(method).upper(),str(url),cat,detail,_caller()))
+    method_text=str(method).upper()
+    url_text=str(url)
+    # Notion database queries use HTTP POST but are read-only operations.
+    # Exclude them entirely from the mutation audit.
+    if method_text=='POST' and re.search(r'/v1/databases/[^/?#]+/query(?:[?#].*)?$',url_text):
+        return
+    cat,detail=classify_mutation(method_text,url_text,payload)
+    _EVENTS.append(AuditEvent(method_text,url_text,cat,detail,_caller()))
 
 def install_supabase_authority_audit(datastore):
     global _INSTALLED,_ENABLED
