@@ -6954,20 +6954,20 @@ def create_notion_task(
     """
     Transitional creation dispatcher.
 
-    Only explicitly-approved ordinary top-level creation is Supabase-primary.
-    Breakdown subtasks, clarification tasks, and relation-bearing creations
-    continue through the existing Notion-only path for now.
+    Explicitly-approved top-level tasks are Supabase-primary, including
+    clarification tasks. Their Notion pages remain temporary UI mirrors so
+    clarification checkbox/block interaction can continue unchanged.
+
+    Breakdown hierarchy creation uses its dedicated Supabase-first hierarchy
+    creator. Relation-bearing ad hoc creations remain on the legacy path unless
+    migrated explicitly.
     """
-    is_clarification = task_title.lower().startswith(
-        "clarify next action:"
-    )
 
     can_use_supabase_primary = (
         AIOS_DATASTORE == "supabase"
         and supabase_primary
         and parent_task_id is None
         and step_order is None
-        and not is_clarification
         and not DRY_RUN
     )
 
@@ -7254,6 +7254,7 @@ def process_task_item(item):
             is_important=is_important,
             due_date=due_date,
             manual_project=manual_project,
+            supabase_primary=True,
         )
         task_pages_created = [page] if page else []
     else:
