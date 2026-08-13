@@ -1640,6 +1640,158 @@ def format_summary(summary: ReconciliationSummary) -> List[str]:
     return lines
 
 
+def _runtime_datastore(
+    runtime_globals: Optional[Mapping[str, Any]],
+) -> str:
+    """Return the active datastore selected by the runtime."""
+
+    if not runtime_globals:
+        return "notion"
+
+    return str(
+        runtime_globals.get(
+            "AIOS_DATASTORE",
+            "notion",
+        )
+        or "notion"
+    ).strip().lower()
+
+
+def _runtime_update_fn(
+    runtime_globals: Optional[Mapping[str, Any]],
+    name: str,
+):
+    if not runtime_globals:
+        return None
+
+    fn = runtime_globals.get(name)
+
+    return fn if callable(fn) else None
+
+
+def _apply_actions_with_runtime_writer(
+    actions: Sequence[Mapping[str, Any]],
+    *,
+    update_fn,
+) -> Tuple[int, List[str]]:
+    """
+    Apply legacy-shaped property mutations through a runtime-authoritative
+    datastore writer.
+
+    The action page IDs remain legacy Notion IDs because the transitional
+    Supabase writers already own the Notion-ID -> Supabase-ID mapping.
+    """
+
+    if not actions:
+        return 0, []
+
+    if not callable(update_fn):
+        return 0, [
+            "Runtime datastore writer unavailable; mutation skipped"
+        ]
+
+    updated = 0
+    errors: List[str] = []
+
+    for action in actions:
+        page_id = str(
+            action.get("page_id", "")
+        )
+        title = str(
+            action.get("title")
+            or page_id
+        )
+        properties = action.get(
+            "properties"
+        )
+
+        if (
+            not page_id
+            or not isinstance(
+                properties,
+                Mapping,
+            )
+            or not properties
+        ):
+            continue
+
+        try:
+            update_fn(
+                page_id,
+                dict(properties),
+            )
+            updated += 1
+
+        except Exception as exc:
+            errors.append(
+                f"{title}: {exc}"
+            )
+
+    return updated, errors
+
+
+def _apply_rank_actions_with_runtime_writer(
+    actions: Sequence[Mapping[str, Any]],
+    *,
+    update_fn,
+) -> Tuple[int, List[str]]:
+    """
+    Assign canonical Execution Rank values through the execution-state authority.
+
+    The old direct-Notion implementation used a two-pass clear/reassign cycle
+    to defend against Notion write ordering. Supabase execution state is keyed
+    per task, so the canonical sequence can be assigned directly.
+    """
+
+    if not actions:
+        return 0, []
+
+    if not callable(update_fn):
+        return 0, [
+            "Runtime execution writer unavailable; rank rewrite skipped"
+        ]
+
+    updated = 0
+    errors: List[str] = []
+
+    for action in actions:
+        page_id = str(
+            action.get("page_id", "")
+        )
+        title = str(
+            action.get("title")
+            or page_id
+        )
+        new_rank = action.get(
+            "new_rank"
+        )
+
+        if (
+            not page_id
+            or new_rank is None
+        ):
+            continue
+
+        try:
+            update_fn(
+                page_id,
+                {
+                    "Execution Rank": {
+                        "number":
+                            int(new_rank)
+                    }
+                },
+            )
+            updated += 1
+
+        except Exception as exc:
+            errors.append(
+                f"{title}: {exc}"
+            )
+
+    return updated, errors
+
+
 def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[str, Any]] = None) -> ReconciliationSummary:
     """Scan available runtime task objects, print diagnostics, and apply one safe cleanup.
 
@@ -1670,6 +1822,27 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
     rank_diag = collect_execution_rank_diagnostics(pages)
     anomalies = collect_governance_anomaly_diagnostics(pages, rank_diag=rank_diag)
     cleanup_error_count = 0
+
+    datastore = _runtime_datastore(
+        runtime_globals
+    )
+
+    execution_update_fn = _runtime_update_fn(
+        runtime_globals,
+        "execution_state_update_fn",
+    )
+
+    quick_win_update_fn = _runtime_update_fn(
+        runtime_globals,
+        "quick_win_state_update_fn",
+    )
+
+    if datastore == "supabase":
+        print(
+            "[Metadata Reconciliation] "
+            "Supabase persistence authority active; "
+            "direct Notion task mutation disabled"
+        )
 
     for line in format_summary(summary):
         print(line)
@@ -1707,7 +1880,15 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
                 "[Metadata Reconciliation] Clearing stale presentation overlay metadata: "
                 f"{action.get('title')} — reason={action.get('reason')} — {action.get('detail')}"
             )
-        updated, errors = apply_policy_stale_presentation_cleanup(presentation_stale_actions)
+        if datastore == "supabase":
+            updated, errors = _apply_actions_with_runtime_writer(
+                presentation_stale_actions,
+                update_fn=quick_win_update_fn,
+            )
+        else:
+            updated, errors = apply_policy_stale_presentation_cleanup(
+                presentation_stale_actions
+            )
         print(f"[Metadata Reconciliation] Policy stale presentation metadata cleared: {updated}")
         cleanup_error_count += len(errors)
         if errors:
@@ -1724,7 +1905,15 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
                 "[Metadata Reconciliation] Clearing stale canonical execution metadata: "
                 f"{action.get('title')} — reason={action.get('reason')} — {action.get('detail')}"
             )
-        updated, errors = apply_policy_stale_execution_cleanup(policy_stale_actions)
+        if datastore == "supabase":
+            updated, errors = _apply_actions_with_runtime_writer(
+                policy_stale_actions,
+                update_fn=execution_update_fn,
+            )
+        else:
+            updated, errors = apply_policy_stale_execution_cleanup(
+                policy_stale_actions
+            )
         print(f"[Metadata Reconciliation] Policy stale execution metadata cleared: {updated}")
         cleanup_error_count += len(errors)
         if errors:
@@ -1741,7 +1930,19 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
                 "[Metadata Reconciliation] Clearing deprecated metadata: "
                 f"{action.get('title')} — reason={action.get('reason')} — {action.get('detail')}"
             )
-        updated, errors = apply_deprecated_metadata_cleanup(deprecated_cleanup_actions)
+        if datastore == "supabase":
+            updated = 0
+            errors = []
+            print(
+                "[Metadata Reconciliation] "
+                "Deprecated Notion-era metadata is diagnostic-only "
+                "in Supabase mode; no mutation performed"
+            )
+        else:
+            updated, errors = apply_deprecated_metadata_cleanup(
+                deprecated_cleanup_actions
+            )
+
         print(f"[Metadata Reconciliation] Deprecated metadata cleared: {updated}")
         cleanup_error_count += len(errors)
         if errors:
@@ -1764,7 +1965,16 @@ def emit_metadata_reconciliation_diagnostics(runtime_globals: Optional[Mapping[s
                     f"new_rank={action.get('new_rank')} current_rank={action.get('current_rank')} "
                     f"score={action.get('score'):g} id={action.get('short_id')} title={action.get('title')}"
                 )
-            updated, errors = apply_execution_rank_canonicalization(rank_actions)
+            if datastore == "supabase":
+                updated, errors = _apply_rank_actions_with_runtime_writer(
+                    rank_actions,
+                    update_fn=execution_update_fn,
+                )
+            else:
+                updated, errors = apply_execution_rank_canonicalization(
+                    rank_actions
+                )
+
             print(f"[Metadata Reconciliation] Execution ranks rewritten canonically: {updated}")
             cleanup_error_count += len(errors)
             if errors:

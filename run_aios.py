@@ -4919,6 +4919,26 @@ def update_notion_page(page_id, properties):
 
 
 
+# Canonical runtime persistence functions.
+#
+# These are constructed once and reused by:
+#   - Execution Engine V2
+#   - Quick Win surfacing/reconciliation
+#   - metadata reconciliation
+#
+# This prevents reconciliation from becoming a second persistence authority.
+execution_state_update_fn = build_execution_update_fn(
+    notion_update_fn=update_notion_page,
+    datastore=AIOS_DATASTORE,
+)
+
+quick_win_state_update_fn = build_quick_win_update_fn(
+    notion_update_fn=update_notion_page,
+    datastore=AIOS_DATASTORE,
+)
+
+
+
 def update_quick_win_if_needed(task):
     if not task or task.get("dry_run"):
         return False
@@ -5183,10 +5203,7 @@ def refresh_surfaced_quick_wins(open_tasks, bna_tasks=None, limit=None):
     selected_ids = get_task_id_set(selected)
     bna_ids = get_task_id_set(bna_tasks)
 
-    quick_win_update_fn = build_quick_win_update_fn(
-        notion_update_fn=update_notion_page,
-        datastore=AIOS_DATASTORE,
-    )
+    quick_win_update_fn = quick_win_state_update_fn
 
     changed = 0
     quick_win_overlap_cleared = 0
@@ -8276,10 +8293,7 @@ else:
 
         EXECUTION_ENGINE_WINNERS = rebuild_execution_state(
             open_tasks=all_open_tasks,
-            update_fn=build_execution_update_fn(
-                notion_update_fn=update_notion_page,
-                datastore=AIOS_DATASTORE,
-            ),
+            update_fn=execution_state_update_fn,
         )
 
         execution_engine_success = True
