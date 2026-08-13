@@ -118,6 +118,7 @@ except ModuleNotFoundError:
     OpenAI = None
 from difflib import SequenceMatcher
 from core.metadata.temporal import extract_temporal_metadata
+from aios.ingestion.models import InboxItem
 
 dotenv_path = find_dotenv() or ".env"
 load_dotenv(dotenv_path, override=True)
@@ -1104,13 +1105,16 @@ def extract_brain_dump_items(BRAIN_DUMP_PAGE_ID):
 
         notes = extract_note_texts_from_block(block)
 
-        inbox_items.append({
-            "text": text,
-            "notes": notes,
-            "block_id": block_id,
-            "block_type": block_type,
-            "parent_block_id": synced_block_id,
-        })
+        inbox_items.append(
+            InboxItem(
+                text=text,
+                notes=notes,
+                source="notion",
+                source_item_id=block_id,
+                source_container_id=synced_block_id,
+                source_type=block_type,
+            )
+        )
 
         if notes:
             print(f"Extracted notes for: {text}")
