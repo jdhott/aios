@@ -1,6 +1,0 @@
-Run these commands after extracting:
-
-grep "EXECUTION ENGINE V2 IMPORTED" run_aios.py
-
-You should see:
-print("=== EXECUTION ENGINE V2 IMPORTED ===")
