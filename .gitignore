@@ -19,3 +19,6 @@ aios_clarification_*/
 # Python generated files
 __pycache__/
 *.py[cod]
+
+# Runtime logs
+*.log
