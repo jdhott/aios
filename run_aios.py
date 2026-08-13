@@ -71,6 +71,15 @@ from aios.storage.execution_state_writer import (
     build_quick_win_update_fn,
 )
 from aios.storage.task_metadata_writer import update_task_metadata
+from aios.storage.task_lifecycle_writer import update_task_lifecycle
+from aios.storage.task_creation_writer import (
+    create_supabase_primary_task,
+    create_supabase_primary_hierarchy,
+)
+from aios.storage.task_project_relation_writer import get_project_relation_writer
+from aios.storage.project_creation_writer import create_supabase_project
+from aios.storage.project_source import get_supabase_projects
+from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 
 try:
     from core.evaluator import evaluate_task
@@ -5800,40 +5809,57 @@ def prepare_accepted_clarification_title(text):
 
 
 def update_task_from_selection(page_id, new_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None):
-    properties = {
+    lifecycle_updates = {
         "Task Name": {
             "title": [{"text": {"content": new_title}}]
         },
         "Status": {
             "select": {"name": READY_STATUS}
         },
+    }
+
+    metadata_updates = {
         "Just Do It": {"checkbox": is_jdi},
     }
 
     if is_urgent:
-        properties["Urgency"] = {"select": {"name": "High Urgency"}}
+        metadata_updates["Urgency"] = {
+            "select": {"name": "High Urgency"}
+        }
 
     if is_important:
-        properties["Importance"] = {"select": {"name": "High Importance"}}
+        metadata_updates["Importance"] = {
+            "select": {"name": "High Importance"}
+        }
 
     if due_date:
-        properties["Due Date"] = {"date": {"start": due_date.isoformat()}}
+        metadata_updates["Due Date"] = {
+            "date": {"start": due_date.isoformat()}
+        }
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=headers,
-        json={"properties": properties},
-        timeout=30,
-    )
+    try:
+        updated_task = update_task_lifecycle(
+            page_id,
+            lifecycle_updates,
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
+        updated_task = update_task_metadata(
+            updated_task,
+            metadata_updates,
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
+
         print("Updated task →", new_title)
-        return response.json()
+        return updated_task
 
-    increment_summary("errors")
-    print("ERROR updating task")
-    print(response.status_code, response.text)
-    return None
+    except Exception as exc:
+        increment_summary("errors")
+        print("ERROR updating task")
+        print(exc)
+        return None
 
 # In[56]:
 
@@ -5865,30 +5891,29 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 def update_clarification_title(page_id, clarification_text):
     new_title = f"Clarify next action: {clarification_text}"
 
-    response = requests.patch(
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=headers,
-        json={
-            "properties": {
+    try:
+        update_task_lifecycle(
+            page_id,
+            {
                 "Task Name": {
                     "title": [{"text": {"content": new_title}}]
                 },
                 "Status": {
                     "select": {"name": CLARIFY_STATUS}
-                }
-            }
-        },
-        timeout=30,
-    )
+                },
+            },
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
 
-    if response.ok:
         print("Updated clarification title →", new_title)
         return True
 
-    increment_summary("errors")
-    print("ERROR updating clarification title")
-    print(response.status_code, response.text)
-    return False
+    except Exception as exc:
+        increment_summary("errors")
+        print("ERROR updating clarification title")
+        print(exc)
+        return False
 
 # In[59]:
 
@@ -6664,7 +6689,7 @@ def review_possible_duplicate_items(possible_matches):
 
     return reviewed_possible_items, possible_items_to_create_anyway
 
-def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
+def _create_notion_task_only(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
     """Create one task page in Notion.
 
     If parent_task_id is supplied, the new task is linked to that page through
@@ -6840,7 +6865,64 @@ def create_notion_task(task_title, is_jdi=False, is_urgent=False, is_important=F
     )
     return None
 
-def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
+
+def create_notion_task(
+    task_title,
+    is_jdi=False,
+    is_urgent=False,
+    is_important=False,
+    due_date=None,
+    parent_task_id=None,
+    step_order=None,
+    manual_project="",
+    supabase_primary=False,
+):
+    """
+    Transitional creation dispatcher.
+
+    Only explicitly-approved ordinary top-level creation is Supabase-primary.
+    Breakdown subtasks, clarification tasks, and relation-bearing creations
+    continue through the existing Notion-only path for now.
+    """
+    is_clarification = task_title.lower().startswith(
+        "clarify next action:"
+    )
+
+    can_use_supabase_primary = (
+        AIOS_DATASTORE == "supabase"
+        and supabase_primary
+        and parent_task_id is None
+        and step_order is None
+        and not is_clarification
+        and not DRY_RUN
+    )
+
+    if can_use_supabase_primary:
+        return create_supabase_primary_task(
+            task_title=restore_preferred_proper_nouns(
+                task_title
+            ),
+            is_jdi=is_jdi,
+            is_urgent=is_urgent,
+            is_important=is_important,
+            due_date=due_date,
+            manual_project=manual_project,
+            notion_create_fn=_create_notion_task_only,
+            notion_rollback_fn=update_notion_page,
+        )
+
+    return _create_notion_task_only(
+        task_title,
+        is_jdi=is_jdi,
+        is_urgent=is_urgent,
+        is_important=is_important,
+        due_date=due_date,
+        parent_task_id=parent_task_id,
+        step_order=step_order,
+        manual_project=manual_project,
+    )
+
+def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project="", supabase_primary=False):
     """Create one task, then apply AI metadata and Quick Win updates."""
     page = create_notion_task(
         task_title,
@@ -6851,6 +6933,7 @@ def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_importa
         parent_task_id=parent_task_id,
         step_order=step_order,
         manual_project=manual_project,
+        supabase_primary=supabase_primary,
     )
 
     if not page:
@@ -6863,12 +6946,7 @@ def create_and_update_task(task_title, is_jdi=False, is_urgent=False, is_importa
 
 
 def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, manual_project=""):
-    """Create a parent task and linked child tasks for a breakdown item.
-
-    The parent task keeps the original high-level title. Each generated subtask is
-    created with its own clean title and linked back using the "Parent Task"
-    relation property.
-    """
+    """Create a parent task and linked child tasks for a breakdown item."""
     task_pages_created = []
 
     print("Breaking down:", task_title)
@@ -6876,11 +6954,18 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
     try:
         subtasks = generate_subtasks(task_title, client)
         subtasks = clean_subtasks(subtasks)
-        subtasks = [restore_preferred_proper_nouns(s) for s in subtasks]
+        subtasks = [
+            restore_preferred_proper_nouns(s)
+            for s in subtasks
+        ]
         subtasks = subtasks[:MAX_SUBTASKS]
 
         if not subtasks:
-            print("→ No useful subtasks returned; creating original task")
+            print(
+                "→ No useful subtasks returned; "
+                "creating original task"
+            )
+
             page = create_and_update_task(
                 task_title,
                 is_jdi=is_jdi,
@@ -6888,7 +6973,9 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
                 is_important=is_important,
                 due_date=due_date,
                 manual_project=manual_project,
+                supabase_primary=True,
             )
+
             return [page] if page else []
 
         print("\n--- BREAKDOWN ---")
@@ -6896,6 +6983,50 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
 
         for subtask_title in subtasks:
             print(" -", subtask_title)
+
+        if (
+            AIOS_DATASTORE == "supabase"
+            and not DRY_RUN
+        ):
+            def post_create(
+                page,
+                explicit_important,
+            ):
+                page = update_missing_metadata_if_confident(
+                    page,
+                    explicit_important=explicit_important,
+                )
+                update_quick_win_if_needed(
+                    page
+                )
+                return page
+
+            task_pages_created = (
+                create_supabase_primary_hierarchy(
+                    parent_title=task_title,
+                    subtasks=subtasks,
+                    is_jdi=is_jdi,
+                    is_urgent=is_urgent,
+                    is_important=is_important,
+                    due_date=due_date,
+                    manual_project=manual_project,
+                    notion_create_fn=_create_notion_task_only,
+                    post_create_fn=post_create,
+                    notion_rollback_fn=update_notion_page,
+                )
+            )
+
+            if task_pages_created:
+                increment_summary(
+                    "breakdown_parents_created"
+                )
+
+                for _ in task_pages_created[1:]:
+                    increment_summary(
+                        "breakdown_subtasks_created"
+                    )
+
+            return task_pages_created
 
         parent_page = create_and_update_task(
             task_title,
@@ -6907,14 +7038,27 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
         )
 
         if not parent_page:
-            print("→ Parent task was not created; skipping linked subtasks")
+            print(
+                "→ Parent task was not created; "
+                "skipping linked subtasks"
+            )
             return []
 
-        increment_summary("breakdown_parents_created")
-        task_pages_created.append(parent_page)
-        parent_task_id = parent_page["id"]
+        increment_summary(
+            "breakdown_parents_created"
+        )
+        task_pages_created.append(
+            parent_page
+        )
 
-        for step_order, subtask_title in enumerate(subtasks, start=1):
+        parent_task_id = (
+            parent_page["id"]
+        )
+
+        for step_order, subtask_title in enumerate(
+            subtasks,
+            start=1,
+        ):
             page = create_and_update_task(
                 subtask_title,
                 is_jdi=is_jdi,
@@ -6926,10 +7070,15 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
             )
 
             if page:
-                task_pages_created.append(page)
+                task_pages_created.append(
+                    page
+                )
 
     except Exception as e:
-        print("ERROR breaking down task:", task_title)
+        print(
+            "ERROR breaking down task:",
+            task_title,
+        )
         print(e)
 
         page = create_and_update_task(
@@ -6939,10 +7088,15 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
             is_important=is_important,
             due_date=due_date,
             manual_project=manual_project,
+            supabase_primary=(
+                AIOS_DATASTORE == "supabase"
+            ),
         )
 
         if page:
-            task_pages_created.append(page)
+            task_pages_created.append(
+                page
+            )
 
     return task_pages_created
 
@@ -7037,6 +7191,7 @@ def process_task_item(item):
             is_important=is_important,
             due_date=due_date,
             manual_project=manual_project,
+            supabase_primary=True,
         )
         task_pages_created = [page] if page else []
 
@@ -7231,6 +7386,306 @@ def query_tasks_database(filter_payload=None, sorts=None, page_size=100):
 from aios import projects as project_helpers
 
 project_helpers.configure_project_module(globals())
+
+
+def update_project_lifecycle_datastore(
+    project_ref_id,
+    *,
+    status=None,
+    is_active=None,
+):
+    """
+    Datastore-aware project lifecycle persistence seam.
+
+    Supabase mode writes status/is_active directly to Supabase.
+
+    The current AIOS project detector does not automatically activate or
+    deactivate projects; those transitions are review/UI actions. This helper
+    provides the canonical Supabase mutation target for those actions without
+    changing project cognition.
+    """
+    if AIOS_DATASTORE != "supabase":
+        raise RuntimeError(
+            "Project lifecycle datastore helper is "
+            "currently intended for Supabase mode."
+        )
+
+    return (
+        get_project_lifecycle_writer()
+        .update(
+            project_ref_id=project_ref_id,
+            status=status,
+            is_active=is_active,
+        )
+    )
+
+
+# Make the lifecycle mutation seam available to aios.projects / future UI
+# integration without changing detector behavior.
+project_helpers.update_project_lifecycle_datastore = (
+    update_project_lifecycle_datastore
+)
+
+
+
+# Datastore-aware project read seam. aios.projects continues to own all
+# matching / activation / emergence semantics; only its project population
+# source changes when Supabase is selected.
+_notion_query_projects_database = (
+    project_helpers.query_projects_database
+)
+
+
+def query_projects_database_datastore(
+    page_size=100,
+):
+    if AIOS_DATASTORE == "supabase":
+        return get_supabase_projects()
+
+    return _notion_query_projects_database(
+        page_size=page_size
+    )
+
+
+project_helpers.query_projects_database = (
+    query_projects_database_datastore
+)
+
+
+# Preserve the original Notion project-stub creator for Notion mode and
+# dry-run/test behavior only.
+_original_create_inactive_project_stub_if_missing = (
+    project_helpers.create_inactive_project_stub_if_missing
+)
+
+
+def create_inactive_project_stub_datastore(
+    project_name,
+    existing_projects=None,
+    source_reason="",
+):
+    """
+    Datastore-aware project-stub creation.
+
+    notion:
+      existing Notion behavior
+
+    supabase:
+      create directly in Supabase; no Notion project mirror
+    """
+
+    if AIOS_DATASTORE != "supabase":
+        return (
+            _original_create_inactive_project_stub_if_missing(
+                project_name,
+                existing_projects,
+                source_reason,
+            )
+        )
+
+    project_name = str(
+        project_name or ""
+    ).strip()
+
+    if not project_name:
+        return None
+
+    # Keep test/dry-run semantics exactly where they were.
+    if (
+        TEST_MODE
+        or DRY_RUN
+        or not project_helpers.RUN_PROJECT_STUB_CREATION
+    ):
+        return (
+            _original_create_inactive_project_stub_if_missing(
+                project_name,
+                existing_projects,
+                source_reason,
+            )
+        )
+
+    existing_projects = (
+        existing_projects or []
+    )
+
+    existing = (
+        project_helpers.find_project_by_name(
+            project_name,
+            existing_projects,
+        )
+    )
+
+    if existing:
+        return existing
+
+    project = create_supabase_project(
+        project_name=project_name,
+        status_value=(
+            project_helpers.PROJECT_STUB_STATUS_VALUE
+        ),
+        source_reason=source_reason,
+    )
+
+    # A relation writer may already be instantiated in this process.
+    # Refresh its project identity cache so the brand-new native UUID can be
+    # resolved immediately if the detector links a task during this run.
+    try:
+        get_project_relation_writer().refresh_projects()
+    except Exception:
+        pass
+
+    increment_summary(
+        "project_records_created"
+    )
+
+    print(
+        "[Project Creation] "
+        "Supabase-only project stub created"
+    )
+
+    return project
+
+
+project_helpers.create_inactive_project_stub_if_missing = (
+    create_inactive_project_stub_datastore
+)
+
+
+
+
+def set_project_relation_if_safe_datastore(
+    task,
+    project,
+    suggested_project,
+    match_score,
+    source_reason="",
+):
+    """
+    Preserve the existing project-detector guardrails while making the actual
+    task -> project relation Supabase-primary when AIOS_DATASTORE=supabase.
+    """
+    if (
+        TEST_MODE
+        or DRY_RUN
+        or not RUN_PROJECT_RELATION_WRITEBACK
+    ):
+        return False
+
+    if (
+        not task
+        or task.get("dry_run")
+        or not project
+    ):
+        return False
+
+    title = get_title(task)
+
+    if (
+        not title
+        or title.lower().startswith(
+            "clarify next action:"
+        )
+    ):
+        return False
+
+    if project_helpers.task_has_project_relation(
+        task
+    ):
+        increment_summary(
+            "project_relation_skipped"
+        )
+        print(
+            f"Project relation preserved: "
+            f"{title} already has a project relation"
+        )
+        return False
+
+    try:
+        if AIOS_DATASTORE == "supabase":
+            writer = get_project_relation_writer()
+
+            writer.write_supabase(
+                notion_task_id=task["id"],
+                notion_project_id=project["id"],
+            )
+
+            # Keep the local legacy-shaped task coherent for this run.
+            task.setdefault(
+                "properties",
+                {},
+            )[TASK_PROJECT_RELATION_PROPERTY] = {
+                "type": "relation",
+                "relation": [
+                    {"id": project["id"]}
+                ],
+            }
+
+            print(
+                "[Project Relation Write] "
+                "Supabase-only project relation write"
+            )
+
+        else:
+            update_notion_page(
+                task["id"],
+                {
+                    TASK_PROJECT_RELATION_PROPERTY: {
+                        "relation": [
+                            {"id": project["id"]}
+                        ]
+                    }
+                },
+            )
+
+        increment_summary(
+            "project_relation_updates"
+        )
+
+        project_name = get_title(
+            project
+        )
+
+        print(
+            f"Set Project relation: "
+            f"{title} → {project_name}"
+        )
+
+        log_ai_processing_decision(
+            original=title,
+            final_task=title,
+            action="Project Linked",
+            reason=(
+                f"Linked to existing active project "
+                f"'{project_name}' from Suggested Project "
+                f"'{suggested_project}'. {source_reason}"
+            ),
+            review_needed=False,
+            confidence=match_score,
+            source="Project Detector",
+            suggested_project=suggested_project,
+        )
+
+        return True
+
+    except Exception as exc:
+        increment_summary(
+            "errors"
+        )
+
+        print(
+            "ERROR setting Project relation:",
+            title,
+        )
+        print(exc)
+
+        return False
+
+
+# Replace only the write-back mutation seam. Candidate discovery, matching,
+# project activation rules and project-stub behavior remain in aios.projects.
+project_helpers.set_project_relation_if_safe = (
+    set_project_relation_if_safe_datastore
+)
 
 # Keep the historical function name available to the orchestration section.
 run_project_candidate_detector = project_helpers.run_project_candidate_detector
