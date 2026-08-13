@@ -22,8 +22,6 @@ def _extract_number_property(
     if prop.get("type") == "number":
         return prop.get("number"), True
 
-    # update_notion_page callers may sometimes pass the inner property body
-    # without a Notion "type" key. Support that shape too.
     if "number" in prop:
         return prop.get("number"), True
 
@@ -48,52 +46,41 @@ def _extract_checkbox_property(
     return None, False
 
 
-class ExecutionStateDualWriter:
+class ExecutionStatePrimaryWriter:
     """
-    Temporary migration writer.
+    Transitional execution-state writer.
 
-    Notion remains the existing write path.
-    When AIOS_DATASTORE=supabase, execution-state mutations are mirrored into
-    Supabase task_execution_state after the Notion update succeeds.
+    When AIOS_DATASTORE=supabase:
+      1. Supabase task_execution_state is updated first.
+      2. The existing Notion update runs second as a temporary mirror.
 
-    This writer intentionally handles only execution-state fields:
+    This establishes Supabase as the primary execution-state write target
+    while retaining Notion for one more parity-validation stage.
+
+    Fields handled here:
       - Execution Score
       - Execution Rank
-      - Best Next Action
+      - Best Next Action (derived from rank when necessary)
 
-    Surfaced Quick Win is still handled by its existing reconciliation path.
+    Surfaced Quick Win remains on the existing Notion reconciliation path
+    for this stage.
     """
 
     def __init__(
         self,
         notion_update_fn: ExecutionUpdateFn,
-        *,
-        mirror_to_supabase: bool,
     ):
         self.notion_update_fn = notion_update_fn
-        self.mirror_to_supabase = mirror_to_supabase
-
-        self._store = None
-        self._task_repository = None
-        self._execution_repository = None
-
-        self._notion_to_supabase_task_id: dict[str, str] | None = None
-
-    def _ensure_repositories(self) -> None:
-        if self._store is not None:
-            return
 
         self._store = SupabaseStore()
         self._task_repository = TaskRepository(self._store)
         self._execution_repository = ExecutionRepository(self._store)
 
+        self._notion_to_supabase_task_id: dict[str, str] | None = None
+
     def _ensure_task_map(self) -> None:
         if self._notion_to_supabase_task_id is not None:
             return
-
-        self._ensure_repositories()
-
-        assert self._task_repository is not None
 
         tasks = self._task_repository.get_all_tasks()
 
@@ -104,12 +91,12 @@ class ExecutionStateDualWriter:
         }
 
         print(
-            "[Execution Dual Write] "
+            "[Execution Primary Write] "
             f"Loaded task ID mappings: "
             f"{len(self._notion_to_supabase_task_id)}"
         )
 
-    def _mirror(
+    def _write_supabase(
         self,
         notion_task_id: str,
         properties: dict[str, Any],
@@ -117,7 +104,6 @@ class ExecutionStateDualWriter:
         self._ensure_task_map()
 
         assert self._notion_to_supabase_task_id is not None
-        assert self._execution_repository is not None
 
         supabase_task_id = self._notion_to_supabase_task_id.get(
             notion_task_id
@@ -125,7 +111,7 @@ class ExecutionStateDualWriter:
 
         if not supabase_task_id:
             raise RuntimeError(
-                "Execution dual-write could not map "
+                "Execution primary write could not map "
                 f"Notion task ID {notion_task_id} to Supabase."
             )
 
@@ -171,6 +157,7 @@ class ExecutionStateDualWriter:
 
         if has_bna:
             state["best_next_action"] = bool(bna)
+
         elif has_rank:
             state["best_next_action"] = (
                 rank is not None
@@ -186,14 +173,6 @@ class ExecutionStateDualWriter:
         notion_task_id: str,
         properties: dict[str, Any],
     ):
-        result = self.notion_update_fn(
-            notion_task_id,
-            properties,
-        )
-
-        if not self.mirror_to_supabase:
-            return result
-
         relevant = {
             key: value
             for key, value in properties.items()
@@ -205,12 +184,17 @@ class ExecutionStateDualWriter:
         }
 
         if relevant:
-            self._mirror(
+            self._write_supabase(
                 notion_task_id,
                 relevant,
             )
 
-        return result
+        # Temporary validation mirror. If this fails, the exception is
+        # intentionally surfaced rather than silently accepting divergence.
+        return self.notion_update_fn(
+            notion_task_id,
+            properties,
+        )
 
 
 def build_execution_update_fn(
@@ -219,20 +203,14 @@ def build_execution_update_fn(
     datastore: str,
 ) -> ExecutionUpdateFn:
     """
-    Return the execution update callback used by Execution Engine V2.
-
     notion:
-        original Notion-only behavior
+        Original Notion-only behavior.
 
     supabase:
-        Notion write first, then mirror execution state into Supabase
+        Supabase primary execution-state write, followed by Notion mirror.
     """
 
-    normalized = (
-        datastore
-        .strip()
-        .lower()
-    )
+    normalized = datastore.strip().lower()
 
     if normalized not in {
         "notion",
@@ -246,12 +224,142 @@ def build_execution_update_fn(
         return notion_update_fn
 
     print(
-        "[Execution Dual Write] "
-        "Notion remains primary write target; "
-        "mirroring execution state to Supabase"
+        "[Execution Primary Write] "
+        "Supabase is primary execution-state write target; "
+        "Notion remains temporary mirror"
     )
 
-    return ExecutionStateDualWriter(
-        notion_update_fn,
-        mirror_to_supabase=True,
+    return ExecutionStatePrimaryWriter(
+        notion_update_fn
+    )
+
+
+class QuickWinPresentationPrimaryWriter:
+    """
+    Transitional Quick Win presentation writer.
+
+    When AIOS_DATASTORE=supabase:
+      - Surfaced Quick Win is written to Supabase first.
+      - The complete original update is then mirrored to Notion.
+      - The underlying Quick Win eligibility checkbox remains a Notion task
+        field in this stage and is not written to task_execution_state.
+
+    This lets task_execution_state become authoritative for the
+    surfaced_quick_win presentation flag without changing unrelated task
+    metadata yet.
+    """
+
+    def __init__(
+        self,
+        notion_update_fn: ExecutionUpdateFn,
+    ):
+        self.notion_update_fn = notion_update_fn
+
+        self._store = SupabaseStore()
+        self._task_repository = TaskRepository(self._store)
+        self._execution_repository = ExecutionRepository(self._store)
+
+        self._notion_to_supabase_task_id: dict[str, str] | None = None
+
+    def _ensure_task_map(self) -> None:
+        if self._notion_to_supabase_task_id is not None:
+            return
+
+        tasks = self._task_repository.get_all_tasks()
+
+        self._notion_to_supabase_task_id = {
+            task.legacy_notion_id: task.id
+            for task in tasks
+            if task.legacy_notion_id
+        }
+
+        print(
+            "[Quick Win Primary Write] "
+            f"Loaded task ID mappings: "
+            f"{len(self._notion_to_supabase_task_id)}"
+        )
+
+    def _write_surfaced_quick_win(
+        self,
+        notion_task_id: str,
+        value: bool,
+    ) -> None:
+        self._ensure_task_map()
+
+        assert self._notion_to_supabase_task_id is not None
+
+        supabase_task_id = self._notion_to_supabase_task_id.get(
+            notion_task_id
+        )
+
+        if not supabase_task_id:
+            raise RuntimeError(
+                "Quick Win primary write could not map "
+                f"Notion task ID {notion_task_id} to Supabase."
+            )
+
+        self._execution_repository.set_surfaced_quick_win(
+            supabase_task_id,
+            bool(value),
+        )
+
+    def __call__(
+        self,
+        notion_task_id: str,
+        properties: dict[str, Any],
+    ):
+        surfaced_value, has_surfaced = _extract_checkbox_property(
+            properties,
+            "Surfaced Quick Win",
+        )
+
+        if has_surfaced:
+            self._write_surfaced_quick_win(
+                notion_task_id,
+                bool(surfaced_value),
+            )
+
+        # Temporary validation mirror. This still carries any underlying
+        # Quick Win eligibility change to Notion exactly as before.
+        return self.notion_update_fn(
+            notion_task_id,
+            properties,
+        )
+
+
+def build_quick_win_update_fn(
+    *,
+    notion_update_fn: ExecutionUpdateFn,
+    datastore: str,
+) -> ExecutionUpdateFn:
+    """
+    notion:
+        Original Notion-only Quick Win reconciliation behavior.
+
+    supabase:
+        Surfaced Quick Win -> Supabase first, then full Notion mirror.
+        Underlying Quick Win eligibility remains Notion-backed for now.
+    """
+
+    normalized = datastore.strip().lower()
+
+    if normalized not in {
+        "notion",
+        "supabase",
+    }:
+        raise ValueError(
+            "datastore must be 'notion' or 'supabase'"
+        )
+
+    if normalized == "notion":
+        return notion_update_fn
+
+    print(
+        "[Quick Win Primary Write] "
+        "Supabase is primary Surfaced Quick Win target; "
+        "Notion remains temporary mirror"
+    )
+
+    return QuickWinPresentationPrimaryWriter(
+        notion_update_fn
     )

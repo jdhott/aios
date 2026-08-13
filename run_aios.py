@@ -66,7 +66,10 @@ print("__file__ =", __file__)
 
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
-from aios.storage.execution_state_writer import build_execution_update_fn
+from aios.storage.execution_state_writer import (
+    build_execution_update_fn,
+    build_quick_win_update_fn,
+)
 
 try:
     from core.evaluator import evaluate_task
@@ -5097,6 +5100,11 @@ def refresh_surfaced_quick_wins(open_tasks, bna_tasks=None, limit=None):
     selected_ids = get_task_id_set(selected)
     bna_ids = get_task_id_set(bna_tasks)
 
+    quick_win_update_fn = build_quick_win_update_fn(
+        notion_update_fn=update_notion_page,
+        datastore=AIOS_DATASTORE,
+    )
+
     changed = 0
     quick_win_overlap_cleared = 0
     for task in open_tasks:
@@ -5128,7 +5136,7 @@ def refresh_surfaced_quick_wins(open_tasks, bna_tasks=None, limit=None):
             continue
 
         try:
-            update_notion_page(task["id"], updates)
+            quick_win_update_fn(task["id"], updates)
             changed += 1
             if QUICK_WIN_PROPERTY in updates:
                 quick_win_overlap_cleared += 1
