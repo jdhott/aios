@@ -6697,7 +6697,7 @@ def archive_created_item(item, created_pages, archive_section_id):
 
     first_task_url = created_pages[0].get("url")
     archive_item(item, archive_section_id, first_task_url)
-    delete_original_block(item["block_id"])
+    inbox_source.remove_item(item)
 
 def archive_reviewed_items(items, archive_section_id):
     """Archive and remove processed inbox items that did not create new tasks."""
@@ -6719,7 +6719,7 @@ def archive_reviewed_items(items, archive_section_id):
 
     for item in items:
         archive_item(item, archive_section_id)
-        delete_original_block(item["block_id"])
+        inbox_source.remove_item(item)
 
 def limit_items_for_controlled_production(items):
     """Limit how many new inbox items are processed during early production testing."""

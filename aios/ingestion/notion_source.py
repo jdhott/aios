@@ -13,6 +13,10 @@ class NotionInboxSource:
     def list_pending_items(self) -> list[InboxItem]:
         return extract_brain_dump_items(self.page_id)
 
+    def remove_item(self, item: InboxItem) -> None:
+        """Remove the processed source block from the Notion Brain Dump."""
+        delete_original_block(item.source_item_id)
+
 def find_first_synced_block(parent_block_id):
     """Return the synced block that actually contains Brain Dump task items.
 
