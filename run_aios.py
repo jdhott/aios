@@ -66,6 +66,11 @@ print("__file__ =", __file__)
 
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
+from aios.storage.task_source import (
+    get_supabase_quick_win_candidate_tasks,
+    get_supabase_runtime_open_tasks,
+    query_supabase_tasks_legacy,
+)
 from aios.storage.execution_state_writer import (
     build_execution_update_fn,
     build_quick_win_update_fn,
@@ -157,9 +162,11 @@ if TEST_ONLY:
 # -----------------------------------------------------------------------------
 # Datastore migration control
 # -----------------------------------------------------------------------------
-# During the staged Supabase cutover, only the authoritative Execution Engine
-# task read honours this setting. All other reads and all writes remain on
-# Notion until their migration stages are explicitly implemented and tested.
+# AIOS is in a staged Supabase cutover. When AIOS_DATASTORE=supabase,
+# authoritative task/project persistence and the migrated read paths use
+# Supabase compatibility adapters. Notion remains intentionally in use for
+# Brain Dump / clarification / dashboard presentation workflows and as the
+# explicit fallback when AIOS_DATASTORE=notion.
 AIOS_DATASTORE = (
     os.getenv("AIOS_DATASTORE", "notion")
     .strip()
@@ -1114,27 +1121,83 @@ def extract_brain_dump_items(BRAIN_DUMP_PAGE_ID):
 # In[18]:
 
 def get_open_tasks():
-    url = f"https://api.notion.com/v1/databases/{TASKS_DATABASE_ID}/query"
+    """
+    Return the task population used by the Brain Dump / clarification runtime.
+
+    Preserve historical semantics exactly:
+      Open Loop = True
+      Done = False
+
+    Note that this path intentionally does NOT add Archived=False because the
+    legacy Notion query did not include that filter.
+    """
+
+    if AIOS_DATASTORE == "supabase":
+        print(
+            "[Task Read] Reading runtime open tasks "
+            "from Supabase"
+        )
+
+        return (
+            get_supabase_runtime_open_tasks()
+        )
+
+    url = (
+        "https://api.notion.com/v1/"
+        f"databases/{TASKS_DATABASE_ID}/query"
+    )
 
     payload = {
         "filter": {
             "and": [
-                {"property": "Open Loop", "checkbox": {"equals": True}},
-                {"property": "Done", "checkbox": {"equals": False}},
+                {
+                    "property":
+                        "Open Loop",
+                    "checkbox": {
+                        "equals":
+                            True,
+                    },
+                },
+                {
+                    "property":
+                        "Done",
+                    "checkbox": {
+                        "equals":
+                            False,
+                    },
+                },
             ]
         },
         "page_size": 100,
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=30,
+    )
 
     if not response.ok:
-        increment_summary("errors")
-        print("ERROR querying tasks")
-        print(response.status_code, response.text)
+        increment_summary(
+            "errors"
+        )
+        print(
+            "ERROR querying tasks"
+        )
+        print(
+            response.status_code,
+            response.text,
+        )
         return []
 
-    return response.json().get("results", [])
+    return (
+        response.json()
+        .get(
+            "results",
+            [],
+        )
+    )
 
 # In[19]:
 
@@ -4951,16 +5014,27 @@ def get_eligible_quick_wins():
         ]
     }
 
-    open_tasks = query_tasks_database(
-        filter_payload=filter_payload,
-        sorts=[
-            {
-                "timestamp": "created_time",
-                "direction": "ascending"
-            }
-        ],
-        page_size=100,
-    )
+    if AIOS_DATASTORE == "supabase":
+        print(
+            "[Quick Win Read] Reading Quick Win "
+            "candidate population from Supabase"
+        )
+
+        open_tasks = (
+            get_supabase_quick_win_candidate_tasks()
+        )
+
+    else:
+        open_tasks = query_tasks_database(
+            filter_payload=filter_payload,
+            sorts=[
+                {
+                    "timestamp": "created_time",
+                    "direction": "ascending"
+                }
+            ],
+            page_size=100,
+        )
 
     next_sequence_tasks = filter_to_next_sequence_tasks(open_tasks)
 
@@ -7376,6 +7450,35 @@ def query_tasks_database(filter_payload=None, sorts=None, page_size=100):
     print(f"[query_tasks_database] Retrieved {len(results)} total tasks")
 
     return results
+
+
+# Preserve the Notion implementation as an explicit fallback while routing
+# migrated runtime/project-cognition task reads to Supabase.
+_notion_query_tasks_database = query_tasks_database
+
+
+def query_tasks_database_datastore(
+    filter_payload=None,
+    sorts=None,
+    page_size=100,
+):
+    if AIOS_DATASTORE == "supabase":
+        return query_supabase_tasks_legacy(
+            filter_payload=filter_payload,
+            sorts=sorts,
+            page_size=page_size,
+        )
+
+    return _notion_query_tasks_database(
+        filter_payload=filter_payload,
+        sorts=sorts,
+        page_size=page_size,
+    )
+
+
+query_tasks_database = (
+    query_tasks_database_datastore
+)
 
 
 # Legacy execution-state mutation helpers removed in cleanup Phase 1.
