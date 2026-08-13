@@ -15,3 +15,7 @@ aios_*_backup*/
 aios_clarification_*/
 
 .env
+
+# Python generated files
+__pycache__/
+*.py[cod]
