@@ -7790,6 +7790,388 @@ project_helpers.set_project_relation_if_safe = (
     set_project_relation_if_safe_datastore
 )
 
+
+# -------------------------------------------------------------------------
+# Datastore-aware Project task-state writes
+# -------------------------------------------------------------------------
+# Suggested Project is durable task metadata, and review-project membership is
+# a real task -> project relation. In Supabase mode these writes must therefore
+# be authoritative in Supabase rather than split across Notion and Supabase.
+#
+# Notion mode remains unchanged. Brain Dump / clarification / dashboard block
+# presentation remains intentionally Notion-backed elsewhere.
+
+_original_update_suggested_project_if_needed = (
+    project_helpers.update_suggested_project_if_needed
+)
+
+_original_set_suggested_project_canonical = (
+    project_helpers.set_suggested_project_canonical
+)
+
+_original_set_review_project_relation_if_empty = (
+    project_helpers.set_review_project_relation_if_empty
+)
+
+
+def _sync_runtime_task_from_updated_copy(
+    task,
+    updated_task,
+):
+    """Mutate the current legacy-shaped task so later passes see the write."""
+
+    if (
+        not isinstance(task, dict)
+        or not isinstance(updated_task, dict)
+    ):
+        return
+
+    if "properties" in updated_task:
+        task["properties"] = updated_task["properties"]
+
+    for key in (
+        "_source",
+        "_supabase_id",
+    ):
+        if key in updated_task:
+            task[key] = updated_task[key]
+
+
+def update_suggested_project_if_needed_datastore(
+    task,
+    suggested_project,
+    source="Project Detector",
+):
+    """
+    Datastore-aware Suggested Project staging write.
+
+    Supabase mode preserves the original guardrail:
+    write only when Suggested Project is currently blank.
+    """
+
+    if AIOS_DATASTORE != "supabase":
+        return (
+            _original_update_suggested_project_if_needed(
+                task,
+                suggested_project,
+                source,
+            )
+        )
+
+    suggested_project = str(
+        suggested_project or ""
+    ).strip()
+
+    if (
+        not task
+        or task.get("dry_run")
+        or not suggested_project
+    ):
+        return False
+
+    props = task.get(
+        "properties",
+        {},
+    )
+
+    current_value = (
+        project_helpers.get_rich_text_plain_value(
+            props,
+            SUGGESTED_PROJECT_PROPERTY,
+        )
+    )
+
+    title = get_title(task)
+
+    if current_value:
+        if current_value != suggested_project:
+            print(
+                f"Suggested Project preserved: "
+                f"{title} already has "
+                f"{current_value!r}; candidate was "
+                f"{suggested_project!r}"
+            )
+
+        return False
+
+    if TEST_MODE or DRY_RUN:
+        print(
+            f"[DRY RUN] Would set Suggested Project: "
+            f"{title} → {suggested_project}"
+        )
+        return False
+
+    try:
+        updated_task = update_task_metadata(
+            task,
+            {
+                SUGGESTED_PROJECT_PROPERTY:
+                    _notion_rich_text(
+                        suggested_project
+                    )
+            },
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
+
+        _sync_runtime_task_from_updated_copy(
+            task,
+            updated_task,
+        )
+
+        increment_summary(
+            "suggested_project_updates"
+        )
+
+        print(
+            "[Suggested Project Write] "
+            "Supabase-only staging write"
+        )
+
+        print(
+            f"Set Suggested Project: "
+            f"{title} → {suggested_project}"
+        )
+
+        return True
+
+    except Exception as exc:
+        increment_summary(
+            "errors"
+        )
+
+        print(
+            "ERROR setting Suggested Project:",
+            title,
+        )
+
+        print(exc)
+
+        return False
+
+
+def set_suggested_project_canonical_datastore(
+    task,
+    project_name,
+):
+    """
+    Synchronize Suggested Project to the authoritative related Project name.
+
+    Supabase mode replaces stale staging text directly in Supabase and keeps the
+    current legacy-shaped task coherent for later passes in the same run.
+    """
+
+    if AIOS_DATASTORE != "supabase":
+        return (
+            _original_set_suggested_project_canonical(
+                task,
+                project_name,
+            )
+        )
+
+    project_name = str(
+        project_name or ""
+    ).strip()
+
+    if (
+        not task
+        or not project_name
+        or task.get("dry_run")
+    ):
+        return False
+
+    props = (
+        task.get(
+            "properties",
+            {},
+        )
+        or {}
+    )
+
+    current = (
+        project_helpers.get_rich_text_plain_value(
+            props,
+            SUGGESTED_PROJECT_PROPERTY,
+        )
+    )
+
+    if current == project_name:
+        return False
+
+    if TEST_MODE or DRY_RUN:
+        print(
+            f"[DRY RUN] Would sync Suggested Project: "
+            f"{get_title(task)} → {project_name}"
+        )
+        return False
+
+    try:
+        updated_task = update_task_metadata(
+            task,
+            {
+                SUGGESTED_PROJECT_PROPERTY:
+                    _notion_rich_text(
+                        project_name
+                    )
+            },
+            datastore=AIOS_DATASTORE,
+            notion_update_fn=update_notion_page,
+        )
+
+        _sync_runtime_task_from_updated_copy(
+            task,
+            updated_task,
+        )
+
+        increment_summary(
+            "suggested_project_updates"
+        )
+
+        print(
+            "[Suggested Project Write] "
+            "Supabase-only canonical sync"
+        )
+
+        print(
+            "Synced Suggested Project to canonical relation: "
+            f"{get_title(task)} → {project_name}"
+        )
+
+        return True
+
+    except Exception as exc:
+        increment_summary(
+            "errors"
+        )
+
+        print(
+            "ERROR syncing Suggested Project:",
+            get_title(task),
+        )
+
+        print(exc)
+
+        return False
+
+
+def set_review_project_relation_if_empty_datastore(
+    task,
+    project,
+    suggested_project,
+):
+    """
+    Link a task to an inactive review project.
+
+    In Supabase mode, review membership is the same canonical structural
+    relation as active-project membership; only project lifecycle/status
+    distinguishes review from active.
+    """
+
+    if AIOS_DATASTORE != "supabase":
+        return (
+            _original_set_review_project_relation_if_empty(
+                task,
+                project,
+                suggested_project,
+            )
+        )
+
+    if not getattr(
+        project_helpers,
+        "PROJECT_REVIEW_LINK_STUBS",
+        True,
+    ):
+        return False
+
+    if (
+        not task
+        or not project
+        or task.get("dry_run")
+    ):
+        return False
+
+    if project_helpers.is_active_project(
+        project
+    ):
+        return False
+
+    if project_helpers.task_has_project_relation(
+        task
+    ):
+        return False
+
+    if TEST_MODE or DRY_RUN:
+        return False
+
+    title = get_title(task)
+
+    try:
+        writer = get_project_relation_writer()
+
+        writer.write_supabase(
+            notion_task_id=task["id"],
+            notion_project_id=project["id"],
+        )
+
+        # Keep the current legacy-shaped task coherent for this run.
+        task.setdefault(
+            "properties",
+            {},
+        )[TASK_PROJECT_RELATION_PROPERTY] = {
+            "type": "relation",
+            "relation": [
+                {
+                    "id":
+                        project["id"]
+                }
+            ],
+        }
+
+        increment_summary(
+            "project_relation_updates"
+        )
+
+        print(
+            "[Project Relation Write] "
+            "Supabase-only REVIEW project relation"
+        )
+
+        print(
+            f"Set REVIEW Project relation: "
+            f"{title} → {get_title(project)} "
+            "(inactive; manual review required)"
+        )
+
+        return True
+
+    except Exception as exc:
+        increment_summary(
+            "errors"
+        )
+
+        print(
+            "ERROR setting review Project relation:",
+            title,
+        )
+
+        print(exc)
+
+        return False
+
+
+project_helpers.update_suggested_project_if_needed = (
+    update_suggested_project_if_needed_datastore
+)
+
+project_helpers.set_suggested_project_canonical = (
+    set_suggested_project_canonical_datastore
+)
+
+project_helpers.set_review_project_relation_if_empty = (
+    set_review_project_relation_if_empty_datastore
+)
+
+
 # Keep the historical function name available to the orchestration section.
 run_project_candidate_detector = project_helpers.run_project_candidate_detector
 
