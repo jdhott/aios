@@ -22,6 +22,9 @@ def parse_datetime(
     )
 
 
+REVIEW_REPOSITORY_OPEN_QUEUE_VERSION = "app-service-boundary-v1-phase2.1"
+
+
 class InboxReviewRepository:
     """Supabase persistence layer for inbox human-review workflows."""
 
@@ -123,6 +126,24 @@ class InboxReviewRepository:
         return self.row_to_review(
             rows[0]
         )
+
+    def get_open_reviews(
+        self,
+    ) -> list[InboxReview]:
+        response = (
+            self.store.client
+            .table("inbox_reviews")
+            .select("*")
+            .neq("state", "resolved")
+            .order("created_at")
+            .execute()
+        )
+
+        return [
+            self.row_to_review(row)
+            for row in (response.data or [])
+        ]
+
 
     def get_open_reviews_for_item(
         self,
