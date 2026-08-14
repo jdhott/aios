@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from aios.ingestion.models import InboxItem
+from aios.ingestion.capture_metadata import CaptureMetadata
 from aios.storage.supabase_store import SupabaseStore
 
 
@@ -97,6 +98,7 @@ class InboxRepository:
         source: str = "brain_dump",
         source_item_id: Optional[str] = None,
         source_metadata: Optional[dict[str, Any]] = None,
+        capture_metadata: Optional[CaptureMetadata] = None,
     ) -> dict[str, Any]:
         payload = {
             "text": text,
@@ -105,6 +107,16 @@ class InboxRepository:
             "source_item_id": source_item_id,
             "source_metadata": source_metadata or {},
             "status": "pending",
+            "clean_text": capture_metadata.clean_text if capture_metadata else None,
+            "due_date": (
+                capture_metadata.due_date.isoformat()
+                if capture_metadata and capture_metadata.due_date
+                else None
+            ),
+            "project_hint": capture_metadata.project_hint if capture_metadata else None,
+            "is_urgent": capture_metadata.is_urgent if capture_metadata else False,
+            "is_important": capture_metadata.is_important if capture_metadata else False,
+            "is_just_do_it": capture_metadata.is_jdi if capture_metadata else False,
         }
 
         response = (
@@ -120,6 +132,27 @@ class InboxRepository:
             )
 
         return response.data[0]
+
+
+    def create_brain_dump_item(
+        self,
+        *,
+        raw_text: str,
+        notes: Optional[list[str]] = None,
+        parser,
+        source_metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        capture = parser(raw_text)
+        if not isinstance(capture, CaptureMetadata):
+            raise TypeError("Brain Dump parser must return CaptureMetadata")
+
+        return self.create_item(
+            text=raw_text,
+            notes=notes,
+            source="brain_dump",
+            source_metadata=source_metadata,
+            capture_metadata=capture,
+        )
 
     def mark_processed(
         self,
