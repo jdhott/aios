@@ -5377,6 +5377,105 @@ def score_label(score):
     else:
         return "Low"
 
+# Possible-duplicate shadow helper must be defined before the
+# top-level Brain Dump classification loop executes.
+def shadow_possible_duplicate_review(match):
+    """Write an observational Supabase review for a real possible duplicate.
+
+    Notion remains the authoritative review UI. Shadow failures are non-blocking.
+    """
+    if AIOS_DATASTORE != "supabase":
+        return None
+
+    if DRY_RUN:
+        return None
+
+    if (
+        possible_duplicate_shadow_inbox_repo is None
+        or possible_duplicate_shadow_review_repo is None
+    ):
+        return None
+
+    item = match["item"]
+    matched_task = match["task"]
+    score = match["score"]
+
+    try:
+        shadow_row = (
+            possible_duplicate_shadow_inbox_repo
+            .get_or_create_shadow_item(item)
+        )
+
+        existing_reviews = (
+            possible_duplicate_shadow_review_repo
+            .get_open_reviews_for_item(
+                str(shadow_row["id"])
+            )
+        )
+
+        for review in existing_reviews:
+            if review.review_type == "possible_duplicate":
+                print(
+                    "[Possible Duplicate Shadow] Existing open review reused:",
+                    item["text"],
+                )
+                return review
+
+        matched_task_id = (
+            matched_task.get("_supabase_id")
+            or matched_task.get("id")
+        )
+
+        payload = {
+            "original_text": item["text"],
+            "candidate_task_id": (
+                str(matched_task_id)
+                if matched_task_id
+                else None
+            ),
+            "candidate_task_title": get_title(matched_task),
+            "match_score": score,
+            "confidence": score_label(score),
+            "allowed_decisions": [
+                "link_existing",
+                "create_anyway",
+                "ignore",
+            ],
+            "authority": "notion_shadow_only",
+        }
+
+        review = (
+            possible_duplicate_shadow_review_repo
+            .create_review(
+                inbox_item_id=str(shadow_row["id"]),
+                review_type="possible_duplicate",
+                payload=payload,
+            )
+        )
+
+        print(
+            "[Possible Duplicate Shadow] Created Supabase review:",
+            item["text"],
+        )
+
+        return review
+
+    except Exception as exc:
+        print(
+            "[Possible Duplicate Shadow] Write failed:",
+            exc,
+        )
+        return None
+
+print("[Possible Duplicate Shadow] Execution order fixed")
+
+
+# Refresh duplicate-review UI dependencies now that score_label and
+# matching thresholds/helpers are available in runtime globals.
+duplicate_review_ui.configure_duplicate_review_ui(globals())
+print("[Inbox Review UI] Runtime dependencies refreshed")
+
+
 # ## 10. Parent-child linking
 # 
 # Breakdown tasks now create a parent task first, then create cleanly named subtasks linked through the existing `Parent Task` relation property.
@@ -5785,93 +5884,6 @@ def append_notes_to_created_task_pages(created_pages, notes):
 
 
 
-def shadow_possible_duplicate_review(match):
-    """Write an observational Supabase review for a real possible duplicate.
-
-    Notion remains the authoritative review UI. Shadow failures are non-blocking.
-    """
-    if AIOS_DATASTORE != "supabase":
-        return None
-
-    if DRY_RUN:
-        return None
-
-    if (
-        possible_duplicate_shadow_inbox_repo is None
-        or possible_duplicate_shadow_review_repo is None
-    ):
-        return None
-
-    item = match["item"]
-    matched_task = match["task"]
-    score = match["score"]
-
-    try:
-        shadow_row = (
-            possible_duplicate_shadow_inbox_repo
-            .get_or_create_shadow_item(item)
-        )
-
-        existing_reviews = (
-            possible_duplicate_shadow_review_repo
-            .get_open_reviews_for_item(
-                str(shadow_row["id"])
-            )
-        )
-
-        for review in existing_reviews:
-            if review.review_type == "possible_duplicate":
-                print(
-                    "[Possible Duplicate Shadow] Existing open review reused:",
-                    item["text"],
-                )
-                return review
-
-        matched_task_id = (
-            matched_task.get("_supabase_id")
-            or matched_task.get("id")
-        )
-
-        payload = {
-            "original_text": item["text"],
-            "candidate_task_id": (
-                str(matched_task_id)
-                if matched_task_id
-                else None
-            ),
-            "candidate_task_title": get_title(matched_task),
-            "match_score": score,
-            "confidence": score_label(score),
-            "allowed_decisions": [
-                "link_existing",
-                "create_anyway",
-                "ignore",
-            ],
-            "authority": "notion_shadow_only",
-        }
-
-        review = (
-            possible_duplicate_shadow_review_repo
-            .create_review(
-                inbox_item_id=str(shadow_row["id"]),
-                review_type="possible_duplicate",
-                payload=payload,
-            )
-        )
-
-        print(
-            "[Possible Duplicate Shadow] Created Supabase review:",
-            item["text"],
-        )
-
-        return review
-
-    except Exception as exc:
-        print(
-            "[Possible Duplicate Shadow] Write failed:",
-            exc,
-        )
-        return None
 
 
 def review_possible_duplicate_items(possible_matches):

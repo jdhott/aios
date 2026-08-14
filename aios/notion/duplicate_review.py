@@ -113,7 +113,7 @@ def append_possible_duplicate_blocks(item, matched_task, score):
     ]
 
     response = requests.patch(
-        f"https://api.notion.com/v1/blocks/{item['block_id']}/children",
+        f"https://api.notion.com/v1/blocks/{item.source_item_id}/children",
         headers=headers,
         json={"children": children},
         timeout=30,

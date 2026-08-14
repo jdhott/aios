@@ -12,7 +12,7 @@ checks = [
     ("archive module marker exists", archive_marker in run),
     ("lifecycle refresh marker exists", refresh_marker in run),
     ("notion source is reconfigured after archive load",
-        run.find(archive_marker) < run.find("notion_source.configure_notion_source(globals())", run.find(archive_marker))),
+        run.find(archive_marker) < run.find("notion_inbox_source.configure_notion_source(globals())", run.find(archive_marker))),
     ("refresh occurs before runtime pipeline",
         run.find(refresh_marker) < run.find("Brain Dump synced blocks found") if "Brain Dump synced blocks found" in run else True),
 ]
