@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
+import os
 
 from aios.api.config import (
     get_api_settings,
@@ -22,12 +23,19 @@ from aios.ingestion.capture_metadata import parse_capture_metadata
 from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.processing.trigger_coordinator import (
+    ProcessingTriggerCoordinator,
+)
+from aios.processing.cloud_run_trigger import (
+    CloudRunJobTrigger,
+)
 
 
 AIOS_API_VERSION = "cloud-run-api-v1-scaffold"
 AIOS_API_SECURITY_VERSION = "cloud-run-api-v1.1-security"
 AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
 AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
+AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"
 
 
 @asynccontextmanager
@@ -64,6 +72,44 @@ def _review_service() -> ReviewService:
     )
 
 
+def _processor_trigger_enabled() -> bool:
+    return (
+        os.getenv("AIOS_PROCESSOR_TRIGGER_ENABLED", "false")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def _request_processor_run() -> None:
+    if not _processor_trigger_enabled():
+        return
+
+    store = _store()
+    coordinator = ProcessingTriggerCoordinator(store)
+    request = coordinator.request_processing()
+
+    if not request.should_trigger:
+        print(
+            "[Processor Trigger] Processing requested; "
+            "existing execution/trigger will handle it."
+        )
+        return
+
+    try:
+        operation = CloudRunJobTrigger().trigger()
+        print(
+            "[Processor Trigger] Cloud Run Job requested:",
+            operation.get("name", "operation accepted"),
+        )
+    except Exception as exc:
+        coordinator.release_trigger_claim()
+        print(
+            "[Processor Trigger] Trigger failed; capture remains pending:",
+            exc,
+        )
+
+
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -95,6 +141,10 @@ def capture_inbox(
             "capture_interface": "cloud_run_api_v1",
         },
     )
+
+    # Triggering is best-effort only. The durable Supabase inbox row is
+    # authoritative; a Cloud Run trigger failure must never lose capture.
+    _request_processor_run()
 
     return InboxCaptureResponse(
         id=str(row["id"]),
