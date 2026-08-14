@@ -8,6 +8,8 @@ def configure_duplicate_review_ui(namespace):
     globals().update(namespace)
 
 
+SOURCE_AWARE_DUPLICATE_REVIEW_VERSION = "app-service-boundary-v1-phase1.2"
+
 class NotionInboxReviewUI:
     def show_possible_duplicate(
         self,
@@ -15,6 +17,13 @@ class NotionInboxReviewUI:
         matched_task,
         score: float,
     ) -> bool:
+        if item.source != "notion":
+            print(
+                "[Inbox Review UI] Skipping Notion duplicate presentation for "
+                f"{item.source_type or item.source} source: {item.text}"
+            )
+            return False
+
         return append_possible_duplicate_blocks(
             item,
             matched_task,
@@ -25,6 +34,9 @@ class NotionInboxReviewUI:
         self,
         item: InboxItem,
     ) -> str | None:
+        if item.source != "notion":
+            return None
+
         return get_checked_possible_duplicate_action(
             item
         )

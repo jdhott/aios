@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+INBOX_IDENTITY_VERSION = "app-service-boundary-v1-phase1.3"
+
+
 @dataclass(frozen=True)
 class InboxItem(Mapping[str, Any]):
     text: str
@@ -20,6 +23,7 @@ class InboxItem(Mapping[str, Any]):
     source_item_id: str = ""
     source_container_id: str | None = None
     source_type: str | None = None
+    inbox_row_id: str | None = None
 
     _LEGACY_KEYS = (
         "text",
@@ -48,6 +52,8 @@ class InboxItem(Mapping[str, Any]):
             return self.source_container_id
         if key == "source_type":
             return self.source_type
+        if key == "inbox_row_id":
+            return self.inbox_row_id
         raise KeyError(key)
 
     def __iter__(self) -> Iterator[str]:
@@ -64,4 +70,5 @@ class InboxItem(Mapping[str, Any]):
             "source_item_id": self.source_item_id,
             "source_container_id": self.source_container_id,
             "source_type": self.source_type,
+            "inbox_row_id": self.inbox_row_id,
         }

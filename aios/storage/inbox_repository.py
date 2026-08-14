@@ -27,13 +27,23 @@ class InboxRepository:
         that is the identity used by lifecycle methods. Any original external
         source ID remains in the Supabase row's source_item_id/source_metadata.
         """
+        source_metadata = row.get("source_metadata") or {}
+
         return InboxItem(
             text=row.get("text") or "",
             notes=list(row.get("notes") or []),
             source=row.get("source") or "brain_dump",
-            source_item_id=str(row["id"]),
-            source_container_id=None,
-            source_type="inbox_item",
+            source_item_id=str(
+                row.get("source_item_id")
+                or row["id"]
+            ),
+            source_container_id=source_metadata.get(
+                "source_container_id"
+            ),
+            source_type=source_metadata.get(
+                "source_type"
+            ) or "inbox_item",
+            inbox_row_id=str(row["id"]),
         )
 
     def get_pending_rows(
@@ -69,9 +79,27 @@ class InboxRepository:
     def get_pending_items(
         self,
     ) -> list[InboxItem]:
+        rows = self.get_pending_rows()
+
+        native_rows = [
+            row
+            for row in rows
+            if not bool(
+                (row.get("source_metadata") or {})
+                .get("shadow")
+            )
+        ]
+
+        skipped = len(rows) - len(native_rows)
+        if skipped:
+            print(
+                "[Supabase Inbox] "
+                f"Skipped {skipped} shadow row(s) from capture ingestion"
+            )
+
         return [
             self.row_to_inbox_item(row)
-            for row in self.get_pending_rows()
+            for row in native_rows
         ]
 
 

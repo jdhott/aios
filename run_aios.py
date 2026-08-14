@@ -183,6 +183,25 @@ if AIOS_DATASTORE not in {"notion", "supabase"}:
 
 print(f"[Datastore] Configured datastore: {AIOS_DATASTORE}")
 
+APP_SERVICE_BOUNDARY_INBOX_VERSION = "app-service-boundary-v1-phase1"
+
+AIOS_INBOX_SOURCE = (
+    os.getenv("AIOS_INBOX_SOURCE", "notion")
+    .strip()
+    .lower()
+)
+
+if AIOS_INBOX_SOURCE not in {"notion", "supabase"}:
+    raise ValueError("AIOS_INBOX_SOURCE must be 'notion' or 'supabase'")
+
+if AIOS_INBOX_SOURCE == "supabase" and AIOS_DATASTORE != "supabase":
+    raise ValueError(
+        "AIOS_INBOX_SOURCE=supabase requires AIOS_DATASTORE=supabase"
+    )
+
+print(f"[Inbox Source] Configured source: {AIOS_INBOX_SOURCE}")
+INBOX_IDENTITY_SHADOW_FILTER_VERSION = "app-service-boundary-v1-phase1.3"
+
 # Observational-only audit of actual Notion mutations during Supabase-mode runs.
 if AIOS_DATASTORE == "supabase":
     try:
@@ -992,14 +1011,20 @@ BRAIN_DUMP_NOTE_BLOCK_TYPES = ["paragraph", "bulleted_list_item", "numbered_list
 # Source-neutral Brain Dump ingestion boundary
 # -------------------------------------------------------------------------
 from aios.ingestion import notion_source as notion_inbox_source
+from aios.ingestion.supabase_source import SupabaseInboxSource
+from aios.storage.inbox_repository import InboxRepository as _InboxSourceRepository
+from aios.storage.supabase_store import SupabaseStore as _InboxSourceSupabaseStore
 
 notion_inbox_source.configure_notion_source(globals())
 
-inbox_source = notion_inbox_source.NotionInboxSource(
-    BRAIN_DUMP_PAGE_ID
-)
-
-print("[Inbox Source] Notion Brain Dump source configured")
+if AIOS_INBOX_SOURCE == "supabase":
+    _runtime_inbox_store = _InboxSourceSupabaseStore()
+    _runtime_inbox_repository = _InboxSourceRepository(_runtime_inbox_store)
+    inbox_source = SupabaseInboxSource(_runtime_inbox_repository)
+    print("[Inbox Source] Supabase source-neutral inbox configured")
+else:
+    inbox_source = notion_inbox_source.NotionInboxSource(BRAIN_DUMP_PAGE_ID)
+    print("[Inbox Source] Notion Brain Dump source configured")
 
 
 # In[18]:
@@ -2772,6 +2797,10 @@ from aios.ingestion import capture_metadata as capture_metadata_parser
 
 capture_metadata_parser.configure_capture_metadata(globals())
 
+CAPTURE_PARSER_INDEPENDENCE_VERSION = "app-service-boundary-v1-phase1.1"
+CAPTURE_PARSER_INDEPENDENCE_V2_VERSION = "app-service-boundary-v1-phase1.1-v2"
+
+clean_task_title = capture_metadata_parser.clean_task_title
 parse_manual_project_tag = capture_metadata_parser.parse_manual_project_tag
 parse_task_flags = capture_metadata_parser.parse_task_flags
 sanitize_task_title_separators = capture_metadata_parser.sanitize_task_title_separators
@@ -5405,6 +5434,7 @@ if AIOS_DATASTORE == "supabase":
         print(f"[Possible Duplicate Shadow] Bootstrap failed: {exc}")
 
 print("[Inbox Review UI] Notion duplicate-review interface configured")
+SOURCE_AWARE_REVIEW_PRESENTATION_VERSION = "app-service-boundary-v1-phase1.2"
 
 
 # In[63]:
@@ -5538,7 +5568,7 @@ if RUN_TASK_CREATION_PIPELINE:
     inbox_items = inbox_source.list_pending_items()
 else:
     inbox_items = []
-    print("Task creation pipeline disabled → skipping Brain Dump extraction.")
+    print("Task creation pipeline disabled → skipping inbox extraction.")
 
 # In[66]:
 

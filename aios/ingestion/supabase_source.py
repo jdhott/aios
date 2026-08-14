@@ -9,9 +9,9 @@ from aios.storage.supabase_store import SupabaseStore
 
 class SupabaseInboxSource:
     """
-    Inactive POC inbox source for the future AIOS app.
+    Source-neutral Supabase inbox source for app/service capture.
 
-    Production Brain Dump ingestion remains on Notion until an explicit cutover.
+    Shadow rows are excluded by InboxRepository.get_pending_items().
     """
 
     def __init__(
@@ -34,6 +34,11 @@ class SupabaseInboxSource:
     ) -> None:
         # Source-neutral lifecycle semantics: a durable inbox row is processed,
         # not physically deleted.
+        inbox_row_id = (
+            item.inbox_row_id
+            or item.source_item_id
+        )
+
         self.repository.mark_processed(
-            item.source_item_id
+            inbox_row_id
         )

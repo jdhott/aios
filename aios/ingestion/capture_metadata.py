@@ -17,8 +17,16 @@ class CaptureMetadata:
     is_jdi: bool
 
 
+CAPTURE_METADATA_PROTECTED_GLOBALS = {
+    "clean_task_title",
+}
+
+
 def configure_capture_metadata(namespace):
-    globals().update(namespace)
+    for key, value in namespace.items():
+        if key in CAPTURE_METADATA_PROTECTED_GLOBALS:
+            continue
+        globals()[key] = value
 
 
 # -------------------------------------------------------------------------
@@ -203,6 +211,26 @@ def sanitize_task_title_separators(text):
 
     return title
 
+
+CAPTURE_TITLE_CLEANER_VERSION = "capture-title-cleaner-v1"
+
+def clean_task_title(text):
+    """Canonical source-neutral cleanup for captured task titles."""
+    title = str(text or "").strip()
+
+    title = re.sub(
+        r"^(remember to|need to|i need to|todo:|to do:)\s+",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+
+    title = sanitize_task_title_separators(title)
+
+    if title:
+        title = title[0].upper() + title[1:]
+
+    return title
 
 def strip_due_date_phrases(text):
     """Remove scheduling words from the visible task title.
