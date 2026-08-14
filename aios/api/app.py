@@ -36,6 +36,7 @@ AIOS_API_SECURITY_VERSION = "cloud-run-api-v1.1-security"
 AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
 AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
 AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"
+AIOS_SCHEDULED_COMPAT_TRIGGER_VERSION = "scheduled-compat-trigger-v1"
 
 
 @asynccontextmanager
@@ -81,9 +82,12 @@ def _processor_trigger_enabled() -> bool:
     )
 
 
-def _request_processor_run() -> None:
+def _request_processor_run() -> dict:
     if not _processor_trigger_enabled():
-        return
+        return {
+            "status": "disabled",
+            "triggered": False,
+        }
 
     store = _store()
     coordinator = ProcessingTriggerCoordinator(store)
@@ -94,7 +98,12 @@ def _request_processor_run() -> None:
             "[Processor Trigger] Processing requested; "
             "existing execution/trigger will handle it."
         )
-        return
+        return {
+            "status": "coalesced",
+            "triggered": False,
+            "running": request.running,
+            "trigger_pending": request.trigger_pending,
+        }
 
     try:
         operation = CloudRunJobTrigger().trigger()
@@ -102,12 +111,22 @@ def _request_processor_run() -> None:
             "[Processor Trigger] Cloud Run Job requested:",
             operation.get("name", "operation accepted"),
         )
+        return {
+            "status": "triggered",
+            "triggered": True,
+            "operation": operation.get("name"),
+        }
     except Exception as exc:
         coordinator.release_trigger_claim()
         print(
-            "[Processor Trigger] Trigger failed; capture remains pending:",
+            "[Processor Trigger] Trigger failed; processing remains requested:",
             exc,
         )
+        return {
+            "status": "failed",
+            "triggered": False,
+            "error": str(exc),
+        }
 
 
 @app.get(
@@ -196,6 +215,33 @@ def get_review(
 
     return ReviewResponse(**review.to_dict())
 
+
+
+@app.post(
+    "/processing/request",
+    status_code=202,
+    tags=["processing"],
+)
+def request_processing_http() -> dict:
+    # Request an AIOS processor run through the canonical coordinator.
+    result = _request_processor_run()
+
+    if result.get("status") == "disabled":
+        raise HTTPException(
+            status_code=503,
+            detail="Processor triggering is disabled",
+        )
+
+    if result.get("status") == "failed":
+        raise HTTPException(
+            status_code=503,
+            detail="Processor trigger failed; processing remains requested",
+        )
+
+    return {
+        "accepted": True,
+        **result,
+    }
 
 def _review_error(exc: Exception) -> HTTPException:
     if isinstance(exc, KeyError):
