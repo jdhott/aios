@@ -74,6 +74,73 @@ class InboxRepository:
             for row in self.get_pending_rows()
         ]
 
+
+    def get_by_source_identity(
+        self,
+        *,
+        source: str,
+        source_item_id: str,
+    ) -> Optional[dict[str, Any]]:
+        response = (
+            self.store.client
+            .table("inbox_items")
+            .select("*")
+            .eq("source", source)
+            .eq("source_item_id", source_item_id)
+            .limit(1)
+            .execute()
+        )
+
+        rows = response.data or []
+        return rows[0] if rows else None
+
+    def get_or_create_shadow_item(
+        self,
+        item: InboxItem,
+    ) -> dict[str, Any]:
+        if not item.source:
+            raise ValueError("Shadow inbox item requires a source.")
+
+        if not item.source_item_id:
+            raise ValueError(
+                "Shadow inbox item requires source_item_id."
+            )
+
+        existing = self.get_by_source_identity(
+            source=item.source,
+            source_item_id=item.source_item_id,
+        )
+
+        if existing:
+            return existing
+
+        source_metadata = {
+            "shadow": True,
+            "source_container_id":
+                item.source_container_id,
+            "source_type":
+                item.source_type,
+        }
+
+        try:
+            return self.create_item(
+                text=item.text,
+                notes=list(item.notes or []),
+                source=item.source,
+                source_item_id=item.source_item_id,
+                source_metadata=source_metadata,
+            )
+        except Exception:
+            existing = self.get_by_source_identity(
+                source=item.source,
+                source_item_id=item.source_item_id,
+            )
+
+            if existing:
+                return existing
+
+            raise
+
     def get_row(
         self,
         inbox_id: str,
