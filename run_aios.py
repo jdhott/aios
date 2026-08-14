@@ -1132,6 +1132,11 @@ trim_archive_runs = archive_helpers.trim_archive_runs
 
 print("[Notion Archive Module] Canonical Brain Dump archive helpers loaded")
 
+# Refresh Notion inbox-source dependencies now that canonical archive
+# lifecycle helpers (including delete_original_block) are available.
+notion_inbox_source.configure_notion_source(globals())
+print("[Inbox Source] Notion lifecycle dependencies refreshed")
+
 
 # ## 4. Text cleanup and actionability checks
 # 
