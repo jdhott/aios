@@ -496,30 +496,173 @@ def update_task_from_selection(page_id, new_title, is_jdi=False, is_urgent=False
 
 
 def clear_page_children(page_id):
+    # Delete all clarification UI children and verify the page is empty.
+    import time
+
     blocks = get_block_children(page_id)
 
+    delete_failed = False
     for block in blocks:
-        requests.delete(
+        response = requests.delete(
             f"https://api.notion.com/v1/blocks/{block['id']}",
             headers=headers,
             timeout=30,
         )
+        if not response.ok:
+            delete_failed = True
+            increment_summary("errors")
+            print(
+                "ERROR deleting clarification block",
+                block.get("id"),
+                response.status_code,
+                response.text,
+            )
 
-    print("Cleared clarification blocks")
+    if delete_failed:
+        return False
+
+    for attempt in range(6):
+        remaining = get_block_children(page_id)
+        if not remaining:
+            print("Cleared clarification blocks (verified)")
+            return True
+
+        if attempt < 5:
+            time.sleep(0.4)
+
+    increment_summary("errors")
+    print(
+        "ERROR clearing clarification blocks: "
+        f"{len(remaining)} child block(s) still present after verification"
+    )
+    return False
+
 
 
 
 # In[57]:
 
 
-def rebuild_clarification_blocks(page_id, original_task, suggestions):
-    clear_page_children(page_id)
+CLARIFICATION_UI_REPLACEMENT_VERSION = "verified-replacement-v1"
+CLARIFICATION_UI_READ_AFTER_WRITE_VERSION = "read-after-write-retry-v1"
+print("[Clarification UI] Verified replacement support active")
 
-    return append_clarification_blocks(
+
+def _clarification_ui_snapshot(page_id):
+    return get_block_children(page_id)
+
+
+def verify_targeted_question_ui(page_id):
+    import time
+
+    for attempt in range(7):
+        blocks = _clarification_ui_snapshot(page_id)
+
+        has_callout = any(
+            block.get("type") == "callout"
+            and "Replace the placeholder" in get_block_text(block)
+            for block in blocks
+        )
+        has_answer_placeholder = any(
+            block.get("type") == "to_do"
+            and "[type your answer here]" in get_block_text(block)
+            for block in blocks
+        )
+        still_has_ask_command = any(
+            block.get("type") == "to_do"
+            and get_block_text(block).strip()
+            == ASK_TARGETED_QUESTION_COMMAND
+            for block in blocks
+        )
+
+        if has_callout and has_answer_placeholder and not still_has_ask_command:
+            if attempt:
+                print(
+                    "[Clarification UI] Targeted-question verification "
+                    f"succeeded after retry {attempt}"
+                )
+            return True
+
+        if attempt < 6:
+            time.sleep(0.4)
+
+    return False
+
+
+
+def verify_proposal_clarification_ui(page_id):
+    import time
+
+    for attempt in range(7):
+        blocks = _clarification_ui_snapshot(page_id)
+
+        has_heading = any(
+            block.get("type") == "heading_3"
+            and get_block_text(block) == CLARIFY_HEADER
+            for block in blocks
+        )
+        has_proposal = any(
+            block.get("type") == "to_do"
+            and get_block_text(block).startswith(USE_SUGGESTION_PREFIX)
+            and "[type your answer here]" not in get_block_text(block)
+            for block in blocks
+        )
+        has_ask_command = any(
+            block.get("type") == "to_do"
+            and get_block_text(block).strip()
+            == ASK_TARGETED_QUESTION_COMMAND
+            for block in blocks
+        )
+        still_has_targeted_callout = any(
+            block.get("type") == "callout"
+            and "Replace the placeholder" in get_block_text(block)
+            for block in blocks
+        )
+
+        if (
+            has_heading
+            and has_proposal
+            and has_ask_command
+            and not still_has_targeted_callout
+        ):
+            if attempt:
+                print(
+                    "[Clarification UI] Proposal verification "
+                    f"succeeded after retry {attempt}"
+                )
+            return True
+
+        if attempt < 6:
+            time.sleep(0.4)
+
+    return False
+
+
+
+def rebuild_clarification_blocks(page_id, original_task, suggestions):
+    # Replace the current clarification UI with a verified proposal UI.
+    if not clear_page_children(page_id):
+        return None
+
+    result = append_clarification_blocks(
         page_id=page_id,
         original_task=original_task,
         suggestions=suggestions,
     )
+    if not result:
+        return None
+
+    if not verify_proposal_clarification_ui(page_id):
+        increment_summary("errors")
+        print(
+            "ERROR rebuilding clarification UI: "
+            "proposal UI verification failed"
+        )
+        return None
+
+    print("[Clarification UI] Verified replacement → proposal")
+    return result
+
 
 
 # In[58]:
@@ -557,6 +700,149 @@ def update_clarification_title(page_id, clarification_text):
 # In[59]:
 
 
+def _shadow_open_clarification_review(page_id):
+    if globals().get("AIOS_DATASTORE") != "supabase":
+        return None
+
+    review_repo = globals().get(
+        "clarification_shadow_review_repo"
+    )
+    if review_repo is None:
+        print(
+            "[Clarification Shadow] Transition skipped: "
+            "review repository unavailable"
+        )
+        return None
+
+    try:
+        response = (
+            review_repo.store.client
+            .table("inbox_reviews")
+            .select("*")
+            .neq("state", "resolved")
+            .eq("review_type", "clarification")
+            .order("created_at")
+            .execute()
+        )
+
+        for row in response.data or []:
+            payload = row.get("payload") or {}
+            if payload.get("notion_task_page_id") == page_id:
+                return review_repo.row_to_review(row)
+
+        return None
+
+    except Exception as exc:
+        print(
+            "[Clarification Shadow] Transition lookup failed:",
+            exc,
+        )
+        return None
+
+def _shadow_mark_awaiting_answer(page_id, question):
+    review = _shadow_open_clarification_review(page_id)
+    if review is None:
+        return
+
+    try:
+        review_repo = globals().get(
+            "clarification_shadow_review_repo"
+        )
+        if review_repo is None:
+            return
+
+        mark_clarification_awaiting_answer(
+            review_repo=review_repo,
+            review=review,
+            question=question,
+        )
+        print("[Clarification Shadow] State → awaiting_answer")
+    except Exception as exc:
+        print(
+            "[Clarification Shadow] Transition write failed:",
+            exc,
+        )
+
+
+def _shadow_mark_pending_confirmation(
+    page_id,
+    answer,
+    proposed_text,
+):
+    review = _shadow_open_clarification_review(page_id)
+    if review is None:
+        return
+
+    try:
+        review_repo = globals().get(
+            "clarification_shadow_review_repo"
+        )
+        if review_repo is None:
+            return
+
+        mark_clarification_pending_confirmation(
+            review_repo=review_repo,
+            review=review,
+            answer=answer,
+            proposed_text=proposed_text,
+        )
+        print("[Clarification Shadow] State → pending_confirmation")
+    except Exception as exc:
+        print(
+            "[Clarification Shadow] Transition write failed:",
+            exc,
+        )
+
+
+def _shadow_resolve_clarification(
+    page_id,
+    selected_text,
+    accepted_text,
+):
+    review = _shadow_open_clarification_review(page_id)
+    if review is None:
+        return
+
+    try:
+        review_repo = globals().get(
+            "clarification_shadow_review_repo"
+        )
+        if review_repo is None:
+            return
+
+        resolve_clarification_review(
+            review_repo=review_repo,
+            review=review,
+            selected_text=selected_text,
+            accepted_text=accepted_text,
+        )
+        print("[Clarification Shadow] State → resolved")
+    except Exception as exc:
+        print(
+            "[Clarification Shadow] Transition write failed:",
+            exc,
+        )
+
+
+CLARIFICATION_TASK_MIRROR_TITLE_SYNC_VERSION = 'clarification-mirror-title-v1'
+
+def _mirror_resolved_task_title(notion_page_id, authoritative_title):
+    if globals().get('AIOS_DATASTORE') != 'supabase':
+        return True
+    writer = globals().get('notion_task_mirror_title_writer')
+    if writer is None:
+        print('[Task Mirror Title] Writer unavailable; mirror title not updated')
+        return False
+    try:
+        writer.update_title(
+            notion_page_id=notion_page_id,
+            authoritative_title=authoritative_title,
+        )
+        return True
+    except Exception as exc:
+        print('[Task Mirror Title] Non-blocking mirror update failed:', exc)
+        return False
+
 def process_clarification_selection(page):
     """Resolve proposal-first clarification choices.
 
@@ -576,7 +862,14 @@ def process_clarification_selection(page):
 
     if text == ASK_TARGETED_QUESTION_COMMAND:
         question = generate_targeted_clarification_question(original_title)
-        clear_page_children(page["id"])
+
+        if not clear_page_children(page["id"]):
+            print(
+                "ERROR replacing clarification UI: "
+                "existing blocks were not fully cleared"
+            )
+            return False
+
         children = [
             {
                 "object": "block",
@@ -617,7 +910,20 @@ def process_clarification_selection(page):
             timeout=30,
         )
         if response.ok:
-            print("Added one targeted clarification question")
+            if not verify_targeted_question_ui(page["id"]):
+                increment_summary("errors")
+                print(
+                    "ERROR adding targeted clarification question: "
+                    "Notion UI verification failed"
+                )
+                return False
+
+            print("Added one targeted clarification question (verified)")
+            print("[Clarification UI] Verified replacement → targeted_question")
+            _shadow_mark_awaiting_answer(
+                page["id"],
+                question,
+            )
             return True
         increment_summary("errors")
         print("ERROR adding targeted clarification question")
@@ -653,7 +959,19 @@ def process_clarification_selection(page):
         proposals = generate_clarification_suggestions(combined)
         if not proposals:
             return False
-        rebuild_clarification_blocks(page["id"], original_title, proposals)
+        rebuild_result = rebuild_clarification_blocks(
+            page["id"],
+            original_title,
+            proposals,
+        )
+        if not rebuild_result:
+            return False
+
+        _shadow_mark_pending_confirmation(
+            page["id"],
+            text,
+            proposals[0],
+        )
         print("Used clarification answer to generate a revised proposal")
         return True
 
@@ -678,6 +996,15 @@ def process_clarification_selection(page):
     if not updated_page:
         return False
 
+    # Supabase update above is authoritative; mirror title outward only.
+    _mirror_resolved_task_title(page['id'], cleaned_title)
+
+    _shadow_resolve_clarification(
+        page["id"],
+        text,
+        cleaned_title,
+    )
+
     log_ai_processing_decision(
         original=original_title,
         final_task=cleaned_title,
@@ -689,7 +1016,11 @@ def process_clarification_selection(page):
     )
     updated_page = update_missing_metadata_if_confident(updated_page)
     update_quick_win_if_needed(updated_page)
-    clear_page_children(page["id"])
+    if not clear_page_children(page["id"]):
+        print(
+            "WARNING: task resolved but clarification UI cleanup "
+            "could not be verified"
+        )
     return True
 
 

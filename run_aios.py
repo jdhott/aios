@@ -889,6 +889,8 @@ NON_TASK_DECISIONS = {"task", "note", "idea", "review"}
 
 # In[14]:
 
+CANONICAL_BLOCK_TEXT_CALLOUT_SUPPORT = "callout-text-v1"
+
 def get_block_text(block):
     block_type = block.get("type")
 
@@ -901,6 +903,7 @@ def get_block_text(block):
         "heading_1",
         "heading_2",
         "heading_3",
+        "callout",
     ]:
         return ""
 
@@ -5263,7 +5266,21 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 # conservative configure hook receives the already-initialized runtime globals
 # so this refactor changes ownership, not behavior.
 from aios import clarification as clarification_helpers
+from aios.storage.notion_task_mirror_writer import (
+    NotionTaskMirrorTitleWriter,
+)
+
+notion_task_mirror_title_writer = None
+if AIOS_DATASTORE == 'supabase':
+    notion_task_mirror_title_writer = NotionTaskMirrorTitleWriter(headers=headers)
+    print('[Task Mirror Title] Writer configured')
+
 from aios.review.clarification_shadow import shadow_clarification_review
+from aios.review.clarification_transitions import (
+    mark_clarification_awaiting_answer,
+    mark_clarification_pending_confirmation,
+    resolve_clarification_review,
+)
 
 clarification_helpers.configure_clarification_module(globals())
 
@@ -5307,6 +5324,9 @@ if AIOS_DATASTORE == "supabase":
         )
         print("[Clarification Shadow] Bootstrap imports localized")
         print("[Clarification Shadow] Supabase shadow review repositories configured")
+        print("[Clarification Shadow] State transition helpers configured")
+        clarification_helpers.configure_clarification_module(globals())
+        print("[Clarification Shadow] Runtime dependencies refreshed")
     except Exception as exc:
         print(f"[Clarification Shadow] Bootstrap failed: {exc}")
 

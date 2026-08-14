@@ -45,6 +45,28 @@ def _parent_db(payload):
     parent=payload.get('parent')
     return _norm(parent.get('database_id')) if isinstance(parent,Mapping) else ''
 
+def _is_task_mirror_title_patch(payload):
+    if not isinstance(payload, Mapping): return False
+    if set(payload.keys()) != {'properties'}: return False
+    properties=payload.get('properties')
+    if not isinstance(properties, Mapping): return False
+    if set(properties.keys()) != {'Task Name'}: return False
+    task_name=properties.get('Task Name')
+    if not isinstance(task_name, Mapping): return False
+    title=task_name.get('title')
+    return isinstance(title,list) and bool(title)
+
+TASK_MIRROR_TITLE_AUDIT_VERSION='task-mirror-title-patch-v1'
+
+def _is_task_mirror_archive_patch(payload):
+    return (
+        isinstance(payload, Mapping)
+        and set(payload.keys()) == {'archived'}
+        and payload.get('archived') is True
+    )
+
+TASK_MIRROR_ARCHIVE_AUDIT_VERSION='task-mirror-archive-patch-v1'
+
 def classify_mutation(method,url,payload=None):
     method=str(method).upper(); url=str(url or '')
     if '/v1/blocks/' in url:
@@ -56,6 +78,10 @@ def classify_mutation(method,url,payload=None):
         if pid and pid==_task_db(): return 'allowed_task_mirror','Transitional Notion task mirror page creation'
         if pid and pid==_project_db(): return 'unexpected_authoritative','Project database page creation in Supabase mode'
         return 'unclassified','Unrecognized Notion page creation'
+    if method=='PATCH' and '/v1/pages/' in url and _is_task_mirror_title_patch(payload):
+        return 'allowed_task_mirror','Supabase-authoritative task title mirrored to Notion presentation'
+    if method=='PATCH' and '/v1/pages/' in url and _is_task_mirror_archive_patch(payload):
+        return 'allowed_task_mirror','Supabase-authoritative archived task mirrored to Notion presentation'
     if '/v1/pages/' in url and method in {'PATCH','DELETE'}:
         return 'unexpected_authoritative',f'Notion page {method} in Supabase mode'
     return 'unclassified',f'Unclassified Notion mutation: {method}'
