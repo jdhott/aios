@@ -5263,6 +5263,7 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 # conservative configure hook receives the already-initialized runtime globals
 # so this refactor changes ownership, not behavior.
 from aios import clarification as clarification_helpers
+from aios.review.clarification_shadow import shadow_clarification_review
 
 clarification_helpers.configure_clarification_module(globals())
 
@@ -5286,6 +5287,29 @@ process_clarification_selection = (
 )
 
 print("[Clarification Module] Canonical workflow functions loaded from aios.clarification")
+
+clarification_shadow_inbox_repo = None
+clarification_shadow_review_repo = None
+
+if AIOS_DATASTORE == "supabase":
+    try:
+        # Local imports remove top-level execution-order dependency.
+        from aios.storage.supabase_store import SupabaseStore as _ClarificationSupabaseStore
+        from aios.storage.inbox_repository import InboxRepository as _ClarificationInboxRepository
+        from aios.review.repository import InboxReviewRepository as _ClarificationInboxReviewRepository
+
+        _clarification_shadow_store = _ClarificationSupabaseStore()
+        clarification_shadow_inbox_repo = _ClarificationInboxRepository(
+            _clarification_shadow_store
+        )
+        clarification_shadow_review_repo = _ClarificationInboxReviewRepository(
+            _clarification_shadow_store
+        )
+        print("[Clarification Shadow] Bootstrap imports localized")
+        print("[Clarification Shadow] Supabase shadow review repositories configured")
+    except Exception as exc:
+        print(f"[Clarification Shadow] Bootstrap failed: {exc}")
+
 
 
 
@@ -6344,7 +6368,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
 
     return task_pages_created
 
-def maybe_add_clarification_blocks(first_page, task_title, original_title):
+def maybe_add_clarification_blocks(first_page, task_title, original_title, item):
     """Attach clarification choices to a newly created clarify task.
 
     Safety guard:
@@ -6364,11 +6388,47 @@ def maybe_add_clarification_blocks(first_page, task_title, original_title):
 
     suggestions = generate_clarification_suggestions(original_title)
 
-    append_clarification_blocks(
+    render_result = append_clarification_blocks(
         page_id=first_page["id"],
         original_task=original_title,
         suggestions=suggestions,
     )
+
+    if (
+        render_result is not None
+        and AIOS_DATASTORE == "supabase"
+        and clarification_shadow_inbox_repo is not None
+        and clarification_shadow_review_repo is not None
+    ):
+        try:
+            mode, reason = clarification_mode_reason(original_title)
+            review, created = shadow_clarification_review(
+                inbox_repo=clarification_shadow_inbox_repo,
+                review_repo=clarification_shadow_review_repo,
+                item=item,
+                first_page=first_page,
+                task_title=task_title,
+                original_title=original_title,
+                suggestions=suggestions,
+                clarification_mode=mode,
+                clarification_reason=reason,
+            )
+
+            if created:
+                print(
+                    "[Clarification Shadow] Created Supabase review:",
+                    original_title,
+                )
+            else:
+                print(
+                    "[Clarification Shadow] Existing open review reused:",
+                    original_title,
+                )
+        except Exception as exc:
+            print(
+                "[Clarification Shadow] Write failed:",
+                exc,
+            )
 
 def process_task_item(item):
     """Create Notion task page(s) for one inbox item.
@@ -6463,6 +6523,7 @@ def process_task_item(item):
             first_page=task_pages_created[0],
             task_title=task_title,
             original_title=original_title,
+            item=item,
         )
 
     return task_pages_created
