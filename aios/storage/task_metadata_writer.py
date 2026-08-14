@@ -134,6 +134,14 @@ class SupabaseTaskMetadataWriter:
             f"Loaded task ID mappings: {len(self._notion_to_supabase)}"
         )
 
+    def refresh_tasks(self) -> None:
+        # Reload task identities after same-process task creation.
+        self._notion_to_supabase = None
+        self._ensure_map()
+        print(
+            "[Task Metadata Write] Refreshed task ID mappings after cache miss"
+        )
+
     def _task_id(self, legacy_notion_id: str) -> str:
         self._ensure_map()
         assert self._notion_to_supabase is not None
@@ -141,9 +149,14 @@ class SupabaseTaskMetadataWriter:
         task_id = self._notion_to_supabase.get(legacy_notion_id)
 
         if not task_id:
+            self.refresh_tasks()
+            assert self._notion_to_supabase is not None
+            task_id = self._notion_to_supabase.get(legacy_notion_id)
+
+        if not task_id:
             raise RuntimeError(
                 "Task metadata write could not map Notion task ID "
-                f"{legacy_notion_id} to Supabase."
+                f"{legacy_notion_id} to Supabase after refresh."
             )
 
         return task_id

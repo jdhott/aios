@@ -77,6 +77,14 @@ class SupabaseProjectRelationWriter:
         self._project_ids = None
         self._ensure_maps()
 
+    def refresh_tasks(self) -> None:
+        # Refresh task identities after same-process task creation.
+        self._task_map = None
+        self._ensure_maps()
+        print(
+            "[Project Relation Write] Refreshed task ID mappings after cache miss"
+        )
+
     def resolve_task_id(
         self,
         task_ref_id: str,
@@ -103,9 +111,16 @@ class SupabaseProjectRelationWriter:
         )
 
         if not task_id:
+            self.refresh_tasks()
+            assert self._task_map is not None
+            task_id = self._task_map.get(
+                task_ref_id
+            )
+
+        if not task_id:
             raise RuntimeError(
                 "Could not resolve task reference "
-                f"{task_ref_id} to Supabase."
+                f"{task_ref_id} to Supabase after refresh."
             )
 
         return task_id
