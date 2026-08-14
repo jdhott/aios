@@ -72,6 +72,26 @@ class FakeReviewService:
 class FakeInboxRepository:
     def __init__(self):
         self.processed = []
+        self.rows = {
+            "inbox-garage": {
+                "id": "inbox-garage",
+                "source_item_id": "native-garage",
+                "source_metadata": {
+                    "shadow": True,
+                },
+            },
+            "native-garage": {
+                "id": "native-garage",
+                "source_item_id": None,
+                "source_metadata": {
+                    "capture_interface": "cloud_run_api_v1",
+                },
+            },
+        }
+
+    def get_row(self, inbox_id):
+        return self.rows.get(inbox_id)
+
     def mark_processed(self, inbox_id):
         self.processed.append(inbox_id)
 
@@ -91,7 +111,7 @@ with TestClient(api_module.app) as client:
     )
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "resolved"
-    assert fake_inbox.processed == ["inbox-garage"]
+    assert fake_inbox.processed == ["inbox-garage", "native-garage"]
 
     r = client.post(
         "/reviews/review-new/possible-duplicate",

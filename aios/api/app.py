@@ -27,6 +27,7 @@ from aios.storage.supabase_store import SupabaseStore
 AIOS_API_VERSION = "cloud-run-api-v1-scaffold"
 AIOS_API_SECURITY_VERSION = "cloud-run-api-v1.1-security"
 AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
+AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
 
 
 @asynccontextmanager
@@ -152,8 +153,39 @@ def _review_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
 def _mark_review_inbox_processed(review: ReviewResponse) -> None:
-    if review.inbox_item_id:
-        _inbox_repository().mark_processed(review.inbox_item_id)
+    if not review.inbox_item_id:
+        return
+
+    repo = _inbox_repository()
+
+    review_row = repo.get_row(review.inbox_item_id)
+
+    repo.mark_processed(review.inbox_item_id)
+
+    if not review_row:
+        return
+
+    source_metadata = review_row.get("source_metadata") or {}
+
+    if not bool(source_metadata.get("shadow")):
+        return
+
+    original_inbox_id = str(
+        review_row.get("source_item_id") or ""
+    ).strip()
+
+    if not original_inbox_id:
+        return
+
+    if original_inbox_id == review.inbox_item_id:
+        return
+
+    original_row = repo.get_row(original_inbox_id)
+
+    if original_row is None:
+        return
+
+    repo.mark_processed(original_inbox_id)
 
 @app.post(
     "/reviews/{review_id}/possible-duplicate",
