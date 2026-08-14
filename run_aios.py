@@ -5384,6 +5384,10 @@ duplicate_review_ui.configure_duplicate_review_ui(globals())
 
 inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
 
+from aios.review.possible_duplicate_transitions import (
+    resolve_possible_duplicate_review,
+)
+
 possible_duplicate_shadow_inbox_repo = None
 possible_duplicate_shadow_review_repo = None
 
@@ -5485,7 +5489,7 @@ def shadow_possible_duplicate_review(match):
                 "create_anyway",
                 "ignore",
             ],
-            "authority": "notion_shadow_only",
+            "authority": "supabase_review_authority_v1",
         }
 
         review = (
@@ -5930,23 +5934,90 @@ def append_notes_to_created_task_pages(created_pages, notes):
 
 
 
-def review_possible_duplicate_items(possible_matches):
-    """Read checked duplicate-review commands from inbox items.
+POSSIBLE_DUPLICATE_REVIEW_AUTHORITY_VERSION = "possible-duplicate-review-authority-v1"
 
-    Returns two lists:
-    - reviewed_possible_items: items that can be archived without creating a new task
-    - possible_items_to_create_anyway: items the user explicitly approved as new tasks
-    """
+_pending_possible_duplicate_create_anyway = {}
+
+
+def _open_possible_duplicate_review(item):
+    if AIOS_DATASTORE != "supabase":
+        return None
+    if possible_duplicate_shadow_inbox_repo is None or possible_duplicate_shadow_review_repo is None:
+        raise RuntimeError("Possible duplicate Supabase review repositories are unavailable.")
+    shadow_row = possible_duplicate_shadow_inbox_repo.get_or_create_shadow_item(item)
+    reviews = possible_duplicate_shadow_review_repo.get_open_reviews_for_item(str(shadow_row["id"]))
+    for review in reviews:
+        if review.review_type == "possible_duplicate":
+            return review
+    raise RuntimeError("No pending Supabase possible_duplicate review found for inbox item: " + item["text"])
+
+
+def _duplicate_candidate_identity(match):
+    task = match.get("task") or {}
+    return str(task.get("id") or ""), get_title(task)
+
+
+def _resolve_possible_duplicate_now(match, action):
+    if AIOS_DATASTORE != "supabase":
+        return True
+    review = _open_possible_duplicate_review(match["item"])
+    candidate_task_id, candidate_title = _duplicate_candidate_identity(match)
+    resolved = resolve_possible_duplicate_review(
+        review_repo=possible_duplicate_shadow_review_repo,
+        review=review,
+        action=action,
+        candidate_task_id=candidate_task_id,
+        candidate_task_title=candidate_title,
+    )
+    print("[Possible Duplicate Review] State → resolved (" + resolved.decision.get("action", "") + ")")
+    return True
+
+
+def _stage_possible_duplicate_create_anyway(match):
+    if AIOS_DATASTORE != "supabase":
+        return True
+    item = match["item"]
+    review = _open_possible_duplicate_review(item)
+    candidate_task_id, candidate_title = _duplicate_candidate_identity(match)
+    _pending_possible_duplicate_create_anyway[item.source_item_id] = {
+        "review": review,
+        "candidate_task_id": candidate_task_id,
+        "candidate_task_title": candidate_title,
+    }
+    print("[Possible Duplicate Review] create_anyway staged until task creation succeeds")
+    return True
+
+
+def _resolve_staged_possible_duplicate_create_anyway(item, created_pages):
+    if AIOS_DATASTORE != "supabase":
+        return True
+    pending = _pending_possible_duplicate_create_anyway.get(item.source_item_id)
+    if pending is None:
+        return True
+    created_ids = [str(page.get("id")) for page in (created_pages or []) if page and page.get("id")]
+    if not created_ids:
+        raise RuntimeError("create_anyway task creation did not produce a task; possible_duplicate review remains pending.")
+    resolved = resolve_possible_duplicate_review(
+        review_repo=possible_duplicate_shadow_review_repo,
+        review=pending["review"],
+        action="create_anyway",
+        candidate_task_id=pending["candidate_task_id"],
+        candidate_task_title=pending["candidate_task_title"],
+        created_task_ids=created_ids,
+    )
+    _pending_possible_duplicate_create_anyway.pop(item.source_item_id, None)
+    print("[Possible Duplicate Review] State → resolved (" + resolved.decision.get("action", "") + ")")
+    return True
+
+
+def review_possible_duplicate_items(possible_matches):
     reviewed_possible_items = []
     possible_items_to_create_anyway = []
-
     for match in possible_matches:
         item = match["item"]
         action = inbox_review_ui.get_possible_duplicate_action(item)
-
         if not action:
             continue
-
         if action == LINK_EXISTING_COMMAND:
             print("Possible duplicate confirmed as existing:", item["text"])
             log_ai_processing_decision(
@@ -5957,12 +6028,12 @@ def review_possible_duplicate_items(possible_matches):
                 review_needed=False,
                 confidence=match.get("score"),
             )
+            _resolve_possible_duplicate_now(match, "link_existing")
             reviewed_possible_items.append(item)
-
         elif action == CREATE_ANYWAY_COMMAND:
             print("Possible duplicate approved as new task:", item["text"])
+            _stage_possible_duplicate_create_anyway(match)
             possible_items_to_create_anyway.append(item)
-
         elif action == IGNORE_DUPLICATE_COMMAND:
             print("Possible duplicate ignored:", item["text"])
             log_ai_processing_decision(
@@ -5973,10 +6044,9 @@ def review_possible_duplicate_items(possible_matches):
                 review_needed=False,
                 confidence=match.get("score"),
             )
+            _resolve_possible_duplicate_now(match, "ignore")
             reviewed_possible_items.append(item)
-
     return reviewed_possible_items, possible_items_to_create_anyway
-
 def _create_notion_task_only(task_title, is_jdi=False, is_urgent=False, is_important=False, due_date=None, parent_task_id=None, step_order=None, manual_project=""):
     """Create one task page in Notion.
 
@@ -6641,6 +6711,7 @@ def run_task_creation_pipeline():
     for item in final_tasks_to_create:
         print(f"\nPROCESSING: {item['text']}")
         created_pages = process_task_item(item)
+        _resolve_staged_possible_duplicate_create_anyway(item, created_pages)
         archive_created_item(item, created_pages, archive_section_id)
 
     # 2) Archive/delete inbox items that were handled without creating new tasks.

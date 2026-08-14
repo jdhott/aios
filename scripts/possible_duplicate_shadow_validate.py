@@ -17,7 +17,7 @@ checks = [
     ("shadow runs after Notion UI", "shadow_possible_duplicate_review(match)" in run),
     ("shadow is Supabase-only", 'if AIOS_DATASTORE != "supabase":' in run),
     ("shadow is non-blocking", "[Possible Duplicate Shadow] Write failed:" in run),
-    ("authority marker exists", '"notion_shadow_only"' in run),
+    ("Supabase review authority marker exists", '"supabase_review_authority_v1"' in run),
 ]
 
 ast.parse(run)
