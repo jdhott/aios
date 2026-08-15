@@ -1032,6 +1032,7 @@ def _page(
     tasks: dict[str, list[dict]] | None = None,
     search: str = "",
     focus: dict | None = None,
+    refresh_focus: bool = False,
 ) -> str:
     tasks = tasks or {}
     focus_id = str(focus.get("id") or "") if focus else ""
@@ -1139,6 +1140,15 @@ def _page(
 
     focus_card = ""
     focus_id = ""
+
+    if not focus and refresh_focus:
+        focus_card = (
+            '<section class="focus-card">'
+            '<div class="focus-label">⭐ Best Next Action</div>'
+            '<div class="focus-pending">Updating your focus…</div>'
+            '</section>'
+        )
+
     if focus:
         focus_id = str(focus.get("id") or "")
         safe_id = html.escape(focus_id)
@@ -1151,8 +1161,12 @@ def _page(
         activation = dict(focus.get("activation") or {})
         activation_id = str(activation.get("id") or "")
         activation_title = str(activation.get("title") or "").strip()
-        activation_pending = bool(
-            focus.get("activation_pending")
+        activation_pending = (
+            bool(focus.get("activation_pending"))
+            or (
+                refresh_focus
+                and not activation_id
+            )
         )
 
         # Activation child is canonical. Never fall back to stale legacy
@@ -1250,7 +1264,25 @@ def _page(
         )
 
     pending_refresh_script = ""
-    if focus and focus.get("activation_pending"):
+
+    activation = (
+        dict(focus.get("activation") or {})
+        if focus
+        else {}
+    )
+
+    refresh_needed = bool(
+        (focus and focus.get("activation_pending"))
+        or (
+            refresh_focus
+            and (
+                not focus
+                or not activation.get("id")
+            )
+        )
+    )
+
+    if refresh_needed:
         pending_refresh_script = """
 <script>
 (() => {
@@ -1717,7 +1749,21 @@ def index(
     except Exception as focus_exc:
         print("[Dashboard Focus] Focus could not be loaded:", focus_exc)
         focus=None
-    return HTMLResponse(_page(message=message, error=error, tasks=tasks, search=search, focus=focus))
+
+    refresh_focus = (
+        request.query_params.get("refresh_focus") == "1"
+    )
+
+    return HTMLResponse(
+        _page(
+            message=message,
+            error=error,
+            tasks=tasks,
+            search=search,
+            focus=focus,
+            refresh_focus=refresh_focus,
+        )
+    )
 
 
 
@@ -1863,8 +1909,17 @@ def edit_task_web(
 
 @app.post("/tasks/{task_id}/complete")
 def complete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:
-    try: _task_action(task_id, "complete"); return RedirectResponse(url="/?message=Task+completed.",status_code=303)
-    except Exception: return RedirectResponse(url="/?error=Task+could+not+be+completed.",status_code=303)
+    try:
+        _task_action(task_id, "complete")
+        return RedirectResponse(
+            url="/?message=Task+completed.&refresh_focus=1",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url="/?error=Task+could+not+be+completed.",
+            status_code=303,
+        )
 
 @app.post("/tasks/{task_id}/delete")
 def delete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:
