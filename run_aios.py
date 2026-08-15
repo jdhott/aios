@@ -66,6 +66,9 @@ print("__file__ =", __file__)
 
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
+from aios.storage.supabase_store import SupabaseStore as _FocusSupabaseStore
+from aios.focus_guidance import ensure_focus_guidance
+AIOS_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 from aios.storage.task_source import (
     get_supabase_quick_win_candidate_tasks,
     get_supabase_runtime_open_tasks,
@@ -7639,6 +7642,14 @@ else:
         )
 
         refresh_surfaced_quick_wins(all_open_tasks, EXECUTION_ENGINE_WINNERS)
+
+        if AIOS_DATASTORE == "supabase" and EXECUTION_ENGINE_WINNERS:
+            try:
+                _focus_store = _FocusSupabaseStore()
+                _focus_task = EXECUTION_ENGINE_WINNERS[0].get("task") or {}
+                ensure_focus_guidance(_focus_store, client, _focus_task)
+            except Exception as focus_exc:
+                print(f"[Focus Guidance] Non-fatal generation failure: {focus_exc}")
     except Exception as e:
         print(f"Execution Engine V2 failure: {e}")
 

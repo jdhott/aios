@@ -6,7 +6,14 @@ import aios.web_capture.app as web
 def basic(u,p): return {"Authorization":"Basic "+base64.b64encode(f"{u}:{p}".encode()).decode()}
 rows=[{"id":"task-1","title":"Test task","due_at":None,"is_quick_win":False,"is_just_do_it":False,"execution_score":28,"execution_rank":3,"best_next_action":True,"surfaced_quick_win":False}]
 env={"AIOS_WEB_USERNAME":"aios","AIOS_WEB_PASSWORD":"test-password","AIOS_API_URL":"https://example.run.app"}
-with patch.dict(os.environ,env,clear=False), patch.object(web,"_fetch_open_tasks",lambda **k: rows):
+sections={
+    "top5": rows,
+    "quick_wins": [],
+    "today": [],
+    "just_do_it": [],
+}
+
+with patch.dict(os.environ,env,clear=False), patch.object(web,"_fetch_open_tasks",lambda **k: sections):
     with TestClient(web.app) as client:
         r=client.get("/",headers=basic("aios","test-password"))
 assert r.status_code==200

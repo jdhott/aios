@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import os
 
@@ -222,6 +223,8 @@ def get_review(
 AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.2-today-includes-overdue"
 AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.3-full-open-population"
 
+AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
+
 @app.get("/tasks", tags=["tasks"])
 def list_open_tasks_http(
     limit: int = 100,
@@ -399,6 +402,360 @@ def delete_task_http(task_id: str) -> dict:
     try: _request_processor_run()
     except Exception: pass
     return {"id":task_id,"deleted":True,"mode":"soft_archive"}
+
+
+
+class TaskDetailUpdate(BaseModel):
+    title: str | None = None
+    due_at: str | None = None
+    defer_until: str | None = None
+    importance: str | None = None
+    urgency: str | None = None
+    effort: str | None = None
+    duration: str | None = None
+    is_just_do_it: bool | None = None
+
+
+@app.get("/tasks/{task_id}", tags=["tasks"])
+def get_task_detail_http(task_id: str) -> dict:
+    rows = (
+        _store().client.table("tasks")
+        .select(
+            "id,title,status,due_at,defer_until,importance,urgency,"
+            "effort,duration,project_id,is_quick_win,is_just_do_it,"
+            "is_open,is_done,is_archived,created_at,updated_at"
+        )
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task = dict(rows[0])
+
+    state_rows = (
+        _store().client.table("task_execution_state")
+        .select(
+            "execution_score,execution_rank,best_next_action,"
+            "surfaced_quick_win,updated_at"
+        )
+        .eq("task_id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    state = state_rows[0] if state_rows else {}
+    task["execution_score"] = state.get("execution_score")
+    task["execution_rank"] = state.get("execution_rank")
+    task["best_next_action"] = bool(state.get("best_next_action", False))
+    task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
+    return {"task": task}
+
+
+@app.patch("/tasks/{task_id}", tags=["tasks"])
+def update_task_detail_http(task_id: str, update: TaskDetailUpdate) -> dict:
+    rows = (
+        _store().client.table("tasks")
+        .select("id,is_done,is_archived")
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if rows[0].get("is_done") or rows[0].get("is_archived"):
+        raise HTTPException(
+            status_code=409,
+            detail="Closed or archived tasks cannot be edited",
+        )
+
+    values = {}
+    for field in (
+        "title", "due_at", "defer_until", "importance",
+        "urgency", "effort", "duration", "is_just_do_it",
+    ):
+        value = getattr(update, field)
+        if value is not None:
+            values[field] = value
+
+    if "title" in values:
+        values["title"] = str(values["title"]).strip()
+        if not values["title"]:
+            raise HTTPException(status_code=422, detail="Task title cannot be blank")
+
+    for field in (
+        "due_at", "defer_until", "importance",
+        "urgency", "effort", "duration",
+    ):
+        if field in values and values[field] == "":
+            values[field] = None
+
+    if values:
+        (
+            _store().client.table("tasks")
+            .update(values)
+            .eq("id", task_id)
+            .execute()
+        )
+
+    return get_task_detail_http(task_id)
+
+
+
+AIOS_PROJECTS_WEB_VERSION = "projects-v1"
+
+
+def _project_display_name(row: dict) -> str:
+    for key in ("title", "name", "project_name"):
+        value = row.get(key)
+        if value:
+            return str(value)
+    return "Untitled Project"
+
+
+@app.get("/projects", tags=["projects"])
+def list_projects_http() -> dict:
+    projects = (
+        _store().client.table("projects")
+        .select("*")
+        .execute()
+        .data
+        or []
+    )
+
+    open_tasks = (
+        _store().client.table("tasks")
+        .select("id,project_id")
+        .eq("is_open", True)
+        .eq("is_done", False)
+        .eq("is_archived", False)
+        .execute()
+        .data
+        or []
+    )
+
+    counts = {}
+    for task in open_tasks:
+        project_id = task.get("project_id")
+        if project_id:
+            counts[project_id] = counts.get(project_id, 0) + 1
+
+    active = []
+    for project in projects:
+        project_id = project.get("id")
+        open_count = counts.get(project_id, 0)
+        if open_count <= 0:
+            continue
+
+        active.append({
+            "id": project_id,
+            "name": _project_display_name(project),
+            "status": project.get("status"),
+            "open_task_count": open_count,
+        })
+
+    active.sort(
+        key=lambda row: (
+            -int(row.get("open_task_count") or 0),
+            str(row.get("name") or "").lower(),
+        )
+    )
+
+    return {"count": len(active), "projects": active}
+
+
+@app.get("/projects/{project_id}", tags=["projects"])
+def get_project_detail_http(project_id: str) -> dict:
+    project_rows = (
+        _store().client.table("projects")
+        .select("*")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project_row = project_rows[0]
+
+    tasks = (
+        _store().client.table("tasks")
+        .select(
+            "id,title,due_at,importance,is_quick_win,is_just_do_it,"
+            "is_open,is_done,is_archived"
+        )
+        .eq("project_id", project_id)
+        .eq("is_open", True)
+        .eq("is_done", False)
+        .eq("is_archived", False)
+        .execute()
+        .data
+        or []
+    )
+
+    task_ids = [row.get("id") for row in tasks if row.get("id")]
+    state_by_task = {}
+
+    if task_ids:
+        states = (
+            _store().client.table("task_execution_state")
+            .select(
+                "task_id,execution_score,execution_rank,"
+                "best_next_action,surfaced_quick_win"
+            )
+            .in_("task_id", task_ids)
+            .execute()
+            .data
+            or []
+        )
+        state_by_task = {
+            row.get("task_id"): row
+            for row in states
+            if row.get("task_id")
+        }
+
+    for task in tasks:
+        state = state_by_task.get(task.get("id"), {})
+        task["execution_score"] = state.get("execution_score")
+        task["execution_rank"] = state.get("execution_rank")
+        task["best_next_action"] = bool(state.get("best_next_action", False))
+        task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
+
+    def sort_key(task: dict):
+        rank = task.get("execution_rank")
+        score = task.get("execution_score")
+        return (
+            rank is None,
+            int(rank) if rank is not None else 999999,
+            score is None,
+            -(float(score) if score is not None else 0.0),
+            str(task.get("title") or "").lower(),
+        )
+
+    tasks.sort(key=sort_key)
+
+    return {
+        "project": {
+            "id": project_row.get("id"),
+            "name": _project_display_name(project_row),
+            "status": project_row.get("status"),
+            "open_task_count": len(tasks),
+        },
+        "tasks": tasks,
+    }
+
+
+
+AIOS_WEB_CREATE_TASK_VERSION = "create-task-v1"
+
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    due_at: str | None = None
+    defer_until: str | None = None
+    importance: str | None = None
+    urgency: str | None = None
+    effort: str | None = None
+    duration: str | None = None
+    is_just_do_it: bool = False
+    project_id: str | None = None
+
+
+@app.post("/tasks", tags=["tasks"], status_code=201)
+def create_task_http(request: CreateTaskRequest) -> dict:
+    title = str(request.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Task title cannot be blank")
+
+    values = {
+        "title": title,
+        "is_open": True,
+        "is_done": False,
+        "is_archived": False,
+        "is_just_do_it": bool(request.is_just_do_it),
+    }
+
+    for field in (
+        "due_at",
+        "defer_until",
+        "importance",
+        "urgency",
+        "effort",
+        "duration",
+        "project_id",
+    ):
+        value = getattr(request, field)
+        if value not in (None, ""):
+            values[field] = value
+
+    result = (
+        _store().client.table("tasks")
+        .insert(values)
+        .execute()
+    )
+
+    rows = result.data or []
+    if not rows:
+        raise HTTPException(status_code=500, detail="Task could not be created")
+
+    task = dict(rows[0])
+
+    try:
+        _request_processor_run()
+    except Exception as exc:
+        print(
+            "[Task Create] Task created; processor trigger failed:",
+            exc,
+        )
+
+    return {"task": task}
+
+
+AIOS_DASHBOARD_FOCUS_API_VERSION = "dashboard-focus-v1"
+
+
+@app.get("/focus", tags=["tasks"])
+def get_dashboard_focus_http() -> dict:
+    states = (_store().client.table("task_execution_state")
+        .select("task_id,execution_score,execution_rank,best_next_action")
+        .not_.is_("execution_rank", "null")
+        .order("execution_rank")
+        .limit(1).execute().data or [])
+    if not states:
+        return {"focus": None}
+    state = dict(states[0])
+    task_id = state.get("task_id")
+    tasks = (_store().client.table("tasks")
+        .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
+        .eq("id", task_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
+        .limit(1).execute().data or [])
+    if not tasks:
+        return {"focus": None}
+    task = dict(tasks[0])
+    task["execution_score"] = state.get("execution_score")
+    task["execution_rank"] = state.get("execution_rank")
+    task["best_next_action"] = bool(state.get("best_next_action", False))
+    try:
+        guidance_rows = (_store().client.table("task_focus_guidance")
+            .select("starter_step,starter_minutes,source,updated_at")
+            .eq("task_id", task_id).limit(1).execute().data or [])
+    except Exception:
+        guidance_rows = []
+    guidance = dict(guidance_rows[0]) if guidance_rows else {}
+    task["starter_step"] = guidance.get("starter_step")
+    task["starter_minutes"] = guidance.get("starter_minutes")
+    task["guidance_source"] = guidance.get("source")
+    return {"focus": task}
 
 
 @app.post(
