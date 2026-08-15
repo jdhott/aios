@@ -1147,22 +1147,69 @@ def _page(
         if focus.get("execution_rank") is not None: meta.append(f"Rank {html.escape(str(focus.get('execution_rank')))}")
         if focus.get("execution_score") is not None: meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
         if focus.get("importance"): meta.append(html.escape(str(focus.get("importance"))))
-        starter = str(focus.get("starter_step") or "").strip()
-        minutes = focus.get("starter_minutes")
-        starter_html = (f'<div class="focus-start"><div class="focus-start-label">Start here</div><div class="focus-start-step">{html.escape(starter)}</div></div>') if starter else ""
-        timebox_html = (f'<div class="focus-timebox">Give it {html.escape(str(minutes))} minutes<span> — only for this starting move.</span></div>') if minutes else ""
+
+        activation = dict(focus.get("activation") or {})
+        activation_id = str(activation.get("id") or "")
+        activation_title = str(activation.get("title") or "").strip()
+
+        # Activation child is canonical. Legacy guidance remains only as
+        # a temporary fallback while the old guidance table is phased out.
+        starter = activation_title or str(focus.get("starter_step") or "").strip()
+
+        activation_duration = str(activation.get("duration") or "").strip()
+        if activation_duration:
+            timebox_text = activation_duration
+        else:
+            legacy_minutes = focus.get("starter_minutes")
+            timebox_text = (
+                f"{legacy_minutes} min"
+                if legacy_minutes
+                else ""
+            )
+
+        starter_html = ""
+        if starter:
+            if activation_id:
+                safe_activation_id = html.escape(activation_id)
+                starter_html = (
+                    '<div class="focus-start">'
+                    '<div class="focus-start-label">Start here</div>'
+                    '<div class="focus-start-row">'
+                    f'<form class="complete-form focus-activation-complete" method="post" action="/tasks/{safe_activation_id}/complete">'
+                    '<button class="complete-checkbox" type="submit" aria-label="Complete starting step" title="Complete starting step"><span aria-hidden="true"></span></button>'
+                    '</form>'
+                    '<div class="focus-start-main">'
+                    f'<a class="focus-start-step" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
+                    '</div>'
+                    '</div>'
+                    '</div>'
+                )
+            else:
+                starter_html = (
+                    '<div class="focus-start">'
+                    '<div class="focus-start-label">Start here</div>'
+                    f'<div class="focus-start-step">{html.escape(starter)}</div>'
+                    '</div>'
+                )
+
+        timebox_html = (
+            f'<div class="focus-timebox">Give it {html.escape(timebox_text)}'
+            '<span> — only for this starting move.</span></div>'
+        ) if timebox_text else ""
+
         focus_card = (
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
-            '<div class="focus-task-row">'
-            f'<form class="complete-form focus-complete" method="post" action="/tasks/{safe_id}/complete">'
-            '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done"><span aria-hidden="true"></span></button></form>'
+            '<div class="focus-task-row focus-parent-row">'
             '<div class="focus-main">'
             f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
             f'<div class="focus-meta">{" · ".join(meta)}</div></div>'
             f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
-            '</div>' + starter_html + timebox_html + '</section>'
+            '</div>'
+            + starter_html
+            + timebox_html
+            + '</section>'
         )
 
     notice = ""
@@ -1278,14 +1325,17 @@ def _page(
     .bna-open:hover {{ text-decoration:underline; }}
     .focus-card {{ margin:0 0 20px; padding:18px 20px; border:1px solid rgba(255,201,60,.72); border-radius:16px; background:#fff8dc; box-shadow:0 4px 18px rgba(38,65,85,.05); }}
     .focus-label {{ margin-bottom:12px; color:var(--navy); font-size:.9rem; font-weight:850; }}
-    .focus-task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; align-items:center; }}
+    .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
     .focus-main {{ min-width:0; }}
     .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.25rem; line-height:1.3; font-weight:850; }}
     .focus-title:hover {{ text-decoration:underline; }}
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
-    .focus-start {{ margin:16px 44px 0 54px; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
+    .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
     .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
-    .focus-start-step {{ margin-top:6px; color:var(--ink); font-size:1rem; line-height:1.45; }}
+    .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr); gap:10px; align-items:center; margin-top:8px; }}
+    .focus-start-main {{ min-width:0; }}
+    .focus-start-step {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.45; font-weight:700; }}
+    .focus-start-step:hover {{ text-decoration:underline; }}
     .focus-timebox {{ margin:10px 44px 0 54px; color:var(--navy); font-size:.88rem; font-weight:800; }}
     .focus-timebox span {{ color:var(--muted); font-weight:500; }}
     .brand {{

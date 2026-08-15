@@ -31,7 +31,7 @@ with patch.dict(os.environ,env,clear=False), \
 assert r.status_code==200
 assert "⭐ Best Next Action" in r.text
 assert "Start here" in r.text
-assert "Give it 10 minutes" in r.text
+assert "Give it 10 min" in r.text
 assert r.text.count("Plan 90th birthday party for Mum")==1
 assert '<details class="task-group" data-section="top5">' in r.text
 assert '<details class="task-group" data-section="top5" open>' not in r.text

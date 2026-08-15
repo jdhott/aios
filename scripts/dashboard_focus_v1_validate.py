@@ -11,7 +11,7 @@ checks=[
 ('guidance cache','table("task_focus_guidance")' in focus),
 ('focus API','@app.get("/focus"' in api),
 ('web focus fetch','def _fetch_focus()' in web),
-('actionable checkbox','focus-complete' in web),
+('activation child checkbox','focus-activation-complete' in web),
 ('actionable trash','focus-delete' in web),
 ('focus title link','class="focus-title"' in web),
 ('rank1 removed from alternatives','if focus_id:' in web),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from aios.focus_activation import get_active_focus_activation
 from contextlib import asynccontextmanager
 import os
 
@@ -755,6 +756,15 @@ def get_dashboard_focus_http() -> dict:
     task["starter_step"] = guidance.get("starter_step")
     task["starter_minutes"] = guidance.get("starter_minutes")
     task["guidance_source"] = guidance.get("source")
+
+    try:
+        task["activation"] = get_active_focus_activation(
+            _store(),
+            task_id,
+        )
+    except Exception:
+        task["activation"] = None
+
     return {"focus": task}
 
 

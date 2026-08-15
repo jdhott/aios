@@ -71,6 +71,7 @@ class TaskRepository:
             project_id=row.get("project_id"),
             parent_task_id=row.get("parent_task_id"),
             step_order=row.get("step_order"),
+            generated_source=row.get("generated_source"),
             legacy_metadata=(
                 row.get("legacy_metadata")
                 or {}
@@ -268,6 +269,7 @@ class TaskRepository:
             "project_id": task.project_id,
             "parent_task_id": task.parent_task_id,
             "step_order": task.step_order,
+            "generated_source": task.generated_source,
             "legacy_metadata": task.legacy_metadata,
             "created_at": (
                 task.created_at.isoformat()
