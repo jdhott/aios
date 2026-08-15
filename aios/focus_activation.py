@@ -92,6 +92,7 @@ def list_focus_activation_children(
         .select(
             "id,title,is_open,is_done,is_archived,is_just_do_it,"
             "parent_task_id,step_order,generated_source,duration,"
+            "activation_disposition,defer_until,"
             "created_at,updated_at,completed_at"
         )
         .eq("parent_task_id", parent_task_id)
@@ -114,13 +115,15 @@ def get_active_focus_activation(
         .table("tasks")
         .select(
             "id,title,is_open,is_done,is_archived,is_just_do_it,"
-            "parent_task_id,step_order,generated_source,duration"
+            "parent_task_id,step_order,generated_source,duration,"
+            "activation_disposition,defer_until"
         )
         .eq("parent_task_id", parent_task_id)
         .eq("generated_source", FOCUS_ACTIVATION_SOURCE)
         .eq("is_open", True)
         .eq("is_done", False)
         .eq("is_archived", False)
+        .is_("activation_disposition", "null")
         .order("step_order")
         .limit(1)
         .execute()
@@ -200,11 +203,124 @@ def create_focus_activation_child(
     return dict(rows[0])
 
 
+
+def mark_focus_activation_not_now(
+    store: SupabaseStore,
+    task_id: str,
+) -> dict[str, Any]:
+    rows = (
+        store.client
+        .table("tasks")
+        .select(
+            "id,title,generated_source,is_done,is_archived,"
+            "activation_disposition"
+        )
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise RuntimeError(f"Activation task {task_id} not found.")
+
+    current = dict(rows[0])
+
+    if current.get("generated_source") != FOCUS_ACTIVATION_SOURCE:
+        raise RuntimeError(
+            "Only focus activation tasks can be marked Not now."
+        )
+
+    if current.get("is_done") or current.get("is_archived"):
+        raise RuntimeError(
+            "Completed or archived activation tasks cannot be marked Not now."
+        )
+
+    response = (
+        store.client
+        .table("tasks")
+        .update({
+            "activation_disposition": "not_now",
+            "is_open": False,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+
+    updated = response.data or []
+
+    if not updated:
+        raise RuntimeError(
+            "Not-now activation update returned no row."
+        )
+
+    return dict(updated[0])
+
+
+def snooze_focus_activation(
+    store: SupabaseStore,
+    task_id: str,
+    defer_until: str,
+) -> dict[str, Any]:
+    defer_until = str(defer_until or "").strip()
+    if not defer_until:
+        raise ValueError("defer_until is required.")
+
+    rows = (
+        store.client
+        .table("tasks")
+        .select(
+            "id,title,generated_source,is_done,is_archived"
+        )
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise RuntimeError(f"Activation task {task_id} not found.")
+
+    current = dict(rows[0])
+
+    if current.get("generated_source") != FOCUS_ACTIVATION_SOURCE:
+        raise RuntimeError(
+            "Only focus activation tasks can be snoozed."
+        )
+
+    if current.get("is_done") or current.get("is_archived"):
+        raise RuntimeError(
+            "Completed or archived activation tasks cannot be snoozed."
+        )
+
+    response = (
+        store.client
+        .table("tasks")
+        .update({
+            "defer_until": defer_until,
+            "is_open": False,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+
+    updated = response.data or []
+
+    if not updated:
+        raise RuntimeError(
+            "Snooze activation update returned no row."
+        )
+
+    return dict(updated[0])
+
 def generate_next_focus_activation(
     client,
     *,
     parent_title: str,
     completed_steps: list[str],
+    unavailable_steps: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """
     Generate exactly one next JDI-sized activation step.
@@ -224,6 +340,20 @@ def generate_next_focus_activation(
     if not history:
         history = "(No activation steps completed yet.)"
 
+    unavailable_steps = [
+        str(step).strip()
+        for step in (unavailable_steps or [])
+        if str(step).strip()
+    ]
+
+    unavailable_history = "\n".join(
+        f"{index}. {step}"
+        for index, step in enumerate(unavailable_steps, start=1)
+    )
+
+    if not unavailable_history:
+        unavailable_history = "(No unavailable activation steps.)"
+
     model = os.getenv(
         "AIOS_FOCUS_GUIDANCE_MODEL",
         "gpt-4.1-mini",
@@ -237,6 +367,9 @@ Parent task:
 Previously completed activation steps:
 {history}
 
+Unavailable / rejected activation steps:
+{unavailable_history}
+
 Generate exactly ONE next small action.
 
 Return JSON only with exactly:
@@ -244,7 +377,8 @@ Return JSON only with exactly:
 
 Rules:
 - The action must advance the parent task.
-- Do not repeat or substantially duplicate any completed activation step.
+- Do not repeat or substantially duplicate any completed or unavailable activation step.
+- The action must be executable now and must not depend on waiting for a reply, delivery, approval, future date, or external event.
 - It must be a concrete action the person can do now.
 - Treat it as a Just Do It task: small, low-friction, and immediately executable.
 - Prefer an action that can be completed in 5 to 15 minutes.
@@ -278,7 +412,7 @@ Rules:
         normalized_title = " ".join(title.lower().split())
         normalized_history = {
             " ".join(step.lower().split())
-            for step in completed_steps
+            for step in (completed_steps + unavailable_steps)
         }
 
         if normalized_title in normalized_history:
@@ -361,10 +495,23 @@ def ensure_next_focus_activation(
         and str(row.get("title") or "").strip()
     ]
 
+    unavailable_steps = [
+        str(row.get("title") or "").strip()
+        for row in history
+        if not row.get("is_done")
+        and not row.get("is_archived")
+        and (
+            row.get("activation_disposition") == "not_now"
+            or row.get("defer_until")
+        )
+        and str(row.get("title") or "").strip()
+    ]
+
     generated = generate_next_focus_activation(
         client,
         parent_title=parent_title,
         completed_steps=completed_steps,
+        unavailable_steps=unavailable_steps,
     )
 
     if not generated:

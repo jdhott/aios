@@ -28,6 +28,13 @@ class FakeQuery:
         self.filters.append((field, value))
         return self
 
+    def is_(self, field, value):
+        if value == "null":
+            self.filters.append((field, None))
+        else:
+            self.filters.append((field, value))
+        return self
+
     def order(self, field):
         self.order_field = field
         return self

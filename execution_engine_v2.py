@@ -902,6 +902,30 @@ def get_execution_active_tasks(open_tasks):
     ]
 
 
+
+def is_project_anchor(task):
+    props = task.get("properties", {}) or {}
+
+    role = safe_nested_get(
+        props,
+        "Task Role",
+        "rich_text",
+    )
+
+    if isinstance(role, list):
+        role = "".join(
+            str(
+                item.get("plain_text")
+                or item.get("text", {}).get("content")
+                or ""
+            )
+            for item in role
+            if isinstance(item, dict)
+        )
+
+    return str(role or "").strip().lower() == "project_anchor"
+
+
 def filter_execution_eligible_tasks(open_tasks):
     eligible = []
 
@@ -909,6 +933,7 @@ def filter_execution_eligible_tasks(open_tasks):
         "total_open_tasks": len(open_tasks),
         "rejected_deferred": 0,
         "rejected_jdi": 0,
+        "rejected_project_anchor": 0,
         "included_quick_win": 0,
         "rejected_non_actionable": 0,
         "eligible": 0,
@@ -921,6 +946,10 @@ def filter_execution_eligible_tasks(open_tasks):
 
         if is_jdi(task):
             diagnostics["rejected_jdi"] += 1
+            continue
+
+        if is_project_anchor(task):
+            diagnostics["rejected_project_anchor"] += 1
             continue
 
         if is_quick_win(task):
@@ -942,6 +971,7 @@ def filter_execution_eligible_tasks(open_tasks):
     print(f"Total open tasks: {diagnostics['total_open_tasks']}")
     print(f"Rejected deferred: {diagnostics['rejected_deferred']}")
     print(f"Rejected JDI: {diagnostics['rejected_jdi']}")
+    print(f"Rejected project anchors: {diagnostics['rejected_project_anchor']}")
     print(f"Quick Wins included in ranking: {diagnostics['included_quick_win']}")
     print(f"Rejected non-actionable: {diagnostics['rejected_non_actionable']}")
     print(f"Eligible execution tasks: {diagnostics['eligible']}")

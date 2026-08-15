@@ -318,6 +318,10 @@ class SupabaseTaskSource:
                     _rich_text_property(
                         task.suggested_project
                     ),
+                "Task Role":
+                    _rich_text_property(
+                        task.task_role
+                    ),
                 "Project":
                     _relation_property(
                         project_ref

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from aios.focus_activation import (
     get_active_focus_activation,
     list_focus_activation_children,
+    mark_focus_activation_not_now,
 )
 from contextlib import asynccontextmanager
 import os
@@ -28,6 +29,8 @@ from aios.ingestion.capture_metadata import parse_capture_metadata
 from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
+from aios.text_utils import normalize
 from aios.processing.trigger_coordinator import (
     ProcessingTriggerCoordinator,
 )
@@ -398,6 +401,32 @@ def complete_task_http(task_id: str) -> dict:
     except Exception: pass
     return {"id":task_id,"completed":True}
 
+
+@app.post("/tasks/{task_id}/not-now", tags=["tasks"])
+def not_now_task_http(task_id: str) -> dict:
+    try:
+        task = mark_focus_activation_not_now(
+            _store(),
+            task_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+
+    return {
+        "id": task_id,
+        "not_now": True,
+        "task": task,
+    }
+
+
 @app.post("/tasks/{task_id}/delete", tags=["tasks"])
 def delete_task_http(task_id: str) -> dict:
     rows=(_store().client.table("tasks").select("id").eq("id",task_id).limit(1).execute().data or [])
@@ -524,6 +553,56 @@ def _project_display_name(row: dict) -> str:
     return "Untitled Project"
 
 
+
+def _project_review_reasons(
+    project: dict,
+    open_tasks: list[dict],
+) -> list[str]:
+    """Return conservative, read-only reasons a project needs review."""
+    reasons: list[str] = []
+
+    project_name = str(project.get("name") or "").strip()
+    project_key = normalize(project_name)
+
+    status = str(project.get("status") or "").strip().lower()
+    inactive_statuses = {
+        "completed",
+        "done",
+        "archived",
+        "paused",
+        "someday",
+    }
+
+    inactive = (
+        status in inactive_statuses
+        or project.get("is_active") is False
+    )
+
+    proxy_tasks = [
+        task
+        for task in open_tasks
+        if project_key
+        and normalize(str(task.get("title") or "")) == project_key
+    ]
+
+    executable_tasks = [
+        task
+        for task in open_tasks
+        if task not in proxy_tasks
+    ]
+
+    if inactive and open_tasks:
+        reasons.append("inactive_with_open_work")
+
+    if proxy_tasks:
+        reasons.append("project_proxy_task")
+
+    if open_tasks and not executable_tasks:
+        reasons.append("no_executable_tasks")
+
+    return reasons
+
+
 @app.get("/projects", tags=["projects"])
 def list_projects_http() -> dict:
     projects = (
@@ -536,7 +615,10 @@ def list_projects_http() -> dict:
 
     open_tasks = (
         _store().client.table("tasks")
-        .select("id,project_id")
+        .select(
+            "id,title,project_id,is_open,is_done,is_archived,"
+            "is_just_do_it,parent_task_id,generated_source"
+        )
         .eq("is_open", True)
         .eq("is_done", False)
         .eq("is_archived", False)
@@ -546,10 +628,17 @@ def list_projects_http() -> dict:
     )
 
     counts = {}
+    tasks_by_project: dict[str, list[dict]] = {}
+
     for task in open_tasks:
         project_id = task.get("project_id")
-        if project_id:
-            counts[project_id] = counts.get(project_id, 0) + 1
+        if not project_id:
+            continue
+
+        counts[project_id] = counts.get(project_id, 0) + 1
+        tasks_by_project.setdefault(project_id, []).append(
+            dict(task)
+        )
 
     active = []
     for project in projects:
@@ -558,11 +647,18 @@ def list_projects_http() -> dict:
         if open_count <= 0:
             continue
 
+        review_reasons = _project_review_reasons(
+            project,
+            tasks_by_project.get(project_id, []),
+        )
+
         active.append({
             "id": project_id,
             "name": _project_display_name(project),
             "status": project.get("status"),
             "open_task_count": open_count,
+            "review_needed": bool(review_reasons),
+            "review_reasons": review_reasons,
         })
 
     active.sort(
@@ -573,6 +669,27 @@ def list_projects_http() -> dict:
     )
 
     return {"count": len(active), "projects": active}
+
+
+
+@app.post("/projects/{project_id}/activate", tags=["projects"])
+def activate_project_http(project_id: str) -> dict:
+    try:
+        project = get_project_lifecycle_writer().update(
+            project_ref_id=project_id,
+            status="Active",
+            is_active=True,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "project": project,
+        "activated": True,
+    }
 
 
 @app.get("/projects/{project_id}", tags=["projects"])

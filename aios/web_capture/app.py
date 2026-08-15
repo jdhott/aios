@@ -591,29 +591,70 @@ def _fetch_project_detail(project_id: str) -> dict:
 
 
 def _projects_page(projects: list[dict], error: str = "") -> str:
-    cards = ""
+    review_projects = [
+        project for project in projects
+        if project.get("review_needed")
+    ]
+    normal_projects = [
+        project for project in projects
+        if not project.get("review_needed")
+    ]
 
-    for project in projects:
-        project_id = html.escape(str(project.get("id") or ""))
-        name = html.escape(str(project.get("name") or "Untitled Project"))
-        count = int(project.get("open_task_count") or 0)
-        status = str(project.get("status") or "").strip()
+    reason_labels = {
+        "inactive_with_open_work": "Inactive project has current open work",
+        "project_proxy_task": "An open task appears to duplicate the project outcome",
+        "no_executable_tasks": "No other executable project tasks are available",
+    }
 
-        status_html = (
-            f'<span class="project-status">{html.escape(status)}</span>'
-            if status else ""
-        )
+    def render_cards(items: list[dict], review: bool = False) -> str:
+        cards = ""
 
-        cards += (
-            f'<a class="project-card" href="/projects/{project_id}">'
-            f'<div><h2>{name}</h2>{status_html}</div>'
-            f'<div class="project-count"><strong>{count}</strong>'
-            f'<span>open task{"s" if count != 1 else ""}</span></div>'
-            f'</a>'
-        )
+        for project in items:
+            project_id = html.escape(str(project.get("id") or ""))
+            name = html.escape(str(project.get("name") or "Untitled Project"))
+            count = int(project.get("open_task_count") or 0)
+            status = str(project.get("status") or "").strip()
 
-    if not cards:
-        cards = '<div class="empty-state">No active projects with open tasks.</div>'
+            status_html = (
+                f'<span class="project-status">{html.escape(status)}</span>'
+                if status else ""
+            )
+
+            review_html = ""
+            if review:
+                reasons = [
+                    reason_labels.get(reason, reason.replace("_", " ").title())
+                    for reason in (project.get("review_reasons") or [])
+                ]
+                if reasons:
+                    review_html = (
+                        '<ul class="review-reasons">'
+                        + "".join(
+                            f"<li>{html.escape(reason)}</li>"
+                            for reason in reasons
+                        )
+                        + "</ul>"
+                    )
+
+            cards += (
+                f'<a class="project-card{" review-card" if review else ""}" '
+                f'href="/projects/{project_id}">'
+                f'<div><h2>{name}</h2>{status_html}{review_html}</div>'
+                f'<div class="project-count"><strong>{count}</strong>'
+                f'<span>open task{"s" if count != 1 else ""}</span></div>'
+                f'</a>'
+            )
+
+        return cards
+
+    review_cards = render_cards(review_projects, review=True)
+    project_cards = render_cards(normal_projects)
+
+    if not review_cards:
+        review_cards = '<div class="empty-state">No projects currently need review.</div>'
+
+    if not project_cards:
+        project_cards = '<div class="empty-state">No other projects with open tasks.</div>'
 
     notice = (
         '<div class="notice error">' + html.escape(error) + '</div>'
@@ -631,6 +672,7 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
 :root {{
   --navy:#264155; --paper:#f7f7f3; --ink:#17242d;
   --muted:#66747d; --border:#d9dedf; --card:#fff; --error:#fae9e7;
+  --review:#fff8dc;
 }}
 * {{ box-sizing:border-box; }}
 body {{
@@ -653,6 +695,14 @@ h1 {{
 .nav-link {{ color:var(--navy); text-decoration:none; font-weight:750; }}
 .notice {{ padding:12px 14px; border-radius:12px; margin-bottom:18px; }}
 .error {{ background:var(--error); }}
+.section {{ margin-top:28px; }}
+.section:first-of-type {{ margin-top:0; }}
+.section h2 {{
+  margin:0 0 12px; color:var(--navy); font-size:1.15rem;
+}}
+.section-note {{
+  margin:-4px 0 14px; color:var(--muted); font-size:.9rem;
+}}
 .project-list {{ display:grid; gap:12px; }}
 .project-card {{
   display:flex; align-items:center; justify-content:space-between;
@@ -663,9 +713,14 @@ h1 {{
 .project-card:hover {{
   border-color:var(--navy); box-shadow:0 8px 24px rgba(38,65,85,.08);
 }}
+.review-card {{ background:var(--review); }}
 .project-card h2 {{ margin:0; color:var(--navy); font-size:1.08rem; }}
 .project-status {{
   display:inline-block; margin-top:6px; color:var(--muted); font-size:.82rem;
+}}
+.review-reasons {{
+  margin:10px 0 0; padding-left:18px; color:var(--muted);
+  font-size:.86rem; line-height:1.45;
 }}
 .project-count {{ flex:0 0 auto; display:grid; text-align:right; }}
 .project-count strong {{ color:var(--navy); font-size:1.35rem; line-height:1; }}
@@ -681,12 +736,23 @@ h1 {{
   <div class="topbar">
     <div>
       <h1>Projects</h1>
-      <p class="subtitle">Active projects with unfinished work.</p>
+      <p class="subtitle">Projects with unfinished work.</p>
     </div>
     <a class="nav-link" href="/">Home</a>
   </div>
+
   {notice}
-  <div class="project-list">{cards}</div>
+
+  <section class="section">
+    <h2>Needs Review</h2>
+    <p class="section-note">Projects where AIOS sees a mismatch between project state and current work.</p>
+    <div class="project-list">{review_cards}</div>
+  </section>
+
+  <section class="section">
+    <h2>Projects</h2>
+    <div class="project-list">{project_cards}</div>
+  </section>
 </main>
 </body>
 </html>"""
@@ -1218,6 +1284,9 @@ def _page(
                     '<div class="focus-start-main">'
                     f'<a class="focus-start-step" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
                     '</div>'
+                    f'<form class="focus-not-now-form" method="post" action="/tasks/{safe_activation_id}/not-now">'
+                    '<button class="focus-not-now" type="submit">Not now</button>'
+                    '</form>'
                     '</div>'
                     '</div>'
                 )
@@ -1408,10 +1477,17 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
     .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
     .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
-    .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr); gap:10px; align-items:center; margin-top:8px; }}
+    .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:center; margin-top:8px; }}
     .focus-start-main {{ min-width:0; }}
     .focus-start-step {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.45; font-weight:700; }}
     .focus-start-step:hover {{ text-decoration:underline; }}
+    .focus-not-now-form {{ display:block; }}
+    .focus-not-now {{
+      border:0; background:transparent; color:var(--muted);
+      font:inherit; font-size:.84rem; font-weight:700;
+      cursor:pointer; padding:7px 4px;
+    }}
+    .focus-not-now:hover {{ color:var(--navy); text-decoration:underline; }}
     .focus-timebox {{ margin:10px 44px 0 54px; color:var(--navy); font-size:.88rem; font-weight:800; }}
     .focus-timebox span {{ color:var(--muted); font-weight:500; }}
     .brand {{
@@ -1920,6 +1996,25 @@ def complete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_a
             url="/?error=Task+could+not+be+completed.",
             status_code=303,
         )
+
+
+@app.post("/tasks/{task_id}/not-now")
+def not_now_task_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> RedirectResponse:
+    try:
+        _task_action(task_id, "not-now")
+        return RedirectResponse(
+            url="/?message=Finding+a+different+step.&refresh_focus=1",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url="/?error=Task+could+not+be+skipped.",
+            status_code=303,
+        )
+
 
 @app.post("/tasks/{task_id}/delete")
 def delete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:

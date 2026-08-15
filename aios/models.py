@@ -51,6 +51,8 @@ class Task:
     parent_task_id: Optional[str] = None
     step_order: Optional[int] = None
     generated_source: Optional[str] = None
+    task_role: Optional[str] = None
+    activation_disposition: Optional[str] = None
 
     legacy_metadata: dict[str, Any] = field(
         default_factory=dict
