@@ -1151,13 +1151,25 @@ def _page(
         activation = dict(focus.get("activation") or {})
         activation_id = str(activation.get("id") or "")
         activation_title = str(activation.get("title") or "").strip()
+        activation_pending = bool(
+            focus.get("activation_pending")
+        )
 
-        # Activation child is canonical. Legacy guidance remains only as
-        # a temporary fallback while the old guidance table is phased out.
-        starter = activation_title or str(focus.get("starter_step") or "").strip()
+        # Activation child is canonical. Never fall back to stale legacy
+        # guidance while the processor is generating the next activation.
+        if activation_title:
+            starter = activation_title
+        elif activation_pending:
+            starter = ""
+        else:
+            starter = str(
+                focus.get("starter_step") or ""
+            ).strip()
 
         activation_duration = str(activation.get("duration") or "").strip()
-        if activation_duration:
+        if activation_pending:
+            timebox_text = ""
+        elif activation_duration:
             timebox_text = activation_duration
         else:
             legacy_minutes = focus.get("starter_minutes")
@@ -1168,6 +1180,17 @@ def _page(
             )
 
         starter_html = ""
+
+        if activation_pending:
+            starter_html = (
+                '<div class="focus-start">'
+                '<div class="focus-start-label">Start here</div>'
+                '<div class="focus-pending">'
+                'Finding your next step…'
+                '</div>'
+                '</div>'
+            )
+
         if starter:
             if activation_id:
                 safe_activation_id = html.escape(activation_id)
@@ -1225,6 +1248,27 @@ def _page(
             + html.escape(error)
             + "</div>"
         )
+
+    pending_refresh_script = ""
+    if focus and focus.get("activation_pending"):
+        pending_refresh_script = """
+<script>
+(() => {
+  const key = "aios-focus-activation-refresh-count";
+  const count = Number(sessionStorage.getItem(key) || "0");
+  if (count < 10) {
+    sessionStorage.setItem(key, String(count + 1));
+    setTimeout(() => window.location.reload(), 2000);
+  }
+})();
+</script>
+"""
+    else:
+        pending_refresh_script = """
+<script>
+sessionStorage.removeItem("aios-focus-activation-refresh-count");
+</script>
+"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1641,6 +1685,7 @@ def _page(
       restoreScroll();
     }})();
   </script>
+{pending_refresh_script}
 </body>
 </html>"""
 
