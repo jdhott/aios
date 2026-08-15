@@ -19,7 +19,7 @@ for text in (app, runner, coord, trigger):
 checks = [
     ("API trigger marker", 'AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"' in app),
     ("capture requests processing", "_request_processor_run()" in app),
-    ("trigger failures preserve capture", "Trigger failed; capture remains pending" in app),
+    ("trigger failures preserve capture", "Trigger failed; processing remains requested" in app),
     ("coordinator uses atomic Supabase RPC", '.rpc(function_name, {})' in coord),
     ("Cloud Run v2 jobs.run endpoint", "run.googleapis.com/v2/" in trigger and ":run" in trigger),
     ("job overlap guard", "if not coordinator.begin_processing()" in runner),

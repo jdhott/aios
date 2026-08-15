@@ -7,6 +7,8 @@ from aios.storage.execution_repository import ExecutionRepository
 from aios.storage.supabase_store import SupabaseStore
 from aios.storage.task_repository import TaskRepository
 
+EXECUTION_STATE_LIFECYCLE_CLEANUP_VERSION = "v1.1"
+
 
 def _title_property(value: str) -> dict[str, Any]:
     return {
@@ -77,13 +79,75 @@ def get_supabase_execution_tasks() -> list[dict[str, Any]]:
     execution_repository = ExecutionRepository(store)
 
     all_tasks = task_repository.get_all_tasks()
-    execution_population = [task for task in all_tasks if not task.is_done]
+    execution_population = [
+        task
+        for task in all_tasks
+        if task.is_open
+        and not task.is_done
+        and not task.is_archived
+    ]
     print(
         "[Execution Task Source] "
-        f"Supabase non-done task population: {len(execution_population)}"
+        f"Supabase active execution population: {len(execution_population)}"
     )
 
     current_state = execution_repository.get_current_state()
+
+    # Lifecycle cleanup is intentionally separate from execution cognition.
+    # A task that is Done, Archived, or no longer Open must not retain
+    # canonical Execution Score / Rank / Best Next Action state.
+    #
+    # We do not change the population supplied to Execution Engine V2 here.
+    # This cleanup only reconciles persisted state against durable task
+    # lifecycle so closed tasks cannot occupy stale ranks indefinitely.
+    task_by_id = {
+        task.id: task
+        for task in all_tasks
+    }
+
+    stale_state_task_ids = []
+
+    for task_id, state in current_state.items():
+        task = task_by_id.get(task_id)
+
+        if task is None:
+            continue
+
+        lifecycle_closed = (
+            task.is_done
+            or task.is_archived
+            or not task.is_open
+        )
+
+        has_execution_state = (
+            state.get("execution_score") is not None
+            or state.get("execution_rank") is not None
+            or bool(state.get("best_next_action", False))
+        )
+
+        if lifecycle_closed and has_execution_state:
+            stale_state_task_ids.append(task_id)
+
+    if stale_state_task_ids:
+        execution_repository.clear_execution_state(
+            stale_state_task_ids
+        )
+        print(
+            "[Execution Task Source] "
+            "Cleared stale execution state for "
+            f"{len(stale_state_task_ids)} closed task(s)"
+        )
+
+        # Keep the in-memory snapshot consistent with the just-cleared
+        # canonical state so the remainder of this run cannot re-read stale
+        # values from the pre-cleanup snapshot.
+        for task_id in stale_state_task_ids:
+            state = current_state.get(task_id)
+            if not state:
+                continue
+            state["execution_score"] = None
+            state["execution_rank"] = None
+            state["best_next_action"] = False
     print(
         "[Execution Task Source] "
         f"Supabase current execution-state rows: {len(current_state)}"
