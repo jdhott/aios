@@ -206,7 +206,22 @@ def _update_task_detail(task_id: str, payload: dict) -> dict:
     return dict((response.json() or {}).get("task") or {})
 
 
-def _task_detail_page(task: dict, message: str = "", error: str = "") -> str:
+def _safe_return_to(value: str | None) -> str:
+    """Allow only local AIOS paths as task-detail return targets."""
+    target = str(value or "").strip()
+
+    if not target.startswith("/") or target.startswith("//"):
+        return "/"
+
+    return target
+
+
+def _task_detail_page(
+    task: dict,
+    message: str = "",
+    error: str = "",
+    return_to: str = "/",
+) -> str:
     task_id = html.escape(str(task.get("id") or ""))
     title = html.escape(str(task.get("title") or ""))
     due_at = html.escape(str(task.get("due_at") or "")[:10])
@@ -216,6 +231,10 @@ def _task_detail_page(task: dict, message: str = "", error: str = "") -> str:
     effort = html.escape(str(task.get("effort") or ""))
     duration = html.escape(str(task.get("duration") or ""))
     checked = " checked" if task.get("is_just_do_it") else ""
+    return_to = html.escape(
+        _safe_return_to(return_to),
+        quote=True,
+    )
 
     notice = ""
     if message:
@@ -468,6 +487,7 @@ input:focus {{
 
   <div class="layout">
     <form method="post" action="/tasks/{task_id}/edit">
+      <input type="hidden" name="return_to" value="{return_to}">
       <section class="card">
         <h2 class="card-title">Task Details</h2>
 
@@ -518,7 +538,7 @@ input:focus {{
 
         <div class="actions">
           <button class="primary-button" type="submit">Save Changes</button>
-          <a class="secondary-link" href="/">Cancel</a>
+          <a class="secondary-link" href="{return_to}">Cancel</a>
         </div>
       </section>
     </form>
@@ -619,13 +639,22 @@ def _project_work_action(
     project_id: str,
     proposal_id: str,
     action: str,
+    payload: dict | None = None,
 ) -> dict:
     api_url = _api_url()
     token = _identity_token(api_url)
 
+    headers = {
+        "Authorization": f"Bearer {token}",
+    }
+
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+
     response = requests.post(
         f"{api_url}/projects/{project_id}/work-proposals/{proposal_id}/{action}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
+        json=payload,
         timeout=30,
     )
 
@@ -805,7 +834,11 @@ h1 {{
 </html>"""
 
 
-def _project_detail_page(payload: dict) -> str:
+def _project_detail_page(
+    payload: dict,
+    *,
+    refresh_proposal: bool = False,
+) -> str:
     project = dict(payload.get("project") or {})
     tasks = list(payload.get("tasks") or [])
     work_proposals = list(payload.get("work_proposals") or [])
@@ -842,7 +875,8 @@ def _project_detail_page(payload: dict) -> str:
             meta.append("Just Do It")
 
         task_rows += (
-            '<a class="task-row" href="/tasks/' + task_id + '">'
+            '<a class="task-row" href="/tasks/' + task_id
+            + '?return_to=/projects/' + project_id + '">'
             '<div>'
             f'<div class="task-title">{title}</div>'
             f'<div class="task-meta">{" · ".join(meta)}</div>'
@@ -866,17 +900,45 @@ def _project_detail_page(payload: dict) -> str:
 
         proposal_rows += (
             '<div class="proposal-row">'
-            '<div class="proposal-title">'
-            f'{proposal_title}'
-            '</div>'
-            '<div class="proposal-actions">'
-            f'<form method="post" action="/projects/{project_id}/work-proposals/{proposal_id}/accept">'
+
+            '<div class="proposal-section">'
+            '<div class="proposal-section-label">Suggested task</div>'
+            f'<form class="proposal-accept-form" method="post" '
+            f'action="/projects/{project_id}/work-proposals/{proposal_id}/accept">'
+            f'<textarea class="proposal-title-input" '
+            f'name="title" maxlength="75" required>'
+            f'{proposal_title}</textarea>'
+            '<div class="proposal-primary-actions">'
+            '<span class="proposal-edit-note">'
+            'Edit the task if needed before accepting.'
+            '</span>'
             '<button class="proposal-accept" type="submit">Accept</button>'
+            '</div>'
             '</form>'
-            f'<form method="post" action="/projects/{project_id}/work-proposals/{proposal_id}/dismiss">'
+            '</div>'
+
+            '<div class="proposal-divider"></div>'
+
+            '<div class="proposal-section">'
+            '<div class="proposal-section-label">Not quite right?</div>'
+            '<div class="proposal-help">'
+            'Tell AIOS exactly what should change. '
+            'Your correction will guide the next proposal.'
+            '</div>'
+            f'<form class="proposal-retry-form" method="post" '
+            f'action="/projects/{project_id}/work-proposals/{proposal_id}/retry">'
+            '<textarea name="feedback" required '
+            'placeholder="What should AIOS change?"></textarea>'
+            '<div class="proposal-action-row">'
+            '<button class="proposal-retry" type="submit">Try Again</button>'
+            '</form>'
+            f'<form method="post" '
+            f'action="/projects/{project_id}/work-proposals/{proposal_id}/dismiss">'
             '<button class="proposal-dismiss" type="submit">Dismiss</button>'
             '</form>'
             '</div>'
+            '</div>'
+
             '</div>'
         )
 
@@ -884,6 +946,49 @@ def _project_detail_page(payload: dict) -> str:
         f'<span class="status">{html.escape(status)}</span>'
         if status else ""
     )
+
+    proposal_pending = bool(
+        refresh_proposal
+        and not work_proposals
+    )
+
+    pending_html = (
+        '<section class="proposal-card proposal-pending-card">'
+        '<h2>Proposed project work</h2>'
+        '<div class="proposal-pending">'
+        '<span class="proposal-spinner" aria-hidden="true"></span>'
+        '<div>'
+        '<strong>Finding a better proposal…</strong>'
+        '<div class="proposal-pending-note">'
+        'AIOS is using your feedback to try a different approach.'
+        '</div>'
+        '</div>'
+        '</div>'
+        '</section>'
+        if proposal_pending
+        else ""
+    )
+
+    if proposal_pending:
+        pending_refresh_script = """
+<script>
+(() => {
+  const key = "aios-project-proposal-refresh-count";
+  const count = Number(sessionStorage.getItem(key) || "0");
+
+  if (count < 45) {
+    sessionStorage.setItem(key, String(count + 1));
+    setTimeout(() => window.location.reload(), 2000);
+  }
+})();
+</script>
+"""
+    else:
+        pending_refresh_script = """
+<script>
+sessionStorage.removeItem("aios-project-proposal-refresh-count");
+</script>
+"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -966,39 +1071,171 @@ h1 {{
 }}
 .context-save:hover {{ opacity:.92; }}
 .proposal-card {{
-  margin:0 0 22px; padding:18px;
-  background:var(--card); border:1px solid var(--border);
+  margin:0 0 22px;
+  padding:22px;
+  background:var(--card);
+  border:1px solid var(--border);
   border-radius:16px;
 }}
+
 .proposal-card h2 {{
-  margin:0 0 6px; color:var(--navy); font-size:1rem;
+  margin:0 0 6px;
+  color:var(--navy);
+  font-size:1.08rem;
 }}
+
 .proposal-note {{
-  margin:0 0 12px; color:var(--muted);
-  font-size:.84rem; line-height:1.4;
+  margin:0 0 18px;
+  color:var(--muted);
+  font-size:.9rem;
+  line-height:1.45;
 }}
+
 .proposal-row {{
-  display:flex; justify-content:space-between; align-items:center;
-  gap:16px; padding:12px 0; border-top:1px solid var(--border);
+  display:grid;
+  gap:22px;
+  padding-top:18px;
+  border-top:1px solid var(--border);
 }}
-.proposal-title {{
-  font-weight:700; line-height:1.4;
+
+.proposal-section {{
+  display:grid;
+  gap:9px;
 }}
-.proposal-actions {{
-  display:flex; gap:8px; flex:0 0 auto;
+
+.proposal-section-label {{
+  color:var(--navy);
+  font-size:.95rem;
+  font-weight:800;
 }}
-.proposal-actions form {{ margin:0; }}
+
+.proposal-help,
+.proposal-edit-note {{
+  color:var(--muted);
+  font-size:.84rem;
+  line-height:1.4;
+}}
+
+.proposal-accept-form,
+.proposal-retry-form {{
+  display:grid;
+  gap:10px;
+}}
+
+.proposal-title-input,
+.proposal-retry-form textarea {{
+  width:100%;
+  resize:vertical;
+  padding:12px 14px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#fff;
+  color:var(--ink);
+  font:inherit;
+  line-height:1.45;
+}}
+
+.proposal-title-input {{
+  min-height:76px;
+  font-weight:700;
+}}
+
+.proposal-retry-form textarea {{
+  min-height:96px;
+}}
+
+.proposal-primary-actions {{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+}}
+
+.proposal-action-row {{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+}}
+
+.proposal-divider {{
+  height:1px;
+  background:var(--border);
+}}
+
 .proposal-accept,
+.proposal-retry,
 .proposal-dismiss {{
-  border-radius:9px; padding:7px 11px;
-  font:inherit; font-size:.84rem; font-weight:750;
+  min-height:42px;
+  border-radius:10px;
+  padding:0 15px;
+  font:inherit;
+  font-size:.86rem;
+  font-weight:750;
   cursor:pointer;
 }}
+
 .proposal-accept {{
-  border:0; background:var(--navy); color:white;
+  border:0;
+  background:var(--navy);
+  color:white;
 }}
+
+.proposal-retry {{
+  border:1px solid var(--navy);
+  background:white;
+  color:var(--navy);
+}}
+
 .proposal-dismiss {{
-  border:1px solid var(--border); background:white; color:var(--muted);
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  padding-left:8px;
+  padding-right:8px;
+}}
+
+.proposal-dismiss:hover {{
+  text-decoration:underline;
+}}
+
+@media (max-width:640px) {{
+  .proposal-card {{
+    padding:18px;
+  }}
+
+  .proposal-primary-actions {{
+    align-items:flex-start;
+    flex-direction:column;
+  }}
+
+  .proposal-primary-actions .proposal-accept {{
+    align-self:flex-end;
+  }}
+}}
+
+.proposal-pending {{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 0 4px;
+}}
+.proposal-pending-note {{
+  margin-top:3px;
+  color:var(--muted);
+  font-size:.84rem;
+}}
+.proposal-spinner {{
+  width:18px;
+  height:18px;
+  flex:0 0 auto;
+  border:2px solid var(--border);
+  border-top-color:var(--navy);
+  border-radius:50%;
+  animation:proposal-spin .8s linear infinite;
+}}
+@keyframes proposal-spin {{
+  to {{ transform:rotate(360deg); }}
 }}
 </style>
 </head>
@@ -1042,8 +1279,11 @@ h1 {{
       else ''
   }
 
+  {pending_html}
+
   <div class="task-list">{task_rows}</div>
 </main>
+{pending_refresh_script}
 </body>
 </html>"""
 
@@ -2116,12 +2356,14 @@ def accept_project_work_web(
     project_id: str,
     proposal_id: str,
     _user: Annotated[str, Depends(_check_basic_auth)],
+    title: Annotated[str, Form()],
 ):
     try:
         _project_work_action(
             project_id,
             proposal_id,
             "accept",
+            {"title": title.strip()},
         )
         return RedirectResponse(
             url=f"/projects/{project_id}?message=Project+task+created.",
@@ -2131,6 +2373,41 @@ def accept_project_work_web(
         print("[Project Work] Accept failed:", exc)
         return RedirectResponse(
             url=f"/projects/{project_id}?error=Project+task+could+not+be+created.",
+            status_code=303,
+        )
+
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/retry"
+)
+def retry_project_work_web(
+    project_id: str,
+    proposal_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    feedback: Annotated[str, Form()],
+):
+    try:
+        _project_work_action(
+            project_id,
+            proposal_id,
+            "retry",
+            {"feedback": feedback.strip()},
+        )
+        return RedirectResponse(
+            url=(
+                f"/projects/{project_id}"
+                "?refresh_proposal=1"
+            ),
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Work] Retry failed:", exc)
+        return RedirectResponse(
+            url=(
+                f"/projects/{project_id}"
+                "?error=Feedback+could+not+be+saved."
+            ),
             status_code=303,
         )
 
@@ -2165,10 +2442,14 @@ def dismiss_project_work_web(
 def project_detail_web(
     project_id: str,
     _user: Annotated[str, Depends(_check_basic_auth)],
+    refresh_proposal: bool = False,
 ):
     try:
         return HTMLResponse(
-            _project_detail_page(_fetch_project_detail(project_id))
+            _project_detail_page(
+                _fetch_project_detail(project_id),
+                refresh_proposal=refresh_proposal,
+            )
         )
     except Exception:
         return RedirectResponse(url="/projects", status_code=303)
@@ -2180,10 +2461,18 @@ def task_detail_web(
     _user: Annotated[str, Depends(_check_basic_auth)],
     message: str = "",
     error: str = "",
+    return_to: str = "/",
 ):
     try:
         task = _fetch_task_detail(task_id)
-        return HTMLResponse(_task_detail_page(task, message=message, error=error))
+        return HTMLResponse(
+            _task_detail_page(
+                task,
+                message=message,
+                error=error,
+                return_to=return_to,
+            )
+        )
     except Exception as exc:
         print("[Task Detail] Render failed:", exc)
         return RedirectResponse(
@@ -2204,6 +2493,7 @@ def edit_task_web(
     effort: Annotated[str, Form()] = "",
     duration: Annotated[str, Form()] = "",
     is_just_do_it: Annotated[str | None, Form()] = None,
+    return_to: Annotated[str, Form()] = "/",
 ):
     payload = {
         "title": title.strip(),
@@ -2218,12 +2508,17 @@ def edit_task_web(
     try:
         _update_task_detail(task_id, payload)
         return RedirectResponse(
-            url="/?message=Task+updated.",
+            url=_safe_return_to(return_to),
             status_code=303,
         )
     except Exception:
+        safe_return = _safe_return_to(return_to)
         return RedirectResponse(
-            url=f"/tasks/{task_id}?error=Task+could+not+be+updated.",
+            url=(
+                f"/tasks/{task_id}"
+                f"?error=Task+could+not+be+updated."
+                f"&return_to={safe_return}"
+            ),
             status_code=303,
         )
 

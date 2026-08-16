@@ -23,7 +23,7 @@ def list_proposed_project_work(
         store.client
         .table("project_work_proposals")
         .select(
-            "id,project_id,title,status,"
+            "id,project_id,title,status,feedback,"
             "created_at,updated_at,accepted_at,dismissed_at"
         )
         .eq("project_id", project_id)
@@ -187,3 +187,83 @@ def dismiss_project_work_proposal(
         )
 
     return dict(rows[0])
+
+
+def retry_project_work_proposal(
+    store: SupabaseStore,
+    proposal_id: str,
+    *,
+    feedback: str,
+) -> dict[str, Any]:
+    """
+    Reject a proposed task with guidance for the next generation attempt.
+
+    We deliberately reuse the existing dismissed lifecycle:
+      dismissed + feedback = rejected with guidance
+      dismissed + no feedback = ordinary dismissal
+    """
+    feedback = str(feedback or "").strip()
+
+    if not feedback:
+        raise ValueError(
+            "Feedback is required when asking AIOS to try again."
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    response = (
+        store.client
+        .table("project_work_proposals")
+        .update({
+            "status": PROPOSAL_STATUS_DISMISSED,
+            "feedback": feedback,
+            "dismissed_at": now,
+            "updated_at": now,
+        })
+        .eq("id", proposal_id)
+        .eq("status", PROPOSAL_STATUS_PROPOSED)
+        .execute()
+    )
+
+    rows = response.data or []
+
+    if not rows:
+        raise RuntimeError(
+            "Proposed project work was not found or is no longer pending."
+        )
+
+    return dict(rows[0])
+
+
+def list_project_work_feedback(
+    store: SupabaseStore,
+    project_id: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Return recent rejected proposals that contain user feedback.
+
+    This is proposal-specific guidance, not durable Project Context.
+    """
+    rows = (
+        store.client
+        .table("project_work_proposals")
+        .select(
+            "id,project_id,title,status,feedback,"
+            "created_at,updated_at,dismissed_at"
+        )
+        .eq("project_id", project_id)
+        .eq("status", PROPOSAL_STATUS_DISMISSED)
+        .order("dismissed_at", desc=True)
+        .limit(max(1, min(int(limit), 20)))
+        .execute()
+        .data
+        or []
+    )
+
+    return [
+        dict(row)
+        for row in rows
+        if str(row.get("feedback") or "").strip()
+    ]

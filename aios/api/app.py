@@ -33,6 +33,7 @@ from aios.project_work import create_supabase_project_task
 from aios.project_work_proposals import (
     accept_project_work_proposal,
     dismiss_project_work_proposal,
+    retry_project_work_proposal,
 )
 from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 from aios.text_utils import normalize
@@ -447,6 +448,14 @@ class ProjectContextUpdate(BaseModel):
     context: str | None = None
 
 
+class ProjectWorkAcceptRequest(BaseModel):
+    title: str | None = None
+
+
+class ProjectWorkRetryRequest(BaseModel):
+    feedback: str
+
+
 class TaskDetailUpdate(BaseModel):
     title: str | None = None
     due_at: str | None = None
@@ -792,6 +801,7 @@ def dismiss_project_work_http(
 def accept_project_work_http(
     project_id: str,
     proposal_id: str,
+    request: ProjectWorkAcceptRequest | None = None,
 ) -> dict:
     store = _store()
 
@@ -821,9 +831,21 @@ def accept_project_work_http(
             detail="Proposal does not belong to this project",
         )
 
+    accepted_title = str(
+        request.title
+        if request and request.title is not None
+        else proposal.get("title") or ""
+    ).strip()
+
+    if not accepted_title:
+        raise HTTPException(
+            status_code=400,
+            detail="Project task title is required",
+        )
+
     task = create_supabase_project_task(
         store,
-        title=str(proposal.get("title") or ""),
+        title=accepted_title,
         project_id=project_id,
     )
 
@@ -852,6 +874,72 @@ def accept_project_work_http(
         "accepted": True,
         "proposal": accepted,
         "task": task,
+    }
+
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/retry",
+    tags=["projects"],
+)
+def retry_project_work_http(
+    project_id: str,
+    proposal_id: str,
+    request: ProjectWorkRetryRequest,
+) -> dict:
+    store = _store()
+
+    rows = (
+        store.client
+        .table("project_work_proposals")
+        .select("id,project_id,title,status")
+        .eq("id", proposal_id)
+        .eq("status", "proposed")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Project-work proposal not found",
+        )
+
+    proposal = dict(rows[0])
+
+    if str(proposal.get("project_id") or "") != project_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Proposal does not belong to this project",
+        )
+
+    try:
+        rejected = retry_project_work_proposal(
+            store,
+            proposal_id,
+            feedback=request.feedback,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+
+    return {
+        "retry_requested": True,
+        "proposal": rejected,
     }
 
 

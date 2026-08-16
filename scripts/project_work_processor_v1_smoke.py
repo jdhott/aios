@@ -16,6 +16,8 @@ class FakeQuery:
         self.table_name = table_name
         self.filters = []
         self.order_field = None
+        self.order_desc = False
+        self.limit_count = None
         self.insert_payload = None
         self.update_payload = None
 
@@ -26,8 +28,13 @@ class FakeQuery:
         self.filters.append((field, value))
         return self
 
-    def order(self, field):
+    def order(self, field, desc=False):
         self.order_field = field
+        self.order_desc = bool(desc)
+        return self
+
+    def limit(self, count):
+        self.limit_count = int(count)
         return self
 
     def insert(self, payload):
@@ -81,8 +88,12 @@ class FakeQuery:
                 key=lambda row: (
                     row.get(self.order_field) is None,
                     row.get(self.order_field),
-                )
+                ),
+                reverse=self.order_desc,
             )
+
+        if self.limit_count is not None:
+            result = result[:self.limit_count]
 
         return Result(result)
 

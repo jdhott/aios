@@ -115,6 +115,7 @@ def generate_project_work(
     completed_work: list[str] | None = None,
     open_work: list[str] | None = None,
     completed_activation_steps: list[str] | None = None,
+    proposal_feedback: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """
     Propose genuine executable project work.
@@ -151,6 +152,36 @@ def generate_project_work(
         for item in (completed_activation_steps or [])
         if str(item).strip()
     ]
+
+    proposal_feedback = [
+        {
+            "title": str(item.get("title") or "").strip(),
+            "feedback": str(item.get("feedback") or "").strip(),
+        }
+        for item in (proposal_feedback or [])
+        if str(item.get("feedback") or "").strip()
+    ]
+
+    feedback_text = "\n".join(
+        f"- Previous proposal: {item['title']}\n"
+        f"  User feedback: {item['feedback']}"
+        for item in proposal_feedback
+    ) or "(No previous proposal feedback.)"
+
+    latest_feedback = (
+        proposal_feedback[0]
+        if proposal_feedback
+        else None
+    )
+
+    latest_feedback_text = (
+        (
+            f"Rejected proposal:\n{latest_feedback['title']}\n\n"
+            f"User correction:\n{latest_feedback['feedback']}"
+        )
+        if latest_feedback
+        else "(No current correction.)"
+    )
 
     def format_items(items: list[str], empty_text: str) -> str:
         if not items:
@@ -204,6 +235,12 @@ Current open project work:
 Completed activation history:
 {activation_text}
 
+Most recent rejected proposal and binding correction:
+{latest_feedback_text}
+
+Earlier proposal feedback:
+{feedback_text}
+
 Determine whether there is useful project work that can actually be done now.
 
 Return JSON only in exactly one of these forms:
@@ -216,6 +253,11 @@ or
 
 Rules:
 - Treat the Known project context as authoritative facts, decisions, and constraints.
+- The most recent User correction is binding. The replacement must directly fix the specific problems the user identified.
+- Follow explicit instructions in the User correction literally, including scope, sequencing, required actions, forbidden actions, and wording/length constraints.
+- Do not preserve a rejected action by substituting a synonym or equivalent action. For example, if the user says not to distribute something yet, do not replace "distribute" with "send", "share", "circulate", "deliver", or an equivalent action.
+- Earlier proposal feedback should also be used to avoid repeating previously rejected approaches.
+- Proposal feedback is authoritative about the user's desired approach, but it is not automatically an authoritative project fact unless the Known project context also establishes that fact.
 - Do not propose work that contradicts the Known project context.
 - Do not invent missing requirements merely because they are common for this type of project.
 - Do not infer that a project needs common optional elements such as decorations, entertainment, catering, gifts, seating plans, themes, or supplies unless the Known project context supports them.
@@ -230,6 +272,8 @@ Rules:
 - Do not recreate the project anchor or restate the project outcome as a task.
 - Do not invent people, deadlines, places, preferences, decisions, or facts not provided.
 - Prefer 1 to 3 concrete project tasks.
+- Every proposed task title must be 75 characters or fewer, including spaces.
+- Prefer direct task wording. Do not pack explanation, rationale, or later steps into the title.
 - These should be meaningful tasks that could later become a Best Next Action.
 - Do not break tasks down into 5–15 minute starting moves; JDI activation is handled elsewhere.
 - If nothing useful can currently be done, return state "waiting" with an empty tasks array.
@@ -271,6 +315,11 @@ Rules:
                 completed_work
                 + open_work
                 + completed_activation_steps
+                + [
+                    item["title"]
+                    for item in proposal_feedback
+                    if item["title"]
+                ]
                 + ([project_anchor_title] if project_anchor_title else [])
             )
         }
@@ -284,6 +333,13 @@ Rules:
 
             title = str(item.get("title") or "").strip()
             if not title:
+                continue
+
+            if len(title) > 75:
+                print(
+                    "[Project Work] Rejected generated title over "
+                    f"75 characters: {title}"
+                )
                 continue
 
             normalized = " ".join(title.lower().split())
@@ -313,6 +369,7 @@ Rules:
             completed_work=completed_work,
             open_work=open_work,
             completed_activation_steps=completed_activation_steps,
+            proposal_feedback=proposal_feedback,
             candidates=tasks,
         )
 
@@ -346,6 +403,7 @@ def validate_project_work_candidates(
     completed_work: list[str] | None,
     open_work: list[str] | None,
     completed_activation_steps: list[str] | None,
+    proposal_feedback: list[dict[str, Any]] | None = None,
     candidates: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     """
@@ -374,6 +432,36 @@ def validate_project_work_candidates(
         for item in (completed_activation_steps or [])
         if str(item).strip()
     ]
+
+    proposal_feedback = [
+        {
+            "title": str(item.get("title") or "").strip(),
+            "feedback": str(item.get("feedback") or "").strip(),
+        }
+        for item in (proposal_feedback or [])
+        if str(item.get("feedback") or "").strip()
+    ]
+
+    feedback_text = "\n".join(
+        f"- Previous proposal: {item['title']}\n"
+        f"  User feedback: {item['feedback']}"
+        for item in proposal_feedback
+    ) or "(none)"
+
+    latest_feedback = (
+        proposal_feedback[0]
+        if proposal_feedback
+        else None
+    )
+
+    latest_feedback_text = (
+        (
+            f"Rejected proposal:\n{latest_feedback['title']}\n\n"
+            f"User correction:\n{latest_feedback['feedback']}"
+        )
+        if latest_feedback
+        else "(none)"
+    )
 
     candidate_lines = "\n".join(
         f"C{index}: {item['title']}"
@@ -408,6 +496,12 @@ Authoritative known project context:
 Known task/work history:
 {history}
 
+Most recent rejected proposal and binding correction:
+{latest_feedback_text}
+
+Earlier proposal feedback:
+{feedback_text}
+
 Candidate tasks:
 {candidate_lines}
 
@@ -415,7 +509,11 @@ Return JSON only:
 {{"approved":["C1"],"rejected":[{{"id":"C2","reason":"..."}}]}}
 
 STRICT RULES:
-- Approve a task only when the known context or history provides sufficient factual basis for doing it.
+- Approve a task only when the known context, history, or explicit user proposal feedback provides sufficient basis for doing it.
+- The most recent User correction is binding. Reject any candidate that violates or only partially follows it.
+- Reject synonym workarounds that preserve an action the user explicitly rejected.
+- Reject any candidate title longer than 75 characters.
+- User proposal feedback may establish the preferred approach to the work, but do not treat unsupported factual details within it as durable project facts.
 - Common or conventional activities for this type of project are NOT evidence.
 - Reject tasks that introduce unsupported assumptions, requirements, preferences, or optional elements.
 - Reject tasks requiring information that is still unresolved or pending.

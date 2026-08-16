@@ -7,6 +7,7 @@ from aios.focus_activation import (
 )
 from aios.project_work import generate_project_work
 from aios.project_work_proposals import (
+    list_project_work_feedback,
     replace_project_work_proposals,
 )
 from aios.storage.supabase_store import SupabaseStore
@@ -118,6 +119,12 @@ def refresh_project_work_proposals(
             and str(row.get("title") or "").strip()
         ]
 
+        proposal_feedback = list_project_work_feedback(
+            store,
+            project_id,
+            limit=5,
+        )
+
         generated = generate_project_work(
             client,
             project_name=project_name,
@@ -128,6 +135,7 @@ def refresh_project_work_proposals(
             completed_work=completed_work,
             open_work=open_work,
             completed_activation_steps=completed_activation_steps,
+            proposal_feedback=proposal_feedback,
         )
 
         titles: list[str] = []
