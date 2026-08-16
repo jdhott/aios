@@ -6926,6 +6926,8 @@ def create_inactive_project_stub_datastore(
     project_name,
     existing_projects=None,
     source_reason="",
+    possible_existing_project=None,
+    possible_existing_project_confidence=None,
 ):
     """
     Datastore-aware project-stub creation.
@@ -6943,6 +6945,8 @@ def create_inactive_project_stub_datastore(
                 project_name,
                 existing_projects,
                 source_reason,
+                possible_existing_project,
+                possible_existing_project_confidence,
             )
         )
 
@@ -6964,6 +6968,8 @@ def create_inactive_project_stub_datastore(
                 project_name,
                 existing_projects,
                 source_reason,
+                possible_existing_project,
+                possible_existing_project_confidence,
             )
         )
 
@@ -6981,12 +6987,28 @@ def create_inactive_project_stub_datastore(
     if existing:
         return existing
 
+    possible_existing_project_id = None
+
+    if possible_existing_project:
+        # Supabase project payloads retain a legacy-shaped `id`,
+        # but `_supabase_id` is always the canonical native UUID.
+        possible_existing_project_id = str(
+            possible_existing_project.get("_supabase_id")
+            or ""
+        ).strip() or None
+
     project = create_supabase_project(
         project_name=project_name,
         status_value=(
             project_helpers.PROJECT_STUB_STATUS_VALUE
         ),
         source_reason=source_reason,
+        possible_existing_project_id=(
+            possible_existing_project_id
+        ),
+        possible_existing_project_confidence=(
+            possible_existing_project_confidence
+        ),
     )
 
     # A relation writer may already be instantiated in this process.

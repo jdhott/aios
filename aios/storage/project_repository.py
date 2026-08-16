@@ -37,6 +37,12 @@ class ProjectRepository:
             status=row.get("status"),
             is_active=row.get("is_active", False),
             context=row.get("context"),
+            possible_existing_project_id=row.get(
+                "possible_existing_project_id"
+            ),
+            possible_existing_project_confidence=row.get(
+                "possible_existing_project_confidence"
+            ),
             legacy_metadata=(
                 row.get("legacy_metadata")
                 or {}

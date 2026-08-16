@@ -612,7 +612,14 @@ def _project_review_reasons(
         and not task.get("is_just_do_it")
     ]
 
-    if inactive and open_tasks:
+    # Someday + inactive is the normal staging state for an emerged
+    # project awaiting an explicit activation decision.
+    awaiting_activation = (
+        status == "someday"
+        and project.get("is_active") is False
+    )
+
+    if inactive and open_tasks and not awaiting_activation:
         reasons.append("inactive_with_open_work")
 
     if unresolved_proxy_tasks:
@@ -651,6 +658,18 @@ def list_projects_http() -> dict:
     counts = {}
     tasks_by_project: dict[str, list[dict]] = {}
 
+    projects_by_id = {
+        str(project.get("id") or ""): project
+        for project in projects
+        if project.get("id")
+    }
+
+    projects_by_id = {
+        str(project.get("id") or ""): project
+        for project in projects
+        if project.get("id")
+    }
+
     for task in open_tasks:
         project_id = task.get("project_id")
         if not project_id:
@@ -673,13 +692,39 @@ def list_projects_http() -> dict:
             tasks_by_project.get(project_id, []),
         )
 
+        possible_existing_project_id = (
+            project.get("possible_existing_project_id")
+        )
+
+        possible_existing_project = (
+            projects_by_id.get(
+                str(possible_existing_project_id or "")
+            )
+            if possible_existing_project_id
+            else None
+        )
+
         active.append({
             "id": project_id,
             "name": _project_display_name(project),
             "status": project.get("status"),
+            "is_active": bool(project.get("is_active", False)),
             "open_task_count": open_count,
             "review_needed": bool(review_reasons),
             "review_reasons": review_reasons,
+            "possible_existing_project_id": (
+                possible_existing_project_id
+            ),
+            "possible_existing_project_name": (
+                _project_display_name(possible_existing_project)
+                if possible_existing_project
+                else None
+            ),
+            "possible_existing_project_confidence": (
+                project.get(
+                    "possible_existing_project_confidence"
+                )
+            ),
         })
 
     active.sort(
@@ -691,6 +736,151 @@ def list_projects_http() -> dict:
 
     return {"count": len(active), "projects": active}
 
+
+
+
+@app.post(
+    "/projects/{project_id}/use-existing-project",
+    tags=["projects"],
+)
+def use_existing_project_http(project_id: str) -> dict:
+    store = _store()
+
+    rows = (
+        store.client
+        .table("projects")
+        .select(
+            "id,name,status,is_active,"
+            "possible_existing_project_id"
+        )
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Suggested project not found",
+        )
+
+    source_project = dict(rows[0])
+
+    target_id = str(
+        source_project.get("possible_existing_project_id")
+        or ""
+    ).strip()
+
+    if not target_id:
+        raise HTTPException(
+            status_code=409,
+            detail="No possible existing project is recorded",
+        )
+
+    target_rows = (
+        store.client
+        .table("projects")
+        .select("id,name,status,is_active")
+        .eq("id", target_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not target_rows:
+        raise HTTPException(
+            status_code=409,
+            detail="Possible existing project no longer exists",
+        )
+
+    target = dict(target_rows[0])
+
+    if not target.get("is_active"):
+        raise HTTPException(
+            status_code=409,
+            detail="Possible existing project is no longer active",
+        )
+
+    target_name = str(target.get("name") or "").strip()
+
+    task_rows = (
+        store.client
+        .table("tasks")
+        .select("id,title,project_id")
+        .eq("project_id", project_id)
+        .execute()
+        .data
+        or []
+    )
+
+    moved = 0
+
+    for task in task_rows:
+        response = (
+            store.client
+            .table("tasks")
+            .update({
+                "project_id": target_id,
+                "suggested_project": target_name,
+            })
+            .eq("id", task["id"])
+            .eq("project_id", project_id)
+            .execute()
+        )
+
+        if response.data or []:
+            moved += 1
+
+    (
+        store.client
+        .table("projects")
+        .update({
+            "status": "Archived",
+            "is_active": False,
+            "possible_existing_project_id": None,
+            "possible_existing_project_confidence": None,
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
+    return {
+        "merged": True,
+        "moved_tasks": moved,
+        "target_project_id": target_id,
+        "target_project_name": target_name,
+    }
+
+
+@app.post(
+    "/projects/{project_id}/keep-separate",
+    tags=["projects"],
+)
+def keep_project_separate_http(project_id: str) -> dict:
+    response = (
+        _store().client
+        .table("projects")
+        .update({
+            "possible_existing_project_id": None,
+            "possible_existing_project_confidence": None,
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if not (response.data or []):
+        raise HTTPException(
+            status_code=404,
+            detail="Suggested project not found",
+        )
+
+    return {
+        "kept_separate": True,
+        "project": dict(response.data[0]),
+    }
 
 
 @app.post("/projects/{project_id}/activate", tags=["projects"])

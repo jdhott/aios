@@ -666,14 +666,44 @@ def _project_work_action(
     return dict(response.json() or {})
 
 
+def _project_lifecycle_action(
+    project_id: str,
+    action: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/projects/{project_id}/{action}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _projects_page(projects: list[dict], error: str = "") -> str:
+    suggested_projects = [
+        project for project in projects
+        if not project.get("review_needed")
+        and not project.get("is_active")
+        and str(project.get("status") or "").strip().lower() == "someday"
+    ]
+
     review_projects = [
         project for project in projects
         if project.get("review_needed")
     ]
-    normal_projects = [
+
+    active_projects = [
         project for project in projects
         if not project.get("review_needed")
+        and project.get("is_active")
     ]
 
     reason_labels = {
@@ -682,7 +712,12 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
         "no_executable_tasks": "No other executable project tasks are available",
     }
 
-    def render_cards(items: list[dict], review: bool = False) -> str:
+    def render_cards(
+        items: list[dict],
+        *,
+        review: bool = False,
+        suggested: bool = False,
+    ) -> str:
         cards = ""
 
         for project in items:
@@ -702,6 +737,7 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
                     reason_labels.get(reason, reason.replace("_", " ").title())
                     for reason in (project.get("review_reasons") or [])
                 ]
+
                 if reasons:
                     review_html = (
                         '<ul class="review-reasons">'
@@ -712,25 +748,123 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
                         + "</ul>"
                     )
 
+            possible_match_html = ""
+
+            if suggested:
+                possible_name = str(
+                    project.get(
+                        "possible_existing_project_name"
+                    )
+                    or ""
+                ).strip()
+
+                possible_confidence = project.get(
+                    "possible_existing_project_confidence"
+                )
+
+                if (
+                    possible_name
+                    and possible_confidence is not None
+                ):
+                    try:
+                        confidence_percent = round(
+                            float(possible_confidence) * 100
+                        )
+                    except (TypeError, ValueError):
+                        confidence_percent = None
+
+                    confidence_text = (
+                        f" · {confidence_percent}% match"
+                        if confidence_percent is not None
+                        else ""
+                    )
+
+                    possible_match_html = (
+                        '<div class="possible-match">'
+                        '<div class="possible-match-label">'
+                        'Possible existing project'
+                        '</div>'
+                        '<div class="possible-match-name">'
+                        f'{html.escape(possible_name)}'
+                        f'{html.escape(confidence_text)}'
+                        '</div>'
+                        '<div class="possible-match-actions">'
+                        f'<form method="post" '
+                        f'action="/projects/{project_id}/use-existing-project">'
+                        '<button class="possible-match-use" type="submit">'
+                        'Use existing project'
+                        '</button>'
+                        '</form>'
+                        f'<form method="post" '
+                        f'action="/projects/{project_id}/keep-separate">'
+                        '<button class="possible-match-keep" type="submit">'
+                        'Keep separate'
+                        '</button>'
+                        '</form>'
+                        '</div>'
+                        '</div>'
+                    )
+
+            activate_html = ""
+
+            if suggested:
+                activate_html = (
+                    f'<form class="project-activate-form" method="post" '
+                    f'action="/projects/{project_id}/activate">'
+                    '<button class="project-activate" type="submit">'
+                    'Activate'
+                    '</button>'
+                    '</form>'
+                )
+
             cards += (
+                '<div class="project-card-wrap">'
                 f'<a class="project-card{" review-card" if review else ""}" '
                 f'href="/projects/{project_id}">'
-                f'<div><h2>{name}</h2>{status_html}{review_html}</div>'
+                f'<div><h2>{name}</h2>{status_html}{review_html}{possible_match_html}</div>'
                 f'<div class="project-count"><strong>{count}</strong>'
                 f'<span>open task{"s" if count != 1 else ""}</span></div>'
-                f'</a>'
+                '</a>'
+                + activate_html
+                + '</div>'
             )
 
         return cards
 
-    review_cards = render_cards(review_projects, review=True)
-    project_cards = render_cards(normal_projects)
+    suggested_cards = render_cards(
+        suggested_projects,
+        suggested=True,
+    )
+
+    review_cards = render_cards(
+        review_projects,
+        review=True,
+    )
+
+    active_cards = render_cards(
+        active_projects,
+    )
+
+    if not suggested_cards:
+        suggested_cards = (
+            '<div class="empty-state">'
+            'No suggested projects awaiting activation.'
+            '</div>'
+        )
 
     if not review_cards:
-        review_cards = '<div class="empty-state">No projects currently need review.</div>'
+        review_cards = (
+            '<div class="empty-state">'
+            'No projects currently need review.'
+            '</div>'
+        )
 
-    if not project_cards:
-        project_cards = '<div class="empty-state">No other projects with open tasks.</div>'
+    if not active_cards:
+        active_cards = (
+            '<div class="empty-state">'
+            'No active projects with open tasks.'
+            '</div>'
+        )
 
     notice = (
         '<div class="notice error">' + html.escape(error) + '</div>'
@@ -789,6 +923,72 @@ h1 {{
 .project-card:hover {{
   border-color:var(--navy); box-shadow:0 8px 24px rgba(38,65,85,.08);
 }}
+.project-card-wrap {{
+  display:grid;
+  gap:7px;
+}}
+.project-activate-form {{
+  display:flex;
+  justify-content:flex-end;
+  margin:0 4px 0 0;
+}}
+.project-activate {{
+  border:1px solid var(--navy);
+  border-radius:9px;
+  padding:7px 11px;
+  background:white;
+  color:var(--navy);
+  font:inherit;
+  font-size:.84rem;
+  font-weight:750;
+  cursor:pointer;
+}}
+.possible-match {{
+  margin-top:12px;
+  padding:11px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:#fff;
+}}
+.possible-match-label {{
+  color:var(--muted);
+  font-size:.78rem;
+  font-weight:750;
+}}
+.possible-match-name {{
+  margin-top:3px;
+  color:var(--ink);
+  font-size:.88rem;
+  font-weight:700;
+}}
+.possible-match-actions {{
+  display:flex;
+  gap:8px;
+  margin-top:9px;
+  flex-wrap:wrap;
+}}
+.possible-match-actions form {{
+  margin:0;
+}}
+.possible-match-use,
+.possible-match-keep {{
+  border-radius:8px;
+  padding:6px 10px;
+  font:inherit;
+  font-size:.8rem;
+  font-weight:750;
+  cursor:pointer;
+}}
+.possible-match-use {{
+  border:1px solid var(--navy);
+  background:var(--navy);
+  color:white;
+}}
+.possible-match-keep {{
+  border:1px solid var(--border);
+  background:white;
+  color:var(--navy);
+}}
 .review-card {{ background:var(--review); }}
 .project-card h2 {{ margin:0; color:var(--navy); font-size:1.08rem; }}
 .project-status {{
@@ -820,14 +1020,24 @@ h1 {{
   {notice}
 
   <section class="section">
+    <h2>Suggested Projects</h2>
+    <p class="section-note">
+      AIOS found these projects, but they are not active until you choose to activate them.
+    </p>
+    <div class="project-list">{suggested_cards}</div>
+  </section>
+
+  <section class="section">
     <h2>Needs Review</h2>
-    <p class="section-note">Projects where AIOS sees a mismatch between project state and current work.</p>
+    <p class="section-note">
+      Projects where AIOS sees a mismatch between project state and current work.
+    </p>
     <div class="project-list">{review_cards}</div>
   </section>
 
   <section class="section">
-    <h2>Projects</h2>
-    <div class="project-list">{project_cards}</div>
+    <h2>Active Projects</h2>
+    <div class="project-list">{active_cards}</div>
   </section>
 </main>
 </body>
@@ -2434,6 +2644,89 @@ def dismiss_project_work_web(
         print("[Project Work] Dismiss failed:", exc)
         return RedirectResponse(
             url=f"/projects/{project_id}?error=Proposal+could+not+be+dismissed.",
+            status_code=303,
+        )
+
+
+
+
+@app.post("/projects/{project_id}/use-existing-project")
+def use_existing_project_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _project_lifecycle_action(
+            project_id,
+            "use-existing-project",
+        )
+
+        return RedirectResponse(
+            url="/projects",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Project Review] Use existing project failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url="/projects?error=Project+could+not+be+merged.",
+            status_code=303,
+        )
+
+
+@app.post("/projects/{project_id}/keep-separate")
+def keep_project_separate_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _project_lifecycle_action(
+            project_id,
+            "keep-separate",
+        )
+
+        return RedirectResponse(
+            url="/projects",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Project Review] Keep separate failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url="/projects?error=Project+review+could+not+be+saved.",
+            status_code=303,
+        )
+
+
+@app.post("/projects/{project_id}/activate")
+def activate_project_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _project_lifecycle_action(
+            project_id,
+            "activate",
+        )
+
+        return RedirectResponse(
+            url="/projects",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print("[Project Activation] Activate failed:", exc)
+
+        return RedirectResponse(
+            url="/projects?error=Project+could+not+be+activated.",
             status_code=303,
         )
 

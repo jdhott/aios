@@ -65,6 +65,8 @@ class SupabaseProjectCreator:
         project_name: str,
         status_value: str,
         source_reason: str = "",
+        possible_existing_project_id: str | None = None,
+        possible_existing_project_confidence: float | None = None,
     ) -> dict[str, Any]:
         project_name = str(
             project_name or ""
@@ -83,6 +85,12 @@ class SupabaseProjectCreator:
                 "name": project_name,
                 "status": status_value,
                 "is_active": False,
+                "possible_existing_project_id": (
+                    possible_existing_project_id
+                ),
+                "possible_existing_project_confidence": (
+                    possible_existing_project_confidence
+                ),
             })
             .execute()
         )
@@ -140,6 +148,8 @@ def create_supabase_project(
     project_name: str,
     status_value: str,
     source_reason: str = "",
+    possible_existing_project_id: str | None = None,
+    possible_existing_project_confidence: float | None = None,
 ) -> dict[str, Any]:
     global _CREATOR
 

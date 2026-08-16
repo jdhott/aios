@@ -39,6 +39,7 @@ PROJECT_DISCOVERY_MIN_CONFIDENCE = float(os.getenv("PROJECT_DISCOVERY_MIN_CONFID
 PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS = int(os.getenv("PROJECT_DISCOVERY_MAX_REVIEW_PROJECTS", "5"))
 PROJECT_DISCOVERY_MAX_NEW_PER_RUN = int(os.getenv("PROJECT_DISCOVERY_MAX_NEW_PER_RUN", "5"))
 PROJECT_INCREMENTAL_AFFINITY_MIN_CONFIDENCE = float(os.getenv("PROJECT_INCREMENTAL_AFFINITY_MIN_CONFIDENCE", "0.82"))
+PROJECT_CLUSTER_REVIEW_MIN_CONFIDENCE = float(os.getenv("PROJECT_CLUSTER_REVIEW_MIN_CONFIDENCE", "0.75"))
 RUN_PROJECT_INCREMENTAL_AFFINITY = os.getenv("RUN_PROJECT_INCREMENTAL_AFFINITY", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 # ============================================================
@@ -3776,7 +3777,13 @@ def build_project_stub_properties(project_name, existing_projects=None):
     return properties
 
 
-def create_inactive_project_stub_if_missing(project_name, existing_projects=None, source_reason=""):
+def create_inactive_project_stub_if_missing(
+    project_name,
+    existing_projects=None,
+    source_reason="",
+    possible_existing_project=None,
+    possible_existing_project_confidence=None,
+):
     """Create a new inactive Projects DB row for a missing suggested project.
 
     This is intentionally separate from relation write-back. Newly-created
@@ -4088,6 +4095,184 @@ def apply_manual_project_intent(seed_task, project_name, open_tasks, all_project
     return updated_count
 
 
+def find_existing_project_cluster_match(
+    candidate_name,
+    candidate_titles,
+    project_contexts,
+    ai_client,
+):
+    """Return one strong ACTIVE project match for a fully emerged task cluster.
+
+    This is the final duplicate-project gate before AIOS creates a new
+    inactive project stub. Context-building stays outside this helper so the
+    semantic matcher does not depend on transitional runtime injection.
+    """
+    candidate_name = str(candidate_name or "").strip()
+
+    cluster_titles = []
+    seen = set()
+
+    for value in candidate_titles or []:
+        title = str(value or "").strip()
+        key = " ".join(title.lower().split())
+
+        if not title or not key or key in seen:
+            continue
+
+        seen.add(key)
+        cluster_titles.append(title)
+
+    contexts = [
+        context
+        for context in (project_contexts or [])
+        if context.get("active")
+        and str(context.get("project_name") or "").strip()
+    ]
+
+    if not candidate_name or not cluster_titles:
+        return None, 0.0, "No usable emerged project cluster.", False
+
+    if not contexts:
+        return None, 0.0, "No active project contexts available.", False
+
+    if ai_client is None:
+        return None, 0.0, "No AI client available for cluster affinity.", False
+
+    project_by_key = {}
+    project_lines = []
+
+    for index, context in enumerate(contexts, start=1):
+        key = f"P{index:03d}"
+        project_by_key[key] = context
+
+        members = "; ".join(
+            context.get("member_titles") or []
+        ) or "(no current open members)"
+
+        project_lines.append(
+            f"{key} | {context['project_name']} | "
+            f"current tasks: {members}"
+        )
+
+    cluster_text = "\n".join(
+        f"- {title}"
+        for title in cluster_titles[:25]
+    )
+
+    prompt = f"""Determine whether an EMERGED PROJECT CLUSTER is actually part of
+an EXISTING ACTIVE project.
+
+Return ONLY raw JSON:
+
+{{
+  "match": {{
+    "project_key": "P001",
+    "confidence": 0.0,
+    "reason": "..."
+  }}
+}}
+
+or:
+
+{{"match": null}}
+
+Rules:
+- Existing active projects have priority over creating a duplicate new project.
+- Evaluate the candidate using BOTH its proposed project name and the collective meaning of its task cluster.
+- Evaluate existing projects using BOTH their names and their current member tasks.
+- Match only when both represent substantially the same outcome, responsibility, or coordinated body of work.
+- Shared vocabulary or broad topic similarity alone are not enough.
+- A narrower implementation-oriented cluster may belong to a broader active project when its tasks clearly advance that same project.
+- Do not force a match when the projects could reasonably remain distinct.
+- When uncertain, return null.
+
+EMERGED PROJECT:
+{candidate_name}
+
+CLUSTER TASKS:
+{cluster_text}
+
+EXISTING ACTIVE PROJECTS:
+{chr(10).join(project_lines)}
+"""
+
+    try:
+        response = ai_client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+        )
+        data = parse_json_object(
+            getattr(response, "output_text", "") or ""
+        )
+    except Exception as exc:
+        print(
+            "[PROJECT CLUSTER AFFINITY] AI error:",
+            exc,
+        )
+        return None, 0.0, "Cluster affinity AI call failed.", False
+
+    match = data.get("match")
+
+    if not isinstance(match, dict):
+        return None, 0.0, "No strong existing-project cluster match.", False
+
+    project_key = match.get("project_key")
+
+    if project_key not in project_by_key:
+        return None, 0.0, "Cluster affinity returned an unknown project.", False
+
+    try:
+        confidence = float(
+            match.get("confidence") or 0.0
+        )
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    threshold = globals().get(
+        "PROJECT_CLUSTER_AFFINITY_MIN_CONFIDENCE",
+        0.88,
+    )
+
+    context = project_by_key[project_key]
+    project = context["project"]
+    project_name = context["project_name"]
+
+    print(
+        "[PROJECT CLUSTER AFFINITY] "
+        f"{candidate_name} → {project_name} "
+        f"({confidence:.2f})"
+    )
+
+    if confidence < threshold:
+        return (
+            project,
+            confidence,
+            "Best cluster match below confidence threshold: "
+            f"{project_name} ({confidence:.2f}).",
+            False,
+        )
+
+    reason = str(
+        match.get("reason") or ""
+    ).strip()
+
+    print(
+        "[PROJECT CLUSTER AFFINITY] "
+        f"Reusing ACTIVE project: {project_name}"
+    )
+
+    return (
+        project,
+        confidence,
+        (
+            f"Matched emerged cluster to existing ACTIVE project "
+            f"{project_name!r} ({confidence:.2f}). "
+            f"{reason}"
+        ).strip(),
+        True,
+    )
+
+
 def apply_project_candidate_writeback(seed_task, result, open_tasks, all_projects, active_projects):
     """Apply Suggested Project and, when safe, the real Project relation.
 
@@ -4098,29 +4283,6 @@ def apply_project_candidate_writeback(seed_task, result, open_tasks, all_project
     if not suggested_project:
         return 0
 
-    existing_project = find_project_by_name(suggested_project, all_projects)
-    project, score, reason = find_existing_project_match(suggested_project, active_projects)
-    review_project = None
-
-    if not project and existing_project:
-        existing_status = get_project_status_name(existing_project)
-        reason = f"Suggested project already exists but is not active: Status={existing_status!r}."
-        review_project = existing_project
-    elif not project and not existing_project:
-        review_project = create_inactive_project_stub_if_missing(
-            suggested_project,
-            existing_projects=all_projects,
-            source_reason=reason,
-        )
-        if review_project:
-            all_projects.append(review_project)
-
-    tasks_by_title = {}
-    for task in [seed_task] + list(open_tasks or []):
-        title = get_title(task)
-        if title:
-            tasks_by_title.setdefault(title, task)
-
     candidate_titles = [get_title(seed_task)]
     candidate_titles.extend(result.get("related_titles") or [])
     candidate_titles.extend(
@@ -4128,6 +4290,94 @@ def apply_project_candidate_writeback(seed_task, result, open_tasks, all_project
         for item in (result.get("expanded_related_titles") or [])
         if item.get("title")
     )
+
+    possible_existing_project = None
+    possible_existing_project_confidence = None
+
+    existing_project = find_project_by_name(
+        suggested_project,
+        all_projects,
+    )
+
+    project, score, reason = find_existing_project_match(
+        suggested_project,
+        active_projects,
+    )
+
+    # Individual task affinity already ran before project emergence.
+    # If the completed cluster still appears to imply a new project, give the
+    # cluster as a whole one final chance to match an existing active project.
+    if not project and not existing_project:
+        project_contexts = build_incremental_project_contexts(
+            all_projects,
+            open_tasks,
+        )
+
+        (
+            cluster_project,
+            cluster_score,
+            cluster_reason,
+            auto_match,
+        ) = find_existing_project_cluster_match(
+            suggested_project,
+            candidate_titles,
+            project_contexts,
+            client,
+        )
+
+        review_band_min = globals().get(
+            "PROJECT_CLUSTER_REVIEW_MIN_CONFIDENCE",
+            0.75,
+        )
+
+        if auto_match and cluster_project:
+            project = cluster_project
+            score = cluster_score
+            reason = cluster_reason
+
+            # Canonicalize Suggested Project metadata to the existing project
+            # rather than preserving the duplicate emerged-project name.
+            suggested_project = get_title(project)
+
+        elif (
+            cluster_project
+            and cluster_score >= review_band_min
+        ):
+            possible_existing_project = cluster_project
+            possible_existing_project_confidence = cluster_score
+            reason = cluster_reason
+
+    review_project = None
+
+    if not project and existing_project:
+        existing_status = get_project_status_name(existing_project)
+        reason = (
+            "Suggested project already exists but is not active: "
+            f"Status={existing_status!r}."
+        )
+        review_project = existing_project
+
+    elif not project and not existing_project:
+        review_project = create_inactive_project_stub_if_missing(
+            suggested_project,
+            existing_projects=all_projects,
+            source_reason=reason,
+            possible_existing_project=possible_existing_project,
+            possible_existing_project_confidence=(
+                possible_existing_project_confidence
+            ),
+        )
+
+        if review_project:
+            all_projects.append(review_project)
+
+    tasks_by_title = {}
+
+    for task in [seed_task] + list(open_tasks or []):
+        title = get_title(task)
+
+        if title:
+            tasks_by_title.setdefault(title, task)
 
     seen_titles = set()
     updated_count = 0
