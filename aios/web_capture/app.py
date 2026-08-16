@@ -590,6 +590,53 @@ def _fetch_project_detail(project_id: str) -> dict:
     return dict(response.json() or {})
 
 
+def _update_project_context(
+    project_id: str,
+    context: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.patch(
+        f"{api_url}/projects/{project_id}/context",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={"context": context},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _project_work_action(
+    project_id: str,
+    proposal_id: str,
+    action: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/projects/{project_id}/work-proposals/{proposal_id}/{action}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _projects_page(projects: list[dict], error: str = "") -> str:
     review_projects = [
         project for project in projects
@@ -761,8 +808,11 @@ h1 {{
 def _project_detail_page(payload: dict) -> str:
     project = dict(payload.get("project") or {})
     tasks = list(payload.get("tasks") or [])
+    work_proposals = list(payload.get("work_proposals") or [])
 
     name = html.escape(str(project.get("name") or "Untitled Project"))
+    project_id = html.escape(str(project.get("id") or ""))
+    context = html.escape(str(project.get("context") or ""))
     count = int(project.get("open_task_count") or 0)
     status = str(project.get("status") or "").strip()
 
@@ -803,6 +853,32 @@ def _project_detail_page(payload: dict) -> str:
 
     if not task_rows:
         task_rows = '<div class="empty-state">No open tasks in this project.</div>'
+
+    proposal_rows = ""
+
+    for proposal in work_proposals:
+        proposal_id = html.escape(
+            str(proposal.get("id") or "")
+        )
+        proposal_title = html.escape(
+            str(proposal.get("title") or "Untitled proposal")
+        )
+
+        proposal_rows += (
+            '<div class="proposal-row">'
+            '<div class="proposal-title">'
+            f'{proposal_title}'
+            '</div>'
+            '<div class="proposal-actions">'
+            f'<form method="post" action="/projects/{project_id}/work-proposals/{proposal_id}/accept">'
+            '<button class="proposal-accept" type="submit">Accept</button>'
+            '</form>'
+            f'<form method="post" action="/projects/{project_id}/work-proposals/{proposal_id}/dismiss">'
+            '<button class="proposal-dismiss" type="submit">Dismiss</button>'
+            '</form>'
+            '</div>'
+            '</div>'
+        )
 
     status_html = (
         f'<span class="status">{html.escape(status)}</span>'
@@ -861,6 +937,69 @@ h1 {{
 }}
 .chevron {{ color:var(--muted); font-size:1.6rem; }}
 .empty-state {{ padding:24px; color:var(--muted); }}
+.context-card {{
+  margin:0 0 22px; padding:18px;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:16px;
+}}
+.context-card h2 {{
+  margin:0 0 6px; color:var(--navy); font-size:1rem;
+}}
+.context-note {{
+  margin:0 0 12px; color:var(--muted);
+  font-size:.84rem; line-height:1.4;
+}}
+.context-card textarea {{
+  width:100%; min-height:130px; resize:vertical;
+  padding:12px 13px; border:1px solid var(--border);
+  border-radius:10px; font:inherit; line-height:1.45;
+  color:var(--ink); background:#fff;
+}}
+.context-actions {{
+  display:flex; justify-content:flex-end;
+  margin-top:10px;
+}}
+.context-save {{
+  border:0; border-radius:10px;
+  padding:9px 14px; background:var(--navy); color:white;
+  font:inherit; font-weight:750; cursor:pointer;
+}}
+.context-save:hover {{ opacity:.92; }}
+.proposal-card {{
+  margin:0 0 22px; padding:18px;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:16px;
+}}
+.proposal-card h2 {{
+  margin:0 0 6px; color:var(--navy); font-size:1rem;
+}}
+.proposal-note {{
+  margin:0 0 12px; color:var(--muted);
+  font-size:.84rem; line-height:1.4;
+}}
+.proposal-row {{
+  display:flex; justify-content:space-between; align-items:center;
+  gap:16px; padding:12px 0; border-top:1px solid var(--border);
+}}
+.proposal-title {{
+  font-weight:700; line-height:1.4;
+}}
+.proposal-actions {{
+  display:flex; gap:8px; flex:0 0 auto;
+}}
+.proposal-actions form {{ margin:0; }}
+.proposal-accept,
+.proposal-dismiss {{
+  border-radius:9px; padding:7px 11px;
+  font:inherit; font-size:.84rem; font-weight:750;
+  cursor:pointer;
+}}
+.proposal-accept {{
+  border:0; background:var(--navy); color:white;
+}}
+.proposal-dismiss {{
+  border:1px solid var(--border); background:white; color:var(--muted);
+}}
 </style>
 </head>
 <body>
@@ -874,6 +1013,35 @@ h1 {{
       {status_html}
     </div>
   </div>
+
+  <section class="context-card">
+    <h2>Project context</h2>
+    <p class="context-note">
+      Durable facts, decisions, and constraints AIOS should use when reasoning about this project.
+    </p>
+    <form method="post" action="/projects/{project_id}/context">
+      <textarea name="context" placeholder="Add project facts, decisions, constraints, dates, people, or other useful context.">{context}</textarea>
+      <div class="context-actions">
+        <button class="context-save" type="submit">Save context</button>
+      </div>
+    </form>
+  </section>
+
+  {
+      (
+          '<section class="proposal-card">'
+          '<h2>Proposed project work</h2>'
+          '<p class="proposal-note">'
+          'AIOS found grounded work that could move this project forward. '
+          'Review it before creating a real task.'
+          '</p>'
+          + proposal_rows
+          + '</section>'
+      )
+      if proposal_rows
+      else ''
+  }
+
   <div class="task-list">{task_rows}</div>
 </main>
 </body>
@@ -1913,6 +2081,83 @@ def projects_web(
         return HTMLResponse(
             _projects_page([], error="Projects could not be loaded."),
             status_code=200,
+        )
+
+
+
+@app.post("/projects/{project_id}/context")
+def update_project_context_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    context: Annotated[str, Form()] = "",
+):
+    try:
+        _update_project_context(
+            project_id,
+            context.strip(),
+        )
+        return RedirectResponse(
+            url=f"/projects/{project_id}?message=Project+context+saved.",
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Context] Update failed:", exc)
+        return RedirectResponse(
+            url=f"/projects/{project_id}?error=Project+context+could+not+be+saved.",
+            status_code=303,
+        )
+
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/accept"
+)
+def accept_project_work_web(
+    project_id: str,
+    proposal_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _project_work_action(
+            project_id,
+            proposal_id,
+            "accept",
+        )
+        return RedirectResponse(
+            url=f"/projects/{project_id}?message=Project+task+created.",
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Work] Accept failed:", exc)
+        return RedirectResponse(
+            url=f"/projects/{project_id}?error=Project+task+could+not+be+created.",
+            status_code=303,
+        )
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/dismiss"
+)
+def dismiss_project_work_web(
+    project_id: str,
+    proposal_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _project_work_action(
+            project_id,
+            proposal_id,
+            "dismiss",
+        )
+        return RedirectResponse(
+            url=f"/projects/{project_id}?message=Proposal+dismissed.",
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Work] Dismiss failed:", exc)
+        return RedirectResponse(
+            url=f"/projects/{project_id}?error=Proposal+could+not+be+dismissed.",
+            status_code=303,
         )
 
 

@@ -67,6 +67,9 @@ print("__file__ =", __file__)
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
 from aios.storage.supabase_store import SupabaseStore as _FocusSupabaseStore
+from aios.project_work_processor import (
+    refresh_project_work_proposals,
+)
 from aios.focus_guidance import ensure_focus_guidance
 from aios.focus_activation import ensure_next_focus_activation
 AIOS_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
@@ -7668,6 +7671,28 @@ else:
                 print(f"[Focus Guidance] Non-fatal generation failure: {focus_exc}")
     except Exception as e:
         print(f"Execution Engine V2 failure: {e}")
+
+    # Project cognition is separate from execution ranking. Active projects
+    # with no normal executable work may receive grounded, review-only
+    # project-work proposals. This pass never creates real tasks.
+    if AIOS_DATASTORE == "supabase":
+        try:
+            _project_work_store = _FocusSupabaseStore()
+
+            _project_work_results = refresh_project_work_proposals(
+                _project_work_store,
+                client,
+            )
+
+            print(
+                "[Project Work] Proposal refresh complete: "
+                f"{len(_project_work_results)} project(s) evaluated"
+            )
+        except Exception as project_work_exc:
+            print(
+                "[Project Work] Non-fatal proposal refresh failure: "
+                f"{project_work_exc}"
+            )
 
     if RUN_TASK_CREATION_PIPELINE:
         if execution_engine_success:

@@ -29,6 +29,11 @@ from aios.ingestion.capture_metadata import parse_capture_metadata
 from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.project_work import create_supabase_project_task
+from aios.project_work_proposals import (
+    accept_project_work_proposal,
+    dismiss_project_work_proposal,
+)
 from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 from aios.text_utils import normalize
 from aios.processing.trigger_coordinator import (
@@ -438,6 +443,10 @@ def delete_task_http(task_id: str) -> dict:
 
 
 
+class ProjectContextUpdate(BaseModel):
+    context: str | None = None
+
+
 class TaskDetailUpdate(BaseModel):
     title: str | None = None
     due_at: str | None = None
@@ -578,23 +587,26 @@ def _project_review_reasons(
         or project.get("is_active") is False
     )
 
-    proxy_tasks = [
+    unresolved_proxy_tasks = [
         task
         for task in open_tasks
         if project_key
         and normalize(str(task.get("title") or "")) == project_key
+        and task.get("task_role") != "project_anchor"
     ]
 
     executable_tasks = [
         task
         for task in open_tasks
-        if task not in proxy_tasks
+        if task.get("task_role") != "project_anchor"
+        and task.get("generated_source") != "focus_activation"
+        and not task.get("is_just_do_it")
     ]
 
     if inactive and open_tasks:
         reasons.append("inactive_with_open_work")
 
-    if proxy_tasks:
+    if unresolved_proxy_tasks:
         reasons.append("project_proxy_task")
 
     if open_tasks and not executable_tasks:
@@ -617,7 +629,7 @@ def list_projects_http() -> dict:
         _store().client.table("tasks")
         .select(
             "id,title,project_id,is_open,is_done,is_archived,"
-            "is_just_do_it,parent_task_id,generated_source"
+            "is_just_do_it,parent_task_id,generated_source,task_role"
         )
         .eq("is_open", True)
         .eq("is_done", False)
@@ -689,6 +701,157 @@ def activate_project_http(project_id: str) -> dict:
     return {
         "project": project,
         "activated": True,
+    }
+
+
+
+@app.patch("/projects/{project_id}/context", tags=["projects"])
+def update_project_context_http(
+    project_id: str,
+    update: ProjectContextUpdate,
+) -> dict:
+    rows = (
+        _store().client
+        .table("projects")
+        .select("id,name,context")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found",
+        )
+
+    context = str(update.context or "").strip() or None
+
+    response = (
+        _store().client
+        .table("projects")
+        .update({
+            "context": context,
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
+    updated = response.data or []
+
+    if not updated:
+        raise HTTPException(
+            status_code=500,
+            detail="Project context update returned no row",
+        )
+
+    return {
+        "project": dict(updated[0]),
+        "updated": True,
+    }
+
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/dismiss",
+    tags=["projects"],
+)
+def dismiss_project_work_http(
+    project_id: str,
+    proposal_id: str,
+) -> dict:
+    try:
+        proposal = dismiss_project_work_proposal(
+            _store(),
+            proposal_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    if str(proposal.get("project_id") or "") != project_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Proposal does not belong to this project",
+        )
+
+    return {
+        "dismissed": True,
+        "proposal": proposal,
+    }
+
+
+@app.post(
+    "/projects/{project_id}/work-proposals/{proposal_id}/accept",
+    tags=["projects"],
+)
+def accept_project_work_http(
+    project_id: str,
+    proposal_id: str,
+) -> dict:
+    store = _store()
+
+    rows = (
+        store.client
+        .table("project_work_proposals")
+        .select("id,project_id,title,status")
+        .eq("id", proposal_id)
+        .eq("status", "proposed")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Project-work proposal not found",
+        )
+
+    proposal = dict(rows[0])
+
+    if str(proposal.get("project_id") or "") != project_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Proposal does not belong to this project",
+        )
+
+    task = create_supabase_project_task(
+        store,
+        title=str(proposal.get("title") or ""),
+        project_id=project_id,
+    )
+
+    try:
+        accepted = accept_project_work_proposal(
+            store,
+            proposal_id,
+        )
+    except Exception as exc:
+        # Do not silently report success if proposal state failed to advance.
+        # The task already exists, so surface the inconsistency for repair.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Task was created but proposal could not be marked accepted: "
+                f"{exc}"
+            ),
+        ) from exc
+
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+
+    return {
+        "accepted": True,
+        "proposal": accepted,
+        "task": task,
     }
 
 
@@ -765,14 +928,34 @@ def get_project_detail_http(project_id: str) -> dict:
 
     tasks.sort(key=sort_key)
 
+    proposals = (
+        _store().client
+        .table("project_work_proposals")
+        .select(
+            "id,project_id,title,status,"
+            "created_at,updated_at,accepted_at,dismissed_at"
+        )
+        .eq("project_id", project_id)
+        .eq("status", "proposed")
+        .order("created_at")
+        .execute()
+        .data
+        or []
+    )
+
     return {
         "project": {
             "id": project_row.get("id"),
             "name": _project_display_name(project_row),
             "status": project_row.get("status"),
+            "context": project_row.get("context"),
             "open_task_count": len(tasks),
         },
         "tasks": tasks,
+        "work_proposals": [
+            dict(row)
+            for row in proposals
+        ],
     }
 
 

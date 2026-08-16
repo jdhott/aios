@@ -9,35 +9,56 @@ class FakeResponse:
 
 
 class FakeResponses:
-    def __init__(self, data):
-        self.data = data
-        self.kwargs = None
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
 
     def create(self, **kwargs):
-        self.kwargs = kwargs
-        return FakeResponse(self.data)
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise RuntimeError("No fake response remaining")
+        return FakeResponse(self.responses.pop(0))
 
 
 class FakeClient:
-    def __init__(self, data):
-        self.responses = FakeResponses(data)
+    def __init__(self, responses):
+        self.responses = FakeResponses(responses)
 
 
-client = FakeClient({
-    "state": "actionable",
-    "tasks": [
-        {
-            "title": "Confirm the food plan for Mum's birthday party"
-        },
-        {
-            "title": "Choose decorations for Mum's birthday party"
-        },
-    ],
-})
+# ------------------------------------------------------------
+# Candidate generation + validation
+# ------------------------------------------------------------
+
+client = FakeClient([
+    {
+        "state": "actionable",
+        "tasks": [
+            {
+                "title": "Plan the potluck dinner menu"
+            },
+            {
+                "title": "Choose a party theme"
+            },
+        ],
+    },
+    {
+        "approved": ["C1"],
+        "rejected": [
+            {
+                "id": "C2",
+                "reason": "No known project context establishes a party theme."
+            }
+        ],
+    },
+])
 
 result = generate_project_work(
     client,
     project_name="Plan 90th Birthday Party for Mum",
+    project_context=(
+        "Small family-only gathering. Dinner is potluck. "
+        "Invitations have already been sent."
+    ),
     project_anchor_title="Plan 90th birthday party for Mum",
     completed_work=[],
     open_work=[],
@@ -47,78 +68,105 @@ result = generate_project_work(
     ],
 )
 
-assert result is not None
-assert result["state"] == "actionable"
-assert len(result["tasks"]) == 2
-
-prompt = client.responses.kwargs["input"]
-
-assert "Plan 90th Birthday Party for Mum" in prompt
-assert "Write a list of close family and friends to invite." in prompt
-assert "Draft a simple invitation message." in prompt
-assert "without waiting" in prompt
-assert "not tiny activation/JDI steps" in prompt
-
-print("Project context supplied: PASS")
-print("Completed activation history supplied: PASS")
-print("Executable-now constraint supplied: PASS")
-print("Project tasks parse: PASS")
-
-
-waiting_client = FakeClient({
-    "state": "waiting",
-    "tasks": [],
-})
-
-waiting = generate_project_work(
-    waiting_client,
-    project_name="Plan 90th Birthday Party for Mum",
-    project_anchor_title="Plan 90th birthday party for Mum",
-    completed_work=[],
-    open_work=[],
-    completed_activation_steps=[
-        "Send invitations to the guest list.",
+assert result == {
+    "state": "actionable",
+    "tasks": [
+        {
+            "title": "Plan the potluck dinner menu"
+        }
     ],
+}
+
+assert len(client.responses.calls) == 2
+
+generation_prompt = client.responses.calls[0]["input"]
+validation_prompt = client.responses.calls[1]["input"]
+
+assert "Small family-only gathering" in generation_prompt
+assert "Dinner is potluck" in generation_prompt
+assert "Treat the Known project context as authoritative" in generation_prompt
+
+assert "Plan the potluck dinner menu" in validation_prompt
+assert "Choose a party theme" in validation_prompt
+assert "When uncertain, REJECT" in validation_prompt
+
+print("Project context supplied to generator: PASS")
+print("Candidate generation parses: PASS")
+print("Grounding validation runs: PASS")
+print("Unsupported candidate filtered out: PASS")
+
+
+# ------------------------------------------------------------
+# No candidates survive validation -> waiting
+# ------------------------------------------------------------
+
+client = FakeClient([
+    {
+        "state": "actionable",
+        "tasks": [
+            {
+                "title": "Choose decorations for the party"
+            },
+        ],
+    },
+    {
+        "approved": [],
+        "rejected": [
+            {
+                "id": "C1",
+                "reason": "Decorations are not established by known context."
+            }
+        ],
+    },
+])
+
+result = generate_project_work(
+    client,
+    project_name="Plan 90th Birthday Party for Mum",
+    project_context=(
+        "Small family-only gathering. Dinner is potluck."
+    ),
+    project_anchor_title="Plan 90th birthday party for Mum",
 )
 
-assert waiting == {
+assert result == {
     "state": "waiting",
     "tasks": [],
 }
 
-print("Waiting state parses without creating work: PASS")
+print("Zero validated candidates becomes waiting: PASS")
 
 
-duplicate_client = FakeClient({
-    "state": "actionable",
-    "tasks": [
-        {
-            "title": "Draft a simple invitation message."
-        },
-        {
-            "title": "Confirm the cake plan"
-        },
-    ],
-})
+# ------------------------------------------------------------
+# Generator itself may decide project is waiting
+# ------------------------------------------------------------
 
-duplicate_result = generate_project_work(
-    duplicate_client,
+client = FakeClient([
+    {
+        "state": "waiting",
+        "tasks": [],
+    },
+])
+
+result = generate_project_work(
+    client,
     project_name="Plan 90th Birthday Party for Mum",
-    project_anchor_title="Plan 90th birthday party for Mum",
-    completed_work=[],
-    open_work=[],
-    completed_activation_steps=[
-        "Draft a simple invitation message.",
-    ],
+    project_context="Invitations sent. Waiting for RSVPs.",
 )
 
-assert duplicate_result is not None
-assert duplicate_result["tasks"] == [
-    {"title": "Confirm the cake plan"}
-]
+assert result == {
+    "state": "waiting",
+    "tasks": [],
+}
 
-print("Completed work duplicate rejected: PASS")
+assert len(client.responses.calls) == 1
 
+print("Generator waiting state avoids validation call: PASS")
+
+
+# ------------------------------------------------------------
+# Missing AI fails closed
+# ------------------------------------------------------------
 
 assert generate_project_work(
     None,
@@ -126,4 +174,8 @@ assert generate_project_work(
 ) is None
 
 print("Missing AI client fails closed: PASS")
-print("RESULT: PROJECT WORK GENERATION V1 SMOKE TEST PASSED")
+
+print(
+    "RESULT: PROJECT WORK GENERATION V1 "
+    "SMOKE TEST PASSED"
+)

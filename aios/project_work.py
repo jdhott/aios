@@ -110,6 +110,7 @@ def generate_project_work(
     client,
     *,
     project_name: str,
+    project_context: str | None = None,
     project_anchor_title: str | None = None,
     completed_work: list[str] | None = None,
     open_work: list[str] | None = None,
@@ -130,6 +131,7 @@ def generate_project_work(
         return None
 
     project_name = str(project_name or "").strip()
+    project_context = str(project_context or "").strip()
     project_anchor_title = str(project_anchor_title or "").strip()
 
     completed_work = [
@@ -187,6 +189,9 @@ def generate_project_work(
 Project:
 {project_name}
 
+Known project context:
+{project_context or "(No additional project context provided.)"}
+
 Project anchor / outcome:
 {project_anchor_title or "(No separate anchor provided.)"}
 
@@ -210,6 +215,13 @@ or
 {{"state":"waiting","tasks":[]}}
 
 Rules:
+- Treat the Known project context as authoritative facts, decisions, and constraints.
+- Do not propose work that contradicts the Known project context.
+- Do not invent missing requirements merely because they are common for this type of project.
+- Do not infer that a project needs common optional elements such as decorations, entertainment, catering, gifts, seating plans, themes, or supplies unless the Known project context supports them.
+- A task is executable now only if all information required to start and meaningfully advance it is already available. Do not propose work that depends on pending RSVPs, unknown preferences, final headcounts, future replies, or other unresolved information.
+- Prefer tasks that follow directly from known facts or unfinished decisions in the Known project context.
+- If the Known project context and work history do not establish enough remaining executable work, return a waiting state rather than inventing conventional project tasks.
 - Tasks must be genuine project tasks, not tiny activation/JDI steps.
 - Each proposed task must advance the project outcome.
 - Each task must be executable now without waiting for another person, reply, delivery, approval, future date, or external event.
@@ -289,11 +301,34 @@ Rules:
             })
 
         if not tasks:
-            return None
+            return {
+                "state": "waiting",
+                "tasks": [],
+            }
+
+        validated_tasks = validate_project_work_candidates(
+            client,
+            project_name=project_name,
+            project_context=project_context,
+            completed_work=completed_work,
+            open_work=open_work,
+            completed_activation_steps=completed_activation_steps,
+            candidates=tasks,
+        )
+
+        if not validated_tasks:
+            print(
+                "[Project Work] No generated candidates passed "
+                "grounding validation."
+            )
+            return {
+                "state": "waiting",
+                "tasks": [],
+            }
 
         return {
             "state": "actionable",
-            "tasks": tasks,
+            "tasks": validated_tasks,
         }
 
     except Exception as exc:
@@ -301,3 +336,127 @@ Rules:
             f"[Project Work] AI generation failed: {exc}"
         )
         return None
+
+
+def validate_project_work_candidates(
+    client,
+    *,
+    project_name: str,
+    project_context: str | None,
+    completed_work: list[str] | None,
+    open_work: list[str] | None,
+    completed_activation_steps: list[str] | None,
+    candidates: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """
+    Strictly validate proposed project tasks against known project state.
+
+    A plausible task is not enough. It must be grounded in known facts and
+    executable now. Validation fails closed.
+    """
+    if client is None or not candidates:
+        return []
+
+    project_context = str(project_context or "").strip()
+
+    completed_work = [
+        str(item).strip()
+        for item in (completed_work or [])
+        if str(item).strip()
+    ]
+    open_work = [
+        str(item).strip()
+        for item in (open_work or [])
+        if str(item).strip()
+    ]
+    completed_activation_steps = [
+        str(item).strip()
+        for item in (completed_activation_steps or [])
+        if str(item).strip()
+    ]
+
+    candidate_lines = "\n".join(
+        f"C{index}: {item['title']}"
+        for index, item in enumerate(candidates, start=1)
+    )
+
+    history = "\n".join(
+        f"- {item}"
+        for item in (
+            completed_work
+            + open_work
+            + completed_activation_steps
+        )
+    ) or "(none)"
+
+    model = os.getenv(
+        "AIOS_PROJECT_WORK_MODEL",
+        os.getenv(
+            "AIOS_FOCUS_GUIDANCE_MODEL",
+            "gpt-4.1-mini",
+        ),
+    )
+
+    prompt = f"""You are a strict validator of proposed tasks for ONE project.
+
+Project:
+{project_name}
+
+Authoritative known project context:
+{project_context or "(none)"}
+
+Known task/work history:
+{history}
+
+Candidate tasks:
+{candidate_lines}
+
+Return JSON only:
+{{"approved":["C1"],"rejected":[{{"id":"C2","reason":"..."}}]}}
+
+STRICT RULES:
+- Approve a task only when the known context or history provides sufficient factual basis for doing it.
+- Common or conventional activities for this type of project are NOT evidence.
+- Reject tasks that introduce unsupported assumptions, requirements, preferences, or optional elements.
+- Reject tasks requiring information that is still unresolved or pending.
+- Reject a task if it assumes that required information, commitments, responses, documents, materials, or decisions already exist when the Known project context or work history does not explicitly establish that they exist.
+- Do not interpret "in progress", "coming in", or "pending" as meaning that enough information exists to complete a dependent task.
+- Reject tasks that depend on future replies, RSVPs, final headcounts, unknown preferences, approvals, deliveries, or future events.
+- Reject work already completed or substantially duplicated.
+- The task must be useful and executable now.
+- When uncertain, REJECT.
+- It is completely valid to approve none.
+"""
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+        )
+
+        raw = (response.output_text or "").strip()
+
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+
+        data = json.loads(raw)
+        approved_ids = {
+            str(item).strip()
+            for item in (data.get("approved") or [])
+        }
+
+        approved = []
+
+        for index, candidate in enumerate(candidates, start=1):
+            if f"C{index}" in approved_ids:
+                approved.append(candidate)
+
+        return approved
+
+    except Exception as exc:
+        print(
+            f"[Project Work] Candidate validation failed: {exc}"
+        )
+        return []

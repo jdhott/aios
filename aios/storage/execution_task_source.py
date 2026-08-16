@@ -33,6 +33,24 @@ def _number_property(value: Optional[int | float]) -> dict[str, Any]:
     return {"type": "number", "number": value}
 
 
+def _rich_text_property(
+    value: Optional[str],
+) -> dict[str, Any]:
+    text = str(value or "").strip()
+
+    return {
+        "type": "rich_text",
+        "rich_text": (
+            [{
+                "plain_text": text,
+                "text": {"content": text},
+            }]
+            if text
+            else []
+        ),
+    }
+
+
 def task_to_legacy_execution_payload(
     task: Task,
     execution_state: Optional[dict[str, Any]] = None,
@@ -57,6 +75,7 @@ def task_to_legacy_execution_payload(
             "Defer Until": _date_property(task.defer_until),
             "Just Do It": _checkbox_property(task.is_just_do_it),
             "Quick Win": _checkbox_property(task.is_quick_win),
+            "Task Role": _rich_text_property(task.task_role),
             "Execution Score": _number_property(execution_state.get("execution_score")),
             "Execution Rank": _number_property(execution_state.get("execution_rank")),
             "Best Next Action": _checkbox_property(bool(execution_state.get("best_next_action", False))),
