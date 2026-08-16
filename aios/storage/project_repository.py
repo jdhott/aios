@@ -36,6 +36,7 @@ class ProjectRepository:
             name=row.get("name") or "(Untitled Project)",
             status=row.get("status"),
             is_active=row.get("is_active", False),
+            outcome=row.get("outcome"),
             context=row.get("context"),
             possible_existing_project_id=row.get(
                 "possible_existing_project_id"
@@ -152,6 +153,7 @@ class ProjectRepository:
             "name": project.name,
             "status": project.status,
             "is_active": project.is_active,
+            "outcome": project.outcome,
             "context": project.context,
             "legacy_metadata": project.legacy_metadata,
             "created_at": (

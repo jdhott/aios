@@ -444,6 +444,10 @@ def delete_task_http(task_id: str) -> dict:
 
 
 
+class ProjectOutcomeUpdate(BaseModel):
+    outcome: str | None = None
+
+
 class ProjectContextUpdate(BaseModel):
     context: str | None = None
 
@@ -684,7 +688,10 @@ def list_projects_http() -> dict:
     for project in projects:
         project_id = project.get("id")
         open_count = counts.get(project_id, 0)
-        if open_count <= 0:
+
+        # Active projects remain visible even when execution has run dry.
+        # This is when Project Work may have proposals or a waiting state.
+        if open_count <= 0 and not project.get("is_active"):
             continue
 
         review_reasons = _project_review_reasons(
@@ -902,6 +909,54 @@ def activate_project_http(project_id: str) -> dict:
         "activated": True,
     }
 
+
+
+@app.patch("/projects/{project_id}/outcome", tags=["projects"])
+def update_project_outcome_http(
+    project_id: str,
+    update: ProjectOutcomeUpdate,
+) -> dict:
+    rows = (
+        _store().client
+        .table("projects")
+        .select("id,name,outcome")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found",
+        )
+
+    outcome = str(update.outcome or "").strip() or None
+
+    response = (
+        _store().client
+        .table("projects")
+        .update({
+            "outcome": outcome,
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
+    updated = response.data or []
+
+    if not updated:
+        raise HTTPException(
+            status_code=500,
+            detail="Project outcome update returned no row",
+        )
+
+    return {
+        "project": dict(updated[0]),
+        "updated": True,
+    }
 
 
 @app.patch("/projects/{project_id}/context", tags=["projects"])
@@ -1226,6 +1281,7 @@ def get_project_detail_http(project_id: str) -> dict:
             "id": project_row.get("id"),
             "name": _project_display_name(project_row),
             "status": project_row.get("status"),
+            "outcome": project_row.get("outcome"),
             "context": project_row.get("context"),
             "open_task_count": len(tasks),
         },

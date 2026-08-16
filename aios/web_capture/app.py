@@ -610,6 +610,31 @@ def _fetch_project_detail(project_id: str) -> dict:
     return dict(response.json() or {})
 
 
+def _update_project_outcome(
+    project_id: str,
+    outcome: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.patch(
+        f"{api_url}/projects/{project_id}/outcome",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={"outcome": outcome},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _update_project_context(
     project_id: str,
     context: str,
@@ -1055,6 +1080,7 @@ def _project_detail_page(
 
     name = html.escape(str(project.get("name") or "Untitled Project"))
     project_id = html.escape(str(project.get("id") or ""))
+    outcome = html.escape(str(project.get("outcome") or ""))
     context = html.escape(str(project.get("context") or ""))
     count = int(project.get("open_task_count") or 0)
     status = str(project.get("status") or "").strip()
@@ -1460,6 +1486,19 @@ h1 {{
       {status_html}
     </div>
   </div>
+
+  <section class="context-card">
+    <h2>Project outcome</h2>
+    <p class="context-note">
+      Describe what done looks like for this project. AIOS will use this to reason about remaining work.
+    </p>
+    <form method="post" action="/projects/{project_id}/outcome">
+      <textarea name="outcome" placeholder="What outcome should this project achieve?">{outcome}</textarea>
+      <div class="context-actions">
+        <button class="context-save" type="submit">Save outcome</button>
+      </div>
+    </form>
+  </section>
 
   <section class="context-card">
     <h2>Project context</h2>
@@ -2533,6 +2572,29 @@ def projects_web(
             status_code=200,
         )
 
+
+
+@app.post("/projects/{project_id}/outcome")
+def update_project_outcome_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    outcome: Annotated[str, Form()] = "",
+):
+    try:
+        _update_project_outcome(
+            project_id,
+            outcome.strip(),
+        )
+        return RedirectResponse(
+            url=f"/projects/{project_id}?message=Project+outcome+saved.",
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Outcome] Update failed:", exc)
+        return RedirectResponse(
+            url=f"/projects/{project_id}?error=Project+outcome+could+not+be+saved.",
+            status_code=303,
+        )
 
 
 @app.post("/projects/{project_id}/context")

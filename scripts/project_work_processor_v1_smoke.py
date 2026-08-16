@@ -107,6 +107,10 @@ class FakeClient:
                     "name": "Plan 90th Birthday Party for Mum",
                     "status": "Active",
                     "is_active": True,
+                    "outcome": (
+                        "Hold Mum's 90th birthday family gathering "
+                        "with the key arrangements in place."
+                    ),
                     "context": (
                         "Small family-only gathering. "
                         "Dinner is potluck."
@@ -117,7 +121,21 @@ class FakeClient:
                     "name": "Project With Existing Work",
                     "status": "Active",
                     "is_active": True,
+                    "outcome": "",
                     "context": "",
+                },
+                {
+                    "id": "project-3",
+                    "name": "Outcome Only Project",
+                    "status": "Active",
+                    "is_active": True,
+                    "outcome": (
+                        "Complete the networking rack installation "
+                        "and leave it operational."
+                    ),
+                    "context": (
+                        "The rack and required equipment are already available."
+                    ),
                 },
             ],
             "tasks": [
@@ -226,6 +244,20 @@ class FakeResponses:
                     }
                 ],
             },
+            # Outcome-only project candidate generation.
+            {
+                "state": "actionable",
+                "tasks": [
+                    {
+                        "title": "Install the networking equipment in the rack"
+                    }
+                ],
+            },
+            # Outcome-only project strict validation.
+            {
+                "approved": ["C1"],
+                "rejected": [],
+            },
         ]
 
     def create(self, **kwargs):
@@ -254,9 +286,10 @@ result = refresh_project_work_proposals(
     client,
 )
 
-assert len(result) == 1
+assert len(result) == 2
 
 birthday = result[0]
+outcome_only = result[1]
 
 assert birthday["project_id"] == "project-1"
 assert birthday["state"] == "actionable"
@@ -270,15 +303,44 @@ assert proposal["status"] == "proposed"
 
 print("Validated project work stored as proposal: PASS")
 
-assert len(client.responses.calls) == 2
+assert len(client.responses.calls) == 4
 
 generation_prompt = client.responses.calls[0]["input"]
 
 assert "Small family-only gathering" in generation_prompt
 assert "Dinner is potluck" in generation_prompt
 assert "Draft invitation message" in generation_prompt
+assert (
+    "Hold Mum's 90th birthday family gathering "
+    "with the key arrangements in place."
+    in generation_prompt
+)
 
-print("Project context and completed activation history supplied: PASS")
+print(
+    "Project outcome, context, and completed activation "
+    "history supplied: PASS"
+)
+
+outcome_prompt = client.responses.calls[2]["input"]
+
+assert outcome_only["project_id"] == "project-3"
+assert outcome_only["state"] == "actionable"
+assert len(outcome_only["proposals"]) == 1
+
+assert (
+    outcome_only["proposals"][0]["title"]
+    == "Install the networking equipment in the rack"
+)
+
+assert (
+    "Complete the networking rack installation "
+    "and leave it operational."
+    in outcome_prompt
+)
+
+assert "The rack and required equipment are already available." in outcome_prompt
+
+print("Outcome-only project reaches Project Work without anchor: PASS")
 
 project_2_proposals = [
     row

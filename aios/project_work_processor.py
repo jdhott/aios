@@ -22,7 +22,7 @@ def refresh_project_work_proposals(
 
     V1 scope is intentionally conservative:
       - active projects only
-      - project must have a project_anchor task
+      - project must have an explicit Outcome or legacy project_anchor
       - project must currently have no normal open executable project work
       - AI output is grounded/validated by generate_project_work()
       - this function creates proposals only, never real tasks
@@ -31,7 +31,7 @@ def refresh_project_work_proposals(
     projects = (
         store.client
         .table("projects")
-        .select("id,name,status,is_active,context")
+        .select("id,name,status,is_active,outcome,context")
         .eq("is_active", True)
         .execute()
         .data
@@ -68,13 +68,26 @@ def refresh_project_work_proposals(
             and not row.get("is_archived")
         ]
 
-        if not anchors:
-            continue
+        # Project Outcome is the canonical project-level goal.
+        # A legacy anchor remains a fallback for projects not yet migrated.
+        project_outcome = str(
+            project.get("outcome") or ""
+        ).strip()
 
-        # V1 assumes one canonical project anchor.
-        anchor = anchors[0]
-        anchor_id = str(anchor.get("id") or "")
-        anchor_title = str(anchor.get("title") or "").strip()
+        anchor = anchors[0] if anchors else None
+        anchor_id = (
+            str(anchor.get("id") or "")
+            if anchor
+            else ""
+        )
+        anchor_title = (
+            str(anchor.get("title") or "").strip()
+            if anchor
+            else ""
+        )
+
+        if not project_outcome and not anchor_title:
+            continue
 
         open_work = [
             str(row.get("title") or "").strip()
@@ -128,6 +141,7 @@ def refresh_project_work_proposals(
         generated = generate_project_work(
             client,
             project_name=project_name,
+            project_outcome=project_outcome,
             project_context=str(
                 project.get("context") or ""
             ),

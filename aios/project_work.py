@@ -110,6 +110,7 @@ def generate_project_work(
     client,
     *,
     project_name: str,
+    project_outcome: str | None = None,
     project_context: str | None = None,
     project_anchor_title: str | None = None,
     completed_work: list[str] | None = None,
@@ -132,8 +133,17 @@ def generate_project_work(
         return None
 
     project_name = str(project_name or "").strip()
+    project_outcome = str(project_outcome or "").strip()
     project_context = str(project_context or "").strip()
     project_anchor_title = str(project_anchor_title or "").strip()
+
+    # Project Outcome is now the canonical project-level goal.
+    # The legacy project_anchor remains a backward-compatible fallback
+    # while existing anchored projects are migrated.
+    effective_outcome = (
+        project_outcome
+        or project_anchor_title
+    )
 
     completed_work = [
         str(item).strip()
@@ -223,8 +233,8 @@ Project:
 Known project context:
 {project_context or "(No additional project context provided.)"}
 
-Project anchor / outcome:
-{project_anchor_title or "(No separate anchor provided.)"}
+Project outcome:
+{effective_outcome or "(No explicit project outcome provided.)"}
 
 Completed project work:
 {completed_text}
@@ -269,7 +279,7 @@ Rules:
 - Each task must be executable now without waiting for another person, reply, delivery, approval, future date, or external event.
 - Do not create a task that merely says to wait, monitor, check later, or review something that does not yet exist.
 - Do not repeat or substantially duplicate completed project work, open project work, or completed activation history.
-- Do not recreate the project anchor or restate the project outcome as a task.
+- Do not restate the project outcome as a task.
 - Do not invent people, deadlines, places, preferences, decisions, or facts not provided.
 - Prefer 1 to 3 concrete project tasks.
 - Every proposed task title must be 75 characters or fewer, including spaces.

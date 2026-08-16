@@ -11,7 +11,11 @@ class Project:
     legacy_notion_id: Optional[str] = None
     status: Optional[str] = None
     is_active: bool = False
+    outcome: Optional[str] = None
     context: Optional[str] = None
+
+    possible_existing_project_id: Optional[str] = None
+    possible_existing_project_confidence: Optional[float] = None
 
     legacy_metadata: dict[str, Any] = field(
         default_factory=dict
