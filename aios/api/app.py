@@ -388,6 +388,23 @@ def list_open_tasks_http(
         except (TypeError, ValueError):
             return str(raw)[:10] <= today.isoformat()
 
+    # Search is a task lookup, not a dashboard-section filter. Return every
+    # matching open task as one dedicated result set so ranking/section rules
+    # cannot hide a valid title match.
+    if clean_search:
+        search_results = sorted(
+            rows,
+            key=lambda row: (
+                (row.get("title") or "").lower(),
+                str(row.get("id") or ""),
+            ),
+        )
+        return {
+            "count": len(search_results),
+            "search": clean_search,
+            "sections": {"search_results": search_results},
+        }
+
     # Dashboard sections are independent views, not mutually exclusive buckets.
     # Best Next Action (rank 1) is rendered separately by the focus card.
     # Top 5 means the next five ranked execution tasks: ranks 2 through 6.

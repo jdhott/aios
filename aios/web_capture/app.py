@@ -2960,12 +2960,16 @@ def _page(
             + '</article>'
         )
 
-    section_specs = [
-        ("Top 5", "top5"),
-        ("Quick Wins", "quick_wins"),
-        ("Today", "today"),
-        ("Just Do It", "just_do_it"),
-    ]
+    section_specs = (
+        [(f'Search Results for “{search}”', "search_results")]
+        if search
+        else [
+            ("Top 5", "top5"),
+            ("Quick Wins", "quick_wins"),
+            ("Today", "today"),
+            ("Just Do It", "just_do_it"),
+        ]
+    )
 
     task_sections = ""
 
@@ -2974,7 +2978,7 @@ def _page(
         # Rank 1 is presented separately as the Best Next Action. Today is
         # intentionally allowed to overlap because it is the complete calendar
         # view of tasks due today or overdue.
-        if focus_id and key != "today":
+        if focus_id and key not in {"today", "search_results"}:
             section_tasks = [task for task in section_tasks if str(task.get("id") or "") != focus_id]
         if not section_tasks:
             continue
@@ -3523,6 +3527,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       <form class="task-search" method="get" action="/">
         <input name="search" value="{html.escape(search)}" placeholder="Search open tasks" aria-label="Search open tasks">
         <button type="submit">Search</button>
+        {('<a class="button secondary" href="/">Clear</a>' if search else '')}
       </form>
       {task_sections}
     </section>
