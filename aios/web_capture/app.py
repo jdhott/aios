@@ -2990,7 +2990,9 @@ def _page(
 
         search_open = ' open' if key == "search_results" else ''
         task_sections += (
-            f'<details class="task-group" data-section="{html.escape(key)}"{search_open}>'
+            f'<details class="task-group" data-section="{html.escape(key)}"'
+            + (' id="search-results"' if key == "search_results" else '')
+            + f'{search_open}>'
             f'<summary class="task-group-heading">'
             f'<span>{html.escape(heading)}</span>'
             f'<span class="section-count">{len(section_tasks)}</span>'
@@ -3646,7 +3648,18 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       }}
 
       restoreSectionState();
-      restoreScroll();
+
+      const activeSearchResults = document.getElementById("search-results");
+      if (activeSearchResults) {{
+        sessionStorage.removeItem(scrollKey);
+        requestAnimationFrame(() => {{
+          requestAnimationFrame(() => {{
+            activeSearchResults.scrollIntoView({{ block: "start" }});
+          }});
+        }});
+      }} else {{
+        restoreScroll();
+      }}
     }})();
   </script>
 {pending_refresh_script}
