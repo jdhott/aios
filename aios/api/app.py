@@ -3,11 +3,13 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from aios.focus_activation import (
+    complete_open_focus_activation_children,
     get_active_focus_activation,
     list_focus_activation_children,
     mark_focus_activation_not_now,
 )
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import os
 
 from aios.api.config import (
@@ -417,13 +419,48 @@ def list_open_tasks_http(
 
 @app.post("/tasks/{task_id}/complete", tags=["tasks"])
 def complete_task_http(task_id: str) -> dict:
-    rows=(_store().client.table("tasks").select("id,is_archived").eq("id",task_id).limit(1).execute().data or [])
-    if not rows: raise HTTPException(status_code=404, detail="Task not found")
-    if rows[0].get("is_archived"): raise HTTPException(status_code=409, detail="Task is archived")
-    (_store().client.table("tasks").update({"is_done":True,"is_open":False}).eq("id",task_id).execute())
-    try: _request_processor_run()
-    except Exception: pass
-    return {"id":task_id,"completed":True}
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id,is_archived")
+        .eq("id", task_id)
+        .limit(1)
+        .execute().data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if rows[0].get("is_archived"):
+        raise HTTPException(status_code=409, detail="Task is archived")
+
+    completed_at = datetime.now(timezone.utc).isoformat()
+    (
+        store.client.table("tasks")
+        .update({
+            "is_done": True,
+            "is_open": False,
+            "completed_at": completed_at,
+            "updated_at": completed_at,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+
+    completed_activation_children = complete_open_focus_activation_children(
+        store,
+        task_id,
+        completed_at=completed_at,
+    )
+
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+    return {
+        "id": task_id,
+        "completed": True,
+        "completed_activation_children": completed_activation_children,
+    }
 
 
 @app.post("/tasks/{task_id}/not-now", tags=["tasks"])

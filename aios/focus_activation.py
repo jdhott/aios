@@ -106,6 +106,48 @@ def list_focus_activation_children(
     return list(rows)
 
 
+def complete_open_focus_activation_children(
+    store: SupabaseStore,
+    parent_task_id: str,
+    *,
+    completed_at: str,
+) -> int:
+    """Complete any still-open AIOS-generated activation children for a parent.
+
+    Parent completion makes its generated starting moves obsolete. Preserve the
+    child rows as execution history rather than deleting them.
+    """
+    rows = (
+        store.client
+        .table("tasks")
+        .select("id")
+        .eq("parent_task_id", parent_task_id)
+        .eq("generated_source", FOCUS_ACTIVATION_SOURCE)
+        .eq("is_open", True)
+        .eq("is_done", False)
+        .eq("is_archived", False)
+        .execute()
+        .data
+        or []
+    )
+
+    for row in rows:
+        (
+            store.client
+            .table("tasks")
+            .update({
+                "is_done": True,
+                "is_open": False,
+                "completed_at": completed_at,
+                "updated_at": completed_at,
+            })
+            .eq("id", row["id"])
+            .execute()
+        )
+
+    return len(rows)
+
+
 def get_active_focus_activation(
     store: SupabaseStore,
     parent_task_id: str,

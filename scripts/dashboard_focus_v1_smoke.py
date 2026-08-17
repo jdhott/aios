@@ -75,7 +75,7 @@ assert "Give it 10 min" in r.text
 
 assert 'href="/tasks/task-1"' in r.text
 assert 'action="/tasks/task-1/delete"' in r.text
-assert 'action="/tasks/task-1/complete"' not in r.text
+assert 'action="/tasks/task-1/complete"' in r.text
 
 assert 'href="/tasks/child-1"' in r.text
 assert 'action="/tasks/child-1/complete"' in r.text
@@ -87,7 +87,7 @@ assert '<details class="task-group" data-section="top5" open>' not in r.text
 
 print("Single focus parent + activation child: PASS")
 print("Activation child is actionable: PASS")
-print("Parent BNA is not directly completable: PASS")
+print("Parent BNA is directly completable: PASS")
 print("AI starter guidance + timebox render: PASS")
 print("Rank1 removed from Top 5: PASS")
 print("Alternative sections collapsed by default: PASS")

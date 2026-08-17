@@ -2981,6 +2981,9 @@ def _page(
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
             '<div class="focus-task-row focus-parent-row">'
+            f'<form class="complete-form focus-parent-complete" method="post" action="/tasks/{safe_id}/complete">'
+            '<button class="complete-checkbox" type="submit" aria-label="Complete Best Next Action" title="Complete Best Next Action"><span aria-hidden="true"></span></button>'
+            '</form>'
             '<div class="focus-main">'
             f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
             f'<div class="focus-meta">{" · ".join(meta)}</div></div>'
@@ -3145,6 +3148,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-card {{ margin:0 0 20px; padding:18px 20px; border:1px solid rgba(255,201,60,.72); border-radius:16px; background:#fff8dc; box-shadow:0 4px 18px rgba(38,65,85,.05); }}
     .focus-label {{ margin-bottom:12px; color:var(--navy); font-size:.9rem; font-weight:850; }}
     .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
+    .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
     .focus-main {{ min-width:0; }}
     .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.25rem; line-height:1.3; font-weight:850; }}
     .focus-title:hover {{ text-decoration:underline; }}

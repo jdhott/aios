@@ -31,8 +31,8 @@ html = _page(
     focus=focus,
 )
 
-assert f'action="/tasks/{PARENT_ID}/complete"' not in html
-print("Parent BNA has no completion action: PASS")
+assert f'action="/tasks/{PARENT_ID}/complete"' in html
+print("Parent BNA has completion action: PASS")
 
 assert f'action="/tasks/{CHILD_ID}/complete"' in html
 print("Activation child has completion action: PASS")
