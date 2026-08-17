@@ -717,6 +717,26 @@ def _project_work_action(
     return dict(response.json() or {})
 
 
+def _request_project_work_generation(
+    project_id: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/projects/{project_id}/work-proposals/generate",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _project_lifecycle_action(
     project_id: str,
     action: str,
@@ -1110,6 +1130,9 @@ def _project_detail_page(
     context = html.escape(str(project.get("context") or ""))
     count = int(project.get("open_task_count") or 0)
     status = str(project.get("status") or "").strip()
+    work_generation_state = str(
+        project.get("work_generation_state") or ""
+    ).strip().lower()
 
     task_rows = ""
     for task in tasks:
@@ -1219,18 +1242,18 @@ def _project_detail_page(
 
     proposal_pending = bool(
         refresh_proposal
-        and not work_proposals
+        and work_generation_state == "pending"
     )
 
     pending_html = (
         '<section class="proposal-card proposal-pending-card">'
-        '<h2>Proposed project work</h2>'
+        '<h2>Suggested project work</h2>'
         '<div class="proposal-pending">'
         '<span class="proposal-spinner" aria-hidden="true"></span>'
         '<div>'
-        '<strong>Finding a better proposal…</strong>'
+        '<strong>Looking for missing project work…</strong>'
         '<div class="proposal-pending-note">'
-        'AIOS is using your feedback to try a different approach.'
+        'AIOS is reviewing the project outcome, context, open work, and completed work.'
         '</div>'
         '</div>'
         '</div>'
@@ -1238,6 +1261,29 @@ def _project_detail_page(
         if proposal_pending
         else ""
     )
+
+    generation_result_html = ""
+    if refresh_proposal and not work_proposals:
+        if work_generation_state == "waiting":
+            generation_result_html = (
+                '<section class="proposal-card">'
+                '<h2>Suggested project work</h2>'
+                '<p class="proposal-note" style="margin-bottom:0">'
+                '<strong>No missing project work found.</strong><br>'
+                'AIOS did not identify additional actionable work beyond what is already planned or completed.'
+                '</p>'
+                '</section>'
+            )
+        elif work_generation_state == "failed":
+            generation_result_html = (
+                '<section class="proposal-card">'
+                '<h2>Suggested project work</h2>'
+                '<p class="proposal-note" style="margin-bottom:0">'
+                '<strong>Project work could not be generated.</strong><br>'
+                'Check that the project has a clear outcome, then try again.'
+                '</p>'
+                '</section>'
+            )
 
     if proposal_pending:
         pending_refresh_script = """
@@ -1556,6 +1602,18 @@ h1 {{
     </form>
   </section>
 
+  <section class="context-card">
+    <h2>Project work</h2>
+    <p class="context-note">
+      Ask AIOS to look for genuinely missing actionable work using the project outcome, context, and full task history. Existing open and completed tasks are treated as work already planned or done.
+    </p>
+    <form method="post" action="/projects/{project_id}/work-proposals/generate">
+      <div class="context-actions">
+        <button class="context-save" type="submit">Generate Project Work</button>
+      </div>
+    </form>
+  </section>
+
   {
       (
           '<section class="proposal-card">'
@@ -1567,11 +1625,12 @@ h1 {{
           + proposal_rows
           + '</section>'
       )
-      if proposal_rows
+      if proposal_rows and not proposal_pending
       else ''
   }
 
   {pending_html}
+  {generation_result_html}
 
   <div class="task-list" id="project-tasks">{task_rows}</div>
 </main>
@@ -4289,6 +4348,28 @@ def update_project_context_web(
             status_code=303,
         )
 
+
+
+@app.post("/projects/{project_id}/work-proposals/generate")
+def generate_project_work_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _request_project_work_generation(project_id)
+        return RedirectResponse(
+            url=f"/projects/{project_id}?refresh_proposal=1",
+            status_code=303,
+        )
+    except Exception as exc:
+        print("[Project Work] Manual generation request failed:", exc)
+        return RedirectResponse(
+            url=(
+                f"/projects/{project_id}"
+                "?error=Project+work+could+not+be+requested."
+            ),
+            status_code=303,
+        )
 
 
 @app.post(

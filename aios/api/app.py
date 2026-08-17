@@ -1195,6 +1195,64 @@ def update_project_context_http(
 
 
 @app.post(
+    "/projects/{project_id}/work-proposals/generate",
+    tags=["projects"],
+)
+def request_project_work_generation_http(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    store = _store()
+    rows = (
+        store.client
+        .table("projects")
+        .select("id,is_active,outcome")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = dict(rows[0])
+    if not project.get("is_active"):
+        raise HTTPException(
+            status_code=409,
+            detail="Project must be active before generating project work.",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    response = (
+        store.client
+        .table("projects")
+        .update({
+            "work_generation_requested_at": now,
+            "work_generation_completed_at": None,
+            "work_generation_state": "pending",
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if not (response.data or []):
+        raise HTTPException(
+            status_code=500,
+            detail="Project-work generation request could not be saved.",
+        )
+
+    background_tasks.add_task(_request_processor_run)
+
+    return {
+        "requested": True,
+        "project_id": project_id,
+        "state": "pending",
+    }
+
+
+@app.post(
     "/projects/{project_id}/work-proposals/{proposal_id}/dismiss",
     tags=["projects"],
 )
@@ -1363,6 +1421,19 @@ def retry_project_work_http(
             detail=str(exc),
         ) from exc
 
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        store.client
+        .table("projects")
+        .update({
+            "work_generation_requested_at": now,
+            "work_generation_completed_at": None,
+            "work_generation_state": "pending",
+        })
+        .eq("id", project_id)
+        .execute()
+    )
+
     try:
         _request_processor_run()
     except Exception:
@@ -1470,6 +1541,9 @@ def get_project_detail_http(project_id: str) -> dict:
             "outcome": project_row.get("outcome"),
             "context": project_row.get("context"),
             "open_task_count": len(tasks),
+            "work_generation_requested_at": project_row.get("work_generation_requested_at"),
+            "work_generation_completed_at": project_row.get("work_generation_completed_at"),
+            "work_generation_state": project_row.get("work_generation_state"),
         },
         "tasks": tasks,
         "work_proposals": [

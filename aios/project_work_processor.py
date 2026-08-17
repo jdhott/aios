@@ -1,16 +1,47 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
-from aios.focus_activation import (
-    list_focus_activation_children,
-)
+from aios.focus_activation import list_focus_activation_children
 from aios.project_work import generate_project_work
 from aios.project_work_proposals import (
     list_project_work_feedback,
     replace_project_work_proposals,
 )
 from aios.storage.supabase_store import SupabaseStore
+
+
+MANUAL_STATE_PENDING = "pending"
+MANUAL_STATE_ACTIONABLE = "actionable"
+MANUAL_STATE_WAITING = "waiting"
+MANUAL_STATE_FAILED = "failed"
+
+
+def _manual_generation_requested(project: dict[str, Any]) -> bool:
+    return (
+        str(project.get("work_generation_state") or "").strip().lower()
+        == MANUAL_STATE_PENDING
+        and bool(str(project.get("work_generation_requested_at") or "").strip())
+    )
+
+
+def _finish_manual_generation(
+    store: SupabaseStore,
+    project_id: str,
+    state: str,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        store.client
+        .table("projects")
+        .update({
+            "work_generation_state": state,
+            "work_generation_completed_at": now,
+        })
+        .eq("id", project_id)
+        .execute()
+    )
 
 
 def refresh_project_work_proposals(
@@ -20,18 +51,27 @@ def refresh_project_work_proposals(
     """
     Refresh review-only project-work proposals.
 
-    V1 scope is intentionally conservative:
+    Automatic generation remains intentionally conservative:
       - active projects only
       - project must have an explicit Outcome or legacy project_anchor
       - project must currently have no normal open executable project work
-      - AI output is grounded/validated by generate_project_work()
-      - this function creates proposals only, never real tasks
+
+    A manual generation request is different: it deliberately bypasses only
+    the "no open work" gate so AIOS can audit one project for genuinely
+    missing work while still receiving all existing open/completed work as
+    grounding context.
+
+    This function creates proposals only, never real tasks.
     """
 
     projects = (
         store.client
         .table("projects")
-        .select("id,name,status,is_active,outcome,context")
+        .select(
+            "id,name,status,is_active,outcome,context,"
+            "work_generation_requested_at,work_generation_completed_at,"
+            "work_generation_state"
+        )
         .eq("is_active", True)
         .execute()
         .data
@@ -43,6 +83,7 @@ def refresh_project_work_proposals(
     for project in projects:
         project_id = str(project.get("id") or "").strip()
         project_name = str(project.get("name") or "").strip()
+        manual_requested = _manual_generation_requested(project)
 
         if not project_id or not project_name:
             continue
@@ -68,18 +109,9 @@ def refresh_project_work_proposals(
             and not row.get("is_archived")
         ]
 
-        # Project Outcome is the canonical project-level goal.
-        # A legacy anchor remains a fallback for projects not yet migrated.
-        project_outcome = str(
-            project.get("outcome") or ""
-        ).strip()
-
+        project_outcome = str(project.get("outcome") or "").strip()
         anchor = anchors[0] if anchors else None
-        anchor_id = (
-            str(anchor.get("id") or "")
-            if anchor
-            else ""
-        )
+        anchor_id = str(anchor.get("id") or "") if anchor else ""
         anchor_title = (
             str(anchor.get("title") or "").strip()
             if anchor
@@ -87,6 +119,19 @@ def refresh_project_work_proposals(
         )
 
         if not project_outcome and not anchor_title:
+            if manual_requested:
+                _finish_manual_generation(
+                    store,
+                    project_id,
+                    MANUAL_STATE_FAILED,
+                )
+                results.append({
+                    "project_id": project_id,
+                    "project_name": project_name,
+                    "state": MANUAL_STATE_FAILED,
+                    "proposals": [],
+                    "manual": True,
+                })
             continue
 
         open_work = [
@@ -100,9 +145,9 @@ def refresh_project_work_proposals(
             and str(row.get("title") or "").strip()
         ]
 
-        # If the project already has real executable work, normal execution
-        # should handle it. Do not manufacture more project work.
-        if open_work:
+        # Automatic generation is a gap-filler. Manual generation is an
+        # explicit audit for missing work and therefore bypasses this one gate.
+        if open_work and not manual_requested:
             continue
 
         completed_work = [
@@ -116,10 +161,7 @@ def refresh_project_work_proposals(
         ]
 
         activation_history = (
-            list_focus_activation_children(
-                store,
-                anchor_id,
-            )
+            list_focus_activation_children(store, anchor_id)
             if anchor_id
             else []
         )
@@ -142,9 +184,7 @@ def refresh_project_work_proposals(
             client,
             project_name=project_name,
             project_outcome=project_outcome,
-            project_context=str(
-                project.get("context") or ""
-            ),
+            project_context=str(project.get("context") or ""),
             project_anchor_title=anchor_title,
             completed_work=completed_work,
             open_work=open_work,
@@ -153,13 +193,22 @@ def refresh_project_work_proposals(
         )
 
         titles: list[str] = []
+        generated_state = (
+            str(generated.get("state") or "").strip().lower()
+            if generated
+            else MANUAL_STATE_FAILED
+        )
 
-        if generated and generated.get("state") == "actionable":
+        if generated_state == MANUAL_STATE_ACTIONABLE:
             titles = [
                 str(item.get("title") or "").strip()
                 for item in (generated.get("tasks") or [])
                 if str(item.get("title") or "").strip()
             ]
+            if not titles:
+                generated_state = MANUAL_STATE_WAITING
+        elif generated_state != MANUAL_STATE_WAITING:
+            generated_state = MANUAL_STATE_FAILED
 
         proposals = replace_project_work_proposals(
             store,
@@ -167,21 +216,26 @@ def refresh_project_work_proposals(
             titles=titles,
         )
 
+        if manual_requested:
+            _finish_manual_generation(
+                store,
+                project_id,
+                generated_state,
+            )
+
         print(
             "[Project Work] "
             f"{project_name}: "
             f"{len(proposals)} proposal(s)"
+            + (" [manual]" if manual_requested else "")
         )
 
         results.append({
             "project_id": project_id,
             "project_name": project_name,
-            "state": (
-                generated.get("state")
-                if generated
-                else "failed"
-            ),
+            "state": generated_state,
             "proposals": proposals,
+            "manual": manual_requested,
         })
 
     return results
