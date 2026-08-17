@@ -171,9 +171,8 @@ if TEST_ONLY:
 # Datastore authority
 # -----------------------------------------------------------------------------
 # Supabase is the default authoritative datastore for AIOS task and project
-# state. Notion remains intentionally in use for Brain Dump, clarification,
-# review, archive/context, dashboard presentation, and selected telemetry /
-# logging workflows.
+# state. Notion is now an optional legacy/capture integration rather than a
+# dependency of the normal Supabase processor runtime.
 #
 # Set AIOS_DATASTORE=notion explicitly only when the legacy Notion persistence
 # path is required for fallback or testing.
@@ -217,20 +216,32 @@ if AIOS_DATASTORE == "supabase":
     except Exception as exc:
         print(f"[Supabase Authority Audit] Bootstrap failed: {exc}")
 
-# In TEST_ONLY mode, avoid requiring production secrets because no external API
-# calls are made. In normal modes, keep failing fast if required env vars are missing.
+# Notion is an optional integration, not a production processor dependency.
+# Explicit Notion datastore/inbox modes retain the legacy fail-fast behavior,
+# while the normal Supabase/Supabase runtime can start with no Notion secrets or IDs.
+NOTION_RUNTIME_REQUIRED = (
+    AIOS_DATASTORE == "notion"
+    or AIOS_INBOX_SOURCE == "notion"
+)
+
 if TEST_ONLY:
     NOTION_TOKEN = os.getenv("NOTION_TOKEN", "test-only-notion-token")
     BRAIN_DUMP_PAGE_ID = os.getenv("BRAIN_DUMP_PAGE_ID", "test-only-brain-dump-page-id")
     TASKS_DATABASE_ID = os.getenv("TASKS_DATABASE_ID", "test-only-tasks-database-id")
     ARCHIVE_TOGGLE_BLOCK_ID = os.getenv("ARCHIVE_TOGGLE_BLOCK_ID", "test-only-archive-toggle-block-id")
-    AI_LOG_DATABASE_ID = os.getenv("NOTION_AI_LOG_DATABASE_ID", "")
-else:
+elif NOTION_RUNTIME_REQUIRED:
     NOTION_TOKEN = os.environ["NOTION_TOKEN"]
     BRAIN_DUMP_PAGE_ID = os.environ["BRAIN_DUMP_PAGE_ID"]
     TASKS_DATABASE_ID = os.environ["TASKS_DATABASE_ID"]
     ARCHIVE_TOGGLE_BLOCK_ID = os.environ["ARCHIVE_TOGGLE_BLOCK_ID"]
-    AI_LOG_DATABASE_ID = os.getenv("NOTION_AI_LOG_DATABASE_ID", "")
+else:
+    NOTION_TOKEN = os.getenv("NOTION_TOKEN", "")
+    BRAIN_DUMP_PAGE_ID = os.getenv("BRAIN_DUMP_PAGE_ID", "")
+    TASKS_DATABASE_ID = os.getenv("TASKS_DATABASE_ID", "")
+    ARCHIVE_TOGGLE_BLOCK_ID = os.getenv("ARCHIVE_TOGGLE_BLOCK_ID", "")
+    print("[Notion] Optional integration disabled for Supabase/Supabase runtime")
+
+AI_LOG_DATABASE_ID = ""
 
 AIOS_DASHBOARD_BLOCK_ID = os.getenv("AIOS_DASHBOARD_BLOCK_ID")
 

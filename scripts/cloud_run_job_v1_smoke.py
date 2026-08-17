@@ -11,18 +11,15 @@ env = {
     "SUPABASE_URL": "https://example.supabase.co",
     "SUPABASE_SECRET_KEY": "test",
     "OPENAI_API_KEY": "test",
-    "NOTION_TOKEN": "test",
-    "TASKS_DATABASE_ID": "test",
-    "BRAIN_DUMP_PAGE_ID": "test",
-    "NOTION_PROJECTS_DATABASE_ID": "test",
-    "AIOS_DASHBOARD_BLOCK_ID": "test",
-    "ARCHIVE_TOGGLE_BLOCK_ID": "test",
 }
 
 with patch.dict(os.environ, env, clear=True):
     settings = validate_job_environment()
     assert settings.datastore == "supabase"
     assert settings.inbox_source == "supabase"
+    assert "NOTION_TOKEN" not in os.environ
+    assert "TASKS_DATABASE_ID" not in os.environ
+
 
 bad = dict(env)
 bad["AIOS_DATASTORE"] = "notion"
@@ -46,5 +43,6 @@ with patch.dict(os.environ, missing, clear=True):
 
 print("Cloud Run environment validation: PASS")
 print("Supabase datastore enforcement: PASS")
-print("Required secret enforcement: PASS")
+print("Required Supabase/OpenAI secret enforcement: PASS")
+print("No Notion production dependency: PASS")
 print("RESULT: CLOUD RUN JOB V1 SMOKE TEST PASSED")

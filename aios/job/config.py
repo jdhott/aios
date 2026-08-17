@@ -8,15 +8,6 @@ REQUIRED_SECRET_ENV = (
     "SUPABASE_URL",
     "SUPABASE_SECRET_KEY",
     "OPENAI_API_KEY",
-    "NOTION_TOKEN",
-)
-
-REQUIRED_ID_ENV = (
-    "TASKS_DATABASE_ID",
-    "BRAIN_DUMP_PAGE_ID",
-    "NOTION_PROJECTS_DATABASE_ID",
-    "AIOS_DASHBOARD_BLOCK_ID",
-    "ARCHIVE_TOGGLE_BLOCK_ID",
 )
 
 @dataclass(frozen=True)
@@ -42,12 +33,6 @@ def validate_job_environment() -> JobSettings:
         if missing:
             raise RuntimeError(
                 "Missing required secret environment variables: " + ", ".join(missing)
-            )
-
-        missing_ids = [name for name in REQUIRED_ID_ENV if not os.getenv(name)]
-        if missing_ids:
-            raise RuntimeError(
-                "Missing required AIOS runtime IDs: " + ", ".join(missing_ids)
             )
 
     return JobSettings(

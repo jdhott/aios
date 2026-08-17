@@ -1,125 +1,129 @@
 """Observational audit of Notion mutations while Supabase is authoritative."""
 from __future__ import annotations
-import atexit, inspect, os, re
+import atexit, inspect, re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Mapping
 
-VERSION = "supabase-authority-audit-v1.0.1"
-_INSTALLED=False
-_ENABLED=False
-_EVENTS=[]
+VERSION = "supabase-authority-audit-v1.1.0"
+_INSTALLED = False
+_ENABLED = False
+_EVENTS = []
+
 
 @dataclass
 class AuditEvent:
-    method:str; url:str; category:str; detail:str; caller:str
+    method: str
+    url: str
+    category: str
+    detail: str
+    caller: str
 
-def _norm(v): return re.sub(r'[^0-9A-Za-z]','',str(v or '')).lower()
-def _env(*names):
-    for n in names:
-        v=os.getenv(n,'').strip()
-        if v: return _norm(v)
-    return ''
-def _task_db(): return _env('TASKS_DATABASE_ID','NOTION_TASKS_DATABASE_ID','NOTION_TASK_DATABASE_ID')
-def _project_db(): return _env('PROJECTS_DATABASE_ID','PROJECT_DATABASE_ID','NOTION_PROJECTS_DATABASE_ID','NOTION_PROJECT_DATABASE_ID')
-def _telemetry_db(): return _env('NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID','TOPOLOGY_TELEMETRY_DATABASE_ID')
 
 def _caller():
-    f=inspect.currentframe()
+    f = inspect.currentframe()
     try:
-        f=f.f_back if f else None
+        f = f.f_back if f else None
         for _ in range(20):
-            if not f: break
-            mod=str(f.f_globals.get('__name__','')); name=f.f_code.co_name
-            if mod != __name__ and not mod.startswith(('requests','urllib3')):
-                return f'{mod}.{name}'
-            f=f.f_back
+            if not f:
+                break
+            mod = str(f.f_globals.get("__name__", ""))
+            name = f.f_code.co_name
+            if mod != __name__ and not mod.startswith(("requests", "urllib3")):
+                return f"{mod}.{name}"
+            f = f.f_back
     finally:
-        try: del f
-        except Exception: pass
-    return ''
+        try:
+            del f
+        except Exception:
+            pass
+    return ""
 
-def _parent_db(payload):
-    if not isinstance(payload,Mapping): return ''
-    parent=payload.get('parent')
-    return _norm(parent.get('database_id')) if isinstance(parent,Mapping) else ''
 
-def _is_task_mirror_title_patch(payload):
-    if not isinstance(payload, Mapping): return False
-    if set(payload.keys()) != {'properties'}: return False
-    properties=payload.get('properties')
-    if not isinstance(properties, Mapping): return False
-    if set(properties.keys()) != {'Task Name'}: return False
-    task_name=properties.get('Task Name')
-    if not isinstance(task_name, Mapping): return False
-    title=task_name.get('title')
-    return isinstance(title,list) and bool(title)
-
-TASK_MIRROR_TITLE_AUDIT_VERSION='task-mirror-title-patch-v1'
-
-def _is_task_mirror_archive_patch(payload):
+def classify_mutation(method, url, payload=None):
+    """Any Notion mutation is unexpected when Supabase is authoritative."""
+    method = str(method).upper()
+    url = str(url or "")
     return (
-        isinstance(payload, Mapping)
-        and set(payload.keys()) == {'archived'}
-        and payload.get('archived') is True
+        "unexpected_notion",
+        f"Notion {method} mutation observed in Supabase mode",
     )
 
-TASK_MIRROR_ARCHIVE_AUDIT_VERSION='task-mirror-archive-patch-v1'
 
-def classify_mutation(method,url,payload=None):
-    method=str(method).upper(); url=str(url or '')
-    if '/v1/blocks/' in url:
-        return 'allowed_interface','Notion block presentation / interaction mutation'
-    if method=='POST' and url.rstrip('/').endswith('/v1/pages'):
-        pid=_parent_db(payload)
-        if pid and pid==_telemetry_db(): return 'allowed_telemetry','Project topology telemetry page creation'
-        if pid and pid==_task_db(): return 'allowed_task_mirror','Transitional Notion task mirror page creation'
-        if pid and pid==_project_db(): return 'unexpected_authoritative','Project database page creation in Supabase mode'
-        return 'unclassified','Unrecognized Notion page creation'
-    if method=='PATCH' and '/v1/pages/' in url and _is_task_mirror_title_patch(payload):
-        return 'allowed_task_mirror','Supabase-authoritative task title mirrored to Notion presentation'
-    if method=='PATCH' and '/v1/pages/' in url and _is_task_mirror_archive_patch(payload):
-        return 'allowed_task_mirror','Supabase-authoritative archived task mirrored to Notion presentation'
-    if '/v1/pages/' in url and method in {'PATCH','DELETE'}:
-        return 'unexpected_authoritative',f'Notion page {method} in Supabase mode'
-    return 'unclassified',f'Unclassified Notion mutation: {method}'
-
-def _record(method,url,payload=None):
-    if not _ENABLED or 'api.notion.com/v1/' not in str(url): return
-    method_text=str(method).upper()
-    url_text=str(url)
-    # Notion database queries use HTTP POST but are read-only operations.
-    # Exclude them entirely from the mutation audit.
-    if method_text=='POST' and re.search(r'/v1/databases/[^/?#]+/query(?:[?#].*)?$',url_text):
+def _record(method, url, payload=None):
+    if not _ENABLED or "api.notion.com/v1/" not in str(url):
         return
-    cat,detail=classify_mutation(method_text,url_text,payload)
-    _EVENTS.append(AuditEvent(method_text,url_text,cat,detail,_caller()))
+    method_text = str(method).upper()
+    url_text = str(url)
+    # Notion database queries use HTTP POST but are read-only operations.
+    # Keep them outside this mutation audit.
+    if method_text == "POST" and re.search(
+        r"/v1/databases/[^/?#]+/query(?:[?#].*)?$", url_text
+    ):
+        return
+    category, detail = classify_mutation(method_text, url_text, payload)
+    _EVENTS.append(
+        AuditEvent(method_text, url_text, category, detail, _caller())
+    )
+
 
 def install_supabase_authority_audit(datastore):
-    global _INSTALLED,_ENABLED
-    if str(datastore).strip().lower()!='supabase': return False
+    global _INSTALLED, _ENABLED
+    if str(datastore).strip().lower() != "supabase":
+        return False
     if _INSTALLED:
-        _ENABLED=True; return True
+        _ENABLED = True
+        return True
+
     import requests
-    op,opa,od=requests.post,requests.patch,requests.delete
-    def post(url,*a,**kw): _record('POST',url,kw.get('json')); return op(url,*a,**kw)
-    def patch(url,*a,**kw): _record('PATCH',url,kw.get('json')); return opa(url,*a,**kw)
-    def delete(url,*a,**kw): _record('DELETE',url,kw.get('json')); return od(url,*a,**kw)
-    requests.post,requests.patch,requests.delete=post,patch,delete
-    _INSTALLED=True; _ENABLED=True
+
+    original_post = requests.post
+    original_patch = requests.patch
+    original_delete = requests.delete
+
+    def post(url, *args, **kwargs):
+        _record("POST", url, kwargs.get("json"))
+        return original_post(url, *args, **kwargs)
+
+    def patch(url, *args, **kwargs):
+        _record("PATCH", url, kwargs.get("json"))
+        return original_patch(url, *args, **kwargs)
+
+    def delete(url, *args, **kwargs):
+        _record("DELETE", url, kwargs.get("json"))
+        return original_delete(url, *args, **kwargs)
+
+    requests.post = post
+    requests.patch = patch
+    requests.delete = delete
+    _INSTALLED = True
+    _ENABLED = True
     atexit.register(emit_report)
-    print(f'[Supabase Authority Audit] Installed — {VERSION}')
+    print(f"[Supabase Authority Audit] Installed — {VERSION}")
     return True
 
+
 def emit_report():
-    if not _ENABLED: return
-    c=Counter(e.category for e in _EVENTS)
-    print('\n=== SUPABASE AUTHORITY AUDIT ===')
-    print(f'[Supabase Authority Audit] Version: {VERSION}')
-    print(f'[Supabase Authority Audit] Notion mutations observed: {len(_EVENTS)}')
-    for key,label in [('allowed_interface','Allowed interface'),('allowed_telemetry','Allowed telemetry'),('allowed_task_mirror','Allowed task mirrors'),('unexpected_authoritative','Unexpected authoritative writes'),('unclassified','Unclassified mutations')]:
-        print(f'[Supabase Authority Audit] {label}: {c[key]}')
-    bad=[e for e in _EVENTS if e.category in {'unexpected_authoritative','unclassified'}]
-    for e in bad[:20]:
-        print(f'[Supabase Authority Audit] {e.category}: {e.method} {e.url} caller={e.caller or "unknown"} detail={e.detail}')
-    print('RESULT: SUPABASE CORE PERSISTENCE AUTHORITY CLEAN' if not bad else 'RESULT: SUPABASE CORE PERSISTENCE AUTHORITY NEEDS REVIEW')
+    if not _ENABLED:
+        return
+    counts = Counter(event.category for event in _EVENTS)
+    print("\n=== SUPABASE AUTHORITY AUDIT ===")
+    print(f"[Supabase Authority Audit] Version: {VERSION}")
+    print(
+        "[Supabase Authority Audit] "
+        f"Notion mutations observed: {len(_EVENTS)}"
+    )
+    print(
+        "[Supabase Authority Audit] Unexpected Notion mutations: "
+        f"{counts['unexpected_notion']}"
+    )
+    for event in _EVENTS[:20]:
+        print(
+            "[Supabase Authority Audit] unexpected_notion: "
+            f"{event.method} {event.url} "
+            f"caller={event.caller or 'unknown'} detail={event.detail}"
+        )
+    print(
+        "RESULT: SUPABASE CORE PERSISTENCE AUTHORITY CLEAN"
+        if not _EVENTS
+        else "RESULT: SUPABASE CORE PERSISTENCE AUTHORITY NEEDS REVIEW"
+    )

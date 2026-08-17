@@ -27,6 +27,7 @@ class FakeTaskRepository:
                 defer_until=None,
                 is_just_do_it=False,
                 is_quick_win=False,
+                task_role=None,
             ),
             SimpleNamespace(
                 id="archived-task",
@@ -44,6 +45,7 @@ class FakeTaskRepository:
                 defer_until=None,
                 is_just_do_it=False,
                 is_quick_win=False,
+                task_role=None,
             ),
             SimpleNamespace(
                 id="closed-task",
@@ -61,6 +63,7 @@ class FakeTaskRepository:
                 defer_until=None,
                 is_just_do_it=False,
                 is_quick_win=False,
+                task_role=None,
             ),
             SimpleNamespace(
                 id="done-task",
@@ -78,6 +81,7 @@ class FakeTaskRepository:
                 defer_until=None,
                 is_just_do_it=False,
                 is_quick_win=False,
+                task_role=None,
             ),
         ]
 
