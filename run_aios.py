@@ -5494,6 +5494,58 @@ def _find_open_possible_duplicate_review_for_item(item):
     return None
 
 
+def _attach_source_task_to_possible_duplicate_review(
+    item,
+    *,
+    source_task_id,
+    source_task_title,
+):
+    """Attach the materialized source task to its open duplicate review."""
+    if AIOS_DATASTORE != "supabase":
+        return None
+
+    if (
+        possible_duplicate_shadow_review_repo is None
+        or not source_task_id
+    ):
+        return None
+
+    review = (
+        _find_open_possible_duplicate_review_for_item(
+            item
+        )
+    )
+
+    if review is None:
+        return None
+
+    payload = dict(review.payload or {})
+
+    payload["source_task_id"] = str(
+        source_task_id
+    )
+    payload["source_task_title"] = str(
+        source_task_title or ""
+    ).strip()
+
+    updated = (
+        possible_duplicate_shadow_review_repo
+        .update_state(
+            review.id,
+            review.state,
+            payload=payload,
+        )
+    )
+
+    print(
+        "[Possible Duplicate Review] "
+        "Source task attached:",
+        source_task_id,
+    )
+
+    return updated
+
+
 # Possible-duplicate shadow helper must be defined before the
 # top-level Brain Dump classification loop executes.
 def _pending_duplicate_reevaluation(item):
@@ -7156,6 +7208,12 @@ def maybe_create_clarification_review(
             "Clarification task has no authoritative "
             "Supabase task ID."
         )
+
+    _attach_source_task_to_possible_duplicate_review(
+        item,
+        source_task_id=task_id,
+        source_task_title=task_title,
+    )
 
     suggestions = (
         generate_clarification_suggestions(

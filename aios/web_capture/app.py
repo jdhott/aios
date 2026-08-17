@@ -1584,6 +1584,7 @@ def _reviews_page(
 
         candidate_changed = bool(
             payload.get("candidate_task_changed")
+            or payload.get("source_task_changed")
         )
 
         if candidate_changed:
@@ -1606,7 +1607,7 @@ def _reviews_page(
                     '<div>'
                     '<strong>Re-evaluating match…</strong>'
                     '<div class="review-stale-note">'
-                    'AIOS is checking the edited task against the new task.'
+                    'AIOS is checking the updated tasks against each other.'
                     '</div>'
                     '</div>'
                     '</div>'
@@ -1617,7 +1618,7 @@ def _reviews_page(
             else:
                 use_existing_html = f"""
                 <div class="review-stale-note">
-                  Re-evaluate this match before using the existing task.
+                  Re-evaluate this match before resolving it.
                 </div>
                 <form method="post"
                       action="/reviews/{review_id}/possible-duplicate/reevaluate">
@@ -3661,6 +3662,51 @@ def reviews_web(
                     )
                     payload["candidate_task_title"] = (
                         current_title
+                    )
+
+                    source_task_id = str(
+                        payload.get("source_task_id")
+                        or ""
+                    ).strip()
+
+                    source_stored_title = str(
+                        payload.get("source_task_title")
+                        or ""
+                    ).strip()
+
+                    source_task_changed = False
+
+                    if source_task_id:
+                        try:
+                            source_task = _fetch_task_detail(
+                                source_task_id
+                            )
+
+                            source_current_title = str(
+                                source_task.get("title")
+                                or ""
+                            ).strip()
+
+                            if source_current_title:
+                                source_task_changed = (
+                                    bool(source_stored_title)
+                                    and source_current_title
+                                    != source_stored_title
+                                )
+
+                                payload[
+                                    "current_source_task_title"
+                                ] = source_current_title
+
+                        except Exception as exc:
+                            print(
+                                "[Review] Source task refresh failed:",
+                                source_task_id,
+                                exc,
+                            )
+
+                    payload["source_task_changed"] = (
+                        source_task_changed
                     )
 
                     review["payload"] = payload
