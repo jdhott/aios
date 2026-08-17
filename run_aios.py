@@ -7152,9 +7152,7 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
                     is_important=is_important,
                     due_date=due_date,
                     manual_project=manual_project,
-                    notion_create_fn=_create_notion_task_only,
                     post_create_fn=post_create,
-                    notion_rollback_fn=update_notion_page,
                 )
             )
 

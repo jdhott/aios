@@ -12,7 +12,7 @@ checks=[
  ("runtime computes inferred importance before native creation", 'importance_result = infer_importance(' in runtime and 'importance=effective_importance' in runtime),
  ("runtime assigns clarification status directly", 'status = (' in runtime and 'CLARIFY_STATUS' in runtime),
  ("normal native creation no longer supplies Notion creator", 'notion_create_fn=_create_notion_task_only' not in runtime[runtime.index('if can_use_supabase_primary:'):runtime.index('return _create_notion_task_only', runtime.index('if can_use_supabase_primary:'))]),
- ("breakdown hierarchy remains transitional", 'create_supabase_primary_hierarchy(' in runtime and 'notion_create_fn=_create_notion_task_only' in runtime),
+ ("breakdown hierarchy is native Supabase", 'create_supabase_primary_hierarchy(' in runtime and 'notion_create_fn=_create_notion_task_only' not in runtime[runtime.index('def create_breakdown_tasks'):runtime.index('def create_breakdown_tasks')+5000]),
 ]
 failed=[]
 for label,ok in checks:

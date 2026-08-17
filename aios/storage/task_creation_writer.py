@@ -110,6 +110,11 @@ class SupabasePrimaryTaskCreator:
                 "Effort": select_prop(row.get("effort")),
                 "Due Date": date_prop(row.get("due_at")),
                 "Suggested Project": {"type": "rich_text", "rich_text": rich_text},
+                "Parent Task": {
+                    "type": "relation",
+                    "relation": ([{"id": str(row["parent_task_id"])}] if row.get("parent_task_id") else []),
+                },
+                "Step Order": {"type": "number", "number": row.get("step_order")},
             },
         }
 
@@ -197,32 +202,18 @@ def create_supabase_primary_task(
 
 
 class SupabasePrimaryTaskHierarchyCreator:
-    """
-    Create a breakdown parent and ordered subtasks in Supabase first, then
-    create temporary Notion mirrors.
+    """Create a breakdown parent and ordered subtasks directly in Supabase.
 
-    Supabase owns:
-      - parent/child identity
-      - parent_task_id
-      - step_order
-
-    Notion pages remain temporary UI mirrors.
+    New native hierarchies intentionally have no Notion mirrors. Supabase owns
+    parent/child identity, parent_task_id, and step_order. Returned task objects
+    keep the compatibility shape used by the current processor.
     """
 
     def __init__(self):
         self.store = SupabaseStore()
 
-    def _delete_task(
-        self,
-        task_id: str,
-    ) -> None:
-        (
-            self.store.client
-            .table("tasks")
-            .delete()
-            .eq("id", task_id)
-            .execute()
-        )
+    def _delete_task(self, task_id: str) -> None:
+        self.store.client.table("tasks").delete().eq("id", task_id).execute()
 
     def _insert_task(
         self,
@@ -235,85 +226,29 @@ class SupabasePrimaryTaskHierarchyCreator:
         manual_project: str,
         parent_task_id: Optional[str],
         step_order: Optional[int],
-    ) -> str:
-        response = (
-            self.store.client
-            .table("tasks")
-            .insert({
-                "legacy_notion_id": None,
-                "title": title,
-                "is_open": True,
-                "is_done": False,
-                "is_archived": False,
-                "is_just_do_it": bool(is_jdi),
-                "is_quick_win": False,
-                "urgency": (
-                    "High Urgency"
-                    if is_urgent
-                    else None
-                ),
-                "importance": (
-                    "High Importance"
-                    if is_important
-                    else None
-                ),
-                "due_at": (
-                    due_date.isoformat()
-                    if due_date
-                    else None
-                ),
-                "suggested_project": (
-                    manual_project
-                    if manual_project
-                    else None
-                ),
-                "parent_task_id": parent_task_id,
-                "step_order": step_order,
-            })
-            .execute()
-        )
-
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "legacy_notion_id": None,
+            "title": title,
+            "is_open": True,
+            "is_done": False,
+            "is_archived": False,
+            "is_just_do_it": bool(is_jdi),
+            "is_quick_win": False,
+            "urgency": "High Urgency" if is_urgent else None,
+            "importance": "High Importance" if is_important else None,
+            "due_at": due_date.isoformat() if due_date else None,
+            "suggested_project": manual_project or None,
+            "parent_task_id": parent_task_id,
+            "step_order": step_order,
+        }
+        response = self.store.client.table("tasks").insert(payload).execute()
         rows = response.data or []
-
         if not rows:
-            raise RuntimeError(
-                "Supabase hierarchy insert returned no row."
-            )
-
-        return rows[0]["id"]
-
-    def _link_mirror(
-        self,
-        *,
-        supabase_task_id: str,
-        notion_page: dict[str, Any],
-    ) -> None:
-        notion_id = notion_page.get("id")
-
-        if not notion_id:
-            raise RuntimeError(
-                "Notion mirror has no page ID."
-            )
-
-        response = (
-            self.store.client
-            .table("tasks")
-            .update({
-                "legacy_notion_id": notion_id,
-            })
-            .eq("id", supabase_task_id)
-            .execute()
-        )
-
-        if not (response.data or []):
-            raise RuntimeError(
-                "Failed to link Notion hierarchy mirror."
-            )
-
-        notion_page["_supabase_id"] = (
-            supabase_task_id
-        )
-        notion_page["_source"] = "supabase"
+            raise RuntimeError("Supabase hierarchy insert returned no row.")
+        row = dict(payload)
+        row.update(rows[0])
+        return row
 
     def create_hierarchy(
         self,
@@ -325,181 +260,51 @@ class SupabasePrimaryTaskHierarchyCreator:
         is_important: bool,
         due_date,
         manual_project: str,
-        notion_create_fn: NotionCreateFn,
-        post_create_fn: Callable[
-            [dict[str, Any], bool],
-            dict[str, Any],
-        ],
+        post_create_fn: Callable[[dict[str, Any], bool], dict[str, Any]],
+        notion_create_fn: Optional[NotionCreateFn] = None,
         notion_rollback_fn: Optional[NotionRollbackFn] = None,
     ) -> list[dict[str, Any]]:
-        """
-        Preserve the existing breakdown semantics:
-
-        Parent:
-          inherits JDI, urgency, importance, due date.
-
-        Children:
-          inherit JDI, urgency, due date.
-          importance remains non-explicit, matching the current runtime.
-        """
-
+        """Preserve breakdown inheritance while creating only native rows."""
+        del notion_create_fn, notion_rollback_fn
         created_supabase_ids: list[str] = []
-        created_notion_ids: list[str] = []
         pages: list[dict[str, Any]] = []
 
         try:
-            parent_supabase_id = self._insert_task(
-                title=parent_title,
-                is_jdi=is_jdi,
-                is_urgent=is_urgent,
-                is_important=is_important,
-                due_date=due_date,
-                manual_project=manual_project,
-                parent_task_id=None,
-                step_order=None,
+            parent_row = self._insert_task(
+                title=parent_title, is_jdi=is_jdi, is_urgent=is_urgent,
+                is_important=is_important, due_date=due_date,
+                manual_project=manual_project, parent_task_id=None, step_order=None,
             )
+            parent_id = str(parent_row["id"])
+            created_supabase_ids.append(parent_id)
+            parent_page = SupabasePrimaryTaskCreator._compat_page(parent_row)
+            parent_page = post_create_fn(parent_page, is_important)
+            pages.append(parent_page)
 
-            created_supabase_ids.append(
-                parent_supabase_id
-            )
-
-            parent_page = notion_create_fn(
-                parent_title,
-                is_jdi=is_jdi,
-                is_urgent=is_urgent,
-                is_important=is_important,
-                due_date=due_date,
-                parent_task_id=None,
-                step_order=None,
-                manual_project=manual_project,
-            )
-
-            if not parent_page:
-                raise RuntimeError(
-                    "Parent Notion mirror creation failed."
-                )
-
-            self._link_mirror(
-                supabase_task_id=parent_supabase_id,
-                notion_page=parent_page,
-            )
-
-            created_notion_ids.append(
-                parent_page["id"]
-            )
-
-            parent_page = post_create_fn(
-                parent_page,
-                is_important,
-            )
-
-            parent_page["_supabase_id"] = (
-                parent_supabase_id
-            )
-            parent_page["_source"] = "supabase"
-
-            pages.append(
-                parent_page
-            )
-
-            parent_notion_id = (
-                parent_page["id"]
-            )
-
-            for step_order, subtask_title in enumerate(
-                subtasks,
-                start=1,
-            ):
-                child_supabase_id = self._insert_task(
-                    title=subtask_title,
-                    is_jdi=is_jdi,
-                    is_urgent=is_urgent,
-                    is_important=False,
-                    due_date=due_date,
-                    manual_project=manual_project,
-                    parent_task_id=parent_supabase_id,
+            for step_order, subtask_title in enumerate(subtasks, start=1):
+                child_row = self._insert_task(
+                    title=subtask_title, is_jdi=is_jdi, is_urgent=is_urgent,
+                    is_important=False, due_date=due_date,
+                    manual_project=manual_project, parent_task_id=parent_id,
                     step_order=step_order,
                 )
-
-                created_supabase_ids.append(
-                    child_supabase_id
-                )
-
-                child_page = notion_create_fn(
-                    subtask_title,
-                    is_jdi=is_jdi,
-                    is_urgent=is_urgent,
-                    is_important=False,
-                    due_date=due_date,
-                    parent_task_id=parent_notion_id,
-                    step_order=step_order,
-                    manual_project=manual_project,
-                )
-
-                if not child_page:
-                    raise RuntimeError(
-                        "Child Notion mirror creation failed "
-                        f"at step {step_order}."
-                    )
-
-                self._link_mirror(
-                    supabase_task_id=child_supabase_id,
-                    notion_page=child_page,
-                )
-
-                created_notion_ids.append(
-                    child_page["id"]
-                )
-
-                child_page = post_create_fn(
-                    child_page,
-                    False,
-                )
-
-                child_page["_supabase_id"] = (
-                    child_supabase_id
-                )
-                child_page["_source"] = "supabase"
-
-                pages.append(
-                    child_page
-                )
+                child_id = str(child_row["id"])
+                created_supabase_ids.append(child_id)
+                child_page = SupabasePrimaryTaskCreator._compat_page(child_row)
+                child_page = post_create_fn(child_page, False)
+                pages.append(child_page)
 
             print(
-                "[Task Hierarchy Creation] "
-                f"Created parent + {len(subtasks)} subtasks "
-                "Supabase-first with linked Notion mirrors"
+                "[Task Hierarchy Creation] Created native Supabase parent + "
+                f"{len(subtasks)} subtasks without Notion mirrors"
             )
-
             return pages
-
         except Exception:
-            if notion_rollback_fn:
-                for notion_id in reversed(
-                    created_notion_ids
-                ):
-                    try:
-                        notion_rollback_fn(
-                            notion_id,
-                            {
-                                "Archived": {
-                                    "checkbox": True,
-                                }
-                            },
-                        )
-                    except Exception:
-                        pass
-
-            for task_id in reversed(
-                created_supabase_ids
-            ):
+            for task_id in reversed(created_supabase_ids):
                 try:
-                    self._delete_task(
-                        task_id
-                    )
+                    self._delete_task(task_id)
                 except Exception:
                     pass
-
             raise
 
 
@@ -515,11 +320,11 @@ def create_supabase_primary_hierarchy(
     is_important: bool,
     due_date,
     manual_project: str,
-    notion_create_fn: NotionCreateFn,
     post_create_fn: Callable[
         [dict[str, Any], bool],
         dict[str, Any],
     ],
+    notion_create_fn: Optional[NotionCreateFn] = None,
     notion_rollback_fn: Optional[NotionRollbackFn] = None,
 ) -> list[dict[str, Any]]:
     global _HIERARCHY_CREATOR
