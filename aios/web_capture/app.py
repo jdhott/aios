@@ -2949,7 +2949,10 @@ def _page(
 
     for heading, key in section_specs:
         section_tasks = tasks.get(key, [])
-        if focus_id:
+        # Rank 1 is presented separately as the Best Next Action. Today is
+        # intentionally allowed to overlap because it is the complete calendar
+        # view of tasks due today or overdue.
+        if focus_id and key != "today":
             section_tasks = [task for task in section_tasks if str(task.get("id") or "") != focus_id]
         if not section_tasks:
             continue
@@ -3541,8 +3544,37 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         }});
       }}
 
+      const sectionStateKey = "aios-dashboard-section-state-v1";
       const taskSections = () =>
         Array.from(document.querySelectorAll("details.task-group"));
+
+      const readSectionState = () => {{
+        try {{
+          return JSON.parse(localStorage.getItem(sectionStateKey) || "{{}}") || {{}};
+        }} catch (_error) {{
+          return {{}};
+        }}
+      }};
+
+      const saveSectionState = () => {{
+        const state = {{}};
+        taskSections().forEach((section) => {{
+          const key = section.dataset.section;
+          if (key) state[key] = section.open;
+        }});
+        localStorage.setItem(sectionStateKey, JSON.stringify(state));
+      }};
+
+      const restoreSectionState = () => {{
+        const state = readSectionState();
+        taskSections().forEach((section) => {{
+          const key = section.dataset.section;
+          if (key && Object.prototype.hasOwnProperty.call(state, key)) {{
+            section.open = Boolean(state[key]);
+          }}
+          section.addEventListener("toggle", saveSectionState);
+        }});
+      }};
 
       const expandAll = document.getElementById("expandAllSections");
       const collapseAll = document.getElementById("collapseAllSections");
@@ -3550,15 +3582,18 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       if (expandAll) {{
         expandAll.addEventListener("click", () => {{
           taskSections().forEach((section) => section.open = true);
+          saveSectionState();
         }});
       }}
 
       if (collapseAll) {{
         collapseAll.addEventListener("click", () => {{
           taskSections().forEach((section) => section.open = false);
+          saveSectionState();
         }});
       }}
 
+      restoreSectionState();
       restoreScroll();
     }})();
   </script>

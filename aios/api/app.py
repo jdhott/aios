@@ -254,7 +254,7 @@ def get_review(
 
 
 AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.2-today-includes-overdue"
-AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.3-full-open-population"
+AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.4-dashboard-semantics"
 
 AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
 
@@ -375,7 +375,17 @@ def list_open_tasks_http(
                 break
         return selected
 
-    top5 = take(sorted(rows, key=score_key), 5)
+    # Best Next Action (rank 1) is rendered separately by the focus card.
+    # Top 5 means the next five ranked execution tasks: ranks 2 through 6.
+    top5 = sorted(
+        [
+            row for row in rows
+            if row.get("execution_rank") is not None
+            and 2 <= int(row.get("execution_rank")) <= 6
+        ],
+        key=lambda row: int(row.get("execution_rank")),
+    )
+    used.update(row.get("id") for row in top5 if row.get("id"))
 
     quick_wins = take(
         sorted(
@@ -385,11 +395,11 @@ def list_open_tasks_http(
         5,
     )
 
-    today_items = take(
-        sorted(
-            [row for row in rows if due_today(row)],
-            key=score_key,
-        )
+    # Today is a calendar view, not another ranking slice. Show every open
+    # task due today or overdue, even when it also appears in another section.
+    today_items = sorted(
+        [row for row in rows if due_today(row)],
+        key=lambda row: (str(row.get("due_at") or "")[:10], *score_key(row)),
     )
 
     jdi_items = take(
