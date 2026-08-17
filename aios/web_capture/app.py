@@ -2881,7 +2881,22 @@ def _page(
     focus_card = ""
     focus_id = ""
 
-    if not focus and refresh_focus:
+    activation = (
+        dict(focus.get("activation") or {})
+        if focus
+        else {}
+    )
+    activation_id = str(activation.get("id") or "")
+    refresh_pending = bool(
+        refresh_focus
+        and (
+            not focus
+            or bool(focus.get("activation_pending"))
+            or not activation_id
+        )
+    )
+
+    if refresh_pending:
         focus_card = (
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
@@ -2889,7 +2904,7 @@ def _page(
             '</section>'
         )
 
-    if focus:
+    if focus and not refresh_pending:
         focus_id = str(focus.get("id") or "")
         safe_id = html.escape(focus_id)
         title = html.escape(str(focus.get("title") or "Untitled task"))
@@ -2898,16 +2913,8 @@ def _page(
         if focus.get("execution_score") is not None: meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
         if focus.get("importance"): meta.append(html.escape(str(focus.get("importance"))))
 
-        activation = dict(focus.get("activation") or {})
-        activation_id = str(activation.get("id") or "")
         activation_title = str(activation.get("title") or "").strip()
-        activation_pending = (
-            bool(focus.get("activation_pending"))
-            or (
-                refresh_focus
-                and not activation_id
-            )
-        )
+        activation_pending = bool(focus.get("activation_pending"))
 
         # Activation child is canonical. Never fall back to stale legacy
         # guidance while the processor is generating the next activation.
@@ -3011,22 +3018,7 @@ def _page(
 
     pending_refresh_script = ""
 
-    activation = (
-        dict(focus.get("activation") or {})
-        if focus
-        else {}
-    )
-
-    refresh_needed = bool(
-        (focus and focus.get("activation_pending"))
-        or (
-            refresh_focus
-            and (
-                not focus
-                or not activation.get("id")
-            )
-        )
-    )
+    refresh_needed = refresh_pending
 
     if refresh_needed:
         pending_refresh_script = """

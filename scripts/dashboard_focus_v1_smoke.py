@@ -92,3 +92,27 @@ print("AI starter guidance + timebox render: PASS")
 print("Rank1 removed from Top 5: PASS")
 print("Alternative sections collapsed by default: PASS")
 print("RESULT: DASHBOARD FOCUS V1 SMOKE TEST PASSED")
+
+pending_focus = dict(focus)
+pending_focus["activation"] = {}
+pending_focus["activation_pending"] = True
+pending_html = web._page(
+    tasks=sections,
+    focus=pending_focus,
+    refresh_focus=True,
+)
+assert "Updating your focus…" in pending_html
+assert "Plan 90th birthday party for Mum" not in pending_html
+assert "Finding your next step…" not in pending_html
+
+ready_html = web._page(
+    tasks=sections,
+    focus=focus,
+    refresh_focus=True,
+)
+assert "Updating your focus…" not in ready_html
+assert "Plan 90th birthday party for Mum" in ready_html
+assert "Start here" in ready_html
+
+print("Provisional BNA hidden during refresh: PASS")
+print("Final BNA revealed only when activation is ready: PASS")
