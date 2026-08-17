@@ -71,9 +71,9 @@ def main():
             in run_text,
         ),
         (
-            "pipeline reads action through review boundary",
-            "inbox_review_ui.get_possible_duplicate_action(item)"
-            in run_text,
+            "legacy Notion action read remains available",
+            ".get_possible_duplicate_action(item)" in run_text
+            and 'AIOS_DATASTORE == "notion"' in run_text,
         ),
         (
             "core runtime no longer accesses item block_id",

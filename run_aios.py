@@ -5409,16 +5409,26 @@ def get_match_title(match):
 
 
 # -------------------------------------------------------------------------
-# Source-neutral duplicate-review interaction boundary
+# Possible-duplicate review authority
 # -------------------------------------------------------------------------
-from aios.notion import duplicate_review as duplicate_review_ui
+# Supabase/web is the review surface whenever Supabase is authoritative.
+# The Notion review UI is loaded only for explicit legacy Notion mode so a
+# Supabase run never pays for duplicate-review block reads/writes in Notion.
 from aios.storage.supabase_store import SupabaseStore
 from aios.storage.inbox_repository import InboxRepository
 from aios.review.repository import InboxReviewRepository
 
-duplicate_review_ui.configure_duplicate_review_ui(globals())
+inbox_review_ui = None
+duplicate_review_ui = None
 
-inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
+if AIOS_DATASTORE == "notion":
+    from aios.notion import duplicate_review as duplicate_review_ui
+
+    duplicate_review_ui.configure_duplicate_review_ui(globals())
+    inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
+    print("[Possible Duplicate Review] Legacy Notion review UI configured")
+else:
+    print("[Possible Duplicate Review] Supabase/web review authority configured")
 
 from aios.review.possible_duplicate_transitions import (
     resolve_possible_duplicate_review,
@@ -5437,12 +5447,11 @@ if AIOS_DATASTORE == "supabase":
         possible_duplicate_shadow_review_repo = InboxReviewRepository(
             _possible_duplicate_shadow_store
         )
-        print("[Possible Duplicate Shadow] Supabase shadow review repositories configured")
+        print("[Possible Duplicate Review] Supabase review repositories configured")
     except Exception as exc:
-        print(f"[Possible Duplicate Shadow] Bootstrap failed: {exc}")
+        print(f"[Possible Duplicate Review] Bootstrap failed: {exc}")
 
-print("[Inbox Review UI] Notion duplicate-review interface configured")
-SOURCE_AWARE_REVIEW_PRESENTATION_VERSION = "app-service-boundary-v1-phase1.2"
+SOURCE_AWARE_REVIEW_PRESENTATION_VERSION = "possible-duplicate-supabase-web-v1"
 
 
 # In[63]:
@@ -5569,11 +5578,8 @@ def _pending_duplicate_reevaluation(item):
     return review
 
 
-def shadow_possible_duplicate_review(match):
-    """Write an observational Supabase review for a real possible duplicate.
-
-    Notion remains the authoritative review UI. Shadow failures are non-blocking.
-    """
+def upsert_possible_duplicate_review(match):
+    """Create or refresh the authoritative Supabase possible-duplicate review."""
     if AIOS_DATASTORE != "supabase":
         return None
 
@@ -5647,7 +5653,7 @@ def shadow_possible_duplicate_review(match):
             )
 
             print(
-                "[Possible Duplicate Shadow] "
+                "[Possible Duplicate Review] "
                 "Existing open review refreshed:",
                 item["text"],
             )
@@ -5698,7 +5704,7 @@ def shadow_possible_duplicate_review(match):
         )
 
         print(
-            "[Possible Duplicate Shadow] Created Supabase review:",
+            "[Possible Duplicate Review] Created Supabase review:",
             item["text"],
         )
 
@@ -5706,18 +5712,19 @@ def shadow_possible_duplicate_review(match):
 
     except Exception as exc:
         print(
-            "[Possible Duplicate Shadow] Write failed:",
+            "[Possible Duplicate Review] Write failed:",
             exc,
         )
         return None
 
-print("[Possible Duplicate Shadow] Execution order fixed")
+print("[Possible Duplicate Review] Supabase review upsert configured")
 
 
-# Refresh duplicate-review UI dependencies now that score_label and
-# matching thresholds/helpers are available in runtime globals.
-duplicate_review_ui.configure_duplicate_review_ui(globals())
-print("[Inbox Review UI] Runtime dependencies refreshed")
+# Legacy Notion mode still needs runtime helpers such as score_label.
+# Supabase mode intentionally skips this configuration entirely.
+if duplicate_review_ui is not None:
+    duplicate_review_ui.configure_duplicate_review_ui(globals())
+    print("[Possible Duplicate Review] Legacy Notion runtime dependencies refreshed")
 
 
 # ## 10. Parent-child linking
@@ -6357,12 +6364,14 @@ if RUN_TASK_CREATION_PIPELINE:
         )
 
         if not DRY_RUN:
-            inbox_review_ui.show_possible_duplicate(
-                match["item"],
-                match["task"],
-                match["score"],
-            )
-            shadow_possible_duplicate_review(match)
+            if AIOS_DATASTORE == "supabase":
+                upsert_possible_duplicate_review(match)
+            elif inbox_review_ui is not None:
+                inbox_review_ui.show_possible_duplicate(
+                    match["item"],
+                    match["task"],
+                    match["score"],
+                )
 
     RUN_SUMMARY["duplicate_inbox_items"] = len(duplicate_inbox_items)
     print(f"\nDuplicate inbox items: {len(duplicate_inbox_items)}")
@@ -6747,7 +6756,11 @@ def review_possible_duplicate_items(possible_matches):
             match
         )
 
-        if not action:
+        if (
+            not action
+            and AIOS_DATASTORE == "notion"
+            and inbox_review_ui is not None
+        ):
             action = (
                 inbox_review_ui
                 .get_possible_duplicate_action(item)

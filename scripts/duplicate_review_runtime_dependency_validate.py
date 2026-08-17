@@ -23,7 +23,7 @@ def main() -> None:
         / "duplicate_review.py"
     ).read_text()
 
-    marker = "[Inbox Review UI] Runtime dependencies refreshed"
+    marker = "[Possible Duplicate Review] Legacy Notion runtime dependencies refreshed"
     score_end = function_end_line(run_text, "score_label")
     run_lines = run_text.splitlines()
 
@@ -63,8 +63,12 @@ def main() -> None:
             in run_text,
         ),
         (
-            "possible-duplicate shadow integration remains present",
-            "def shadow_possible_duplicate_review(" in run_text,
+            "Supabase review upsert integration is present",
+            "def upsert_possible_duplicate_review(" in run_text,
+        ),
+        (
+            "Notion runtime refresh is legacy-only",
+            "if duplicate_review_ui is not None:" in run_text,
         ),
     ]
 

@@ -75,11 +75,9 @@ def main() -> None:
             and "decision jsonb" in sql_text,
         ),
         (
-            "production runtime remains unchanged",
-            "process_clarification_selection(task)"
-            in run_text
-            and "inbox_review_ui.show_possible_duplicate("
-            in run_text,
+            "Supabase runtime owns possible-duplicate review",
+            "upsert_possible_duplicate_review(match)" in run_text
+            and 'AIOS_DATASTORE == "supabase"' in run_text,
         ),
     ]
 
