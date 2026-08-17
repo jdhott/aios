@@ -39,15 +39,15 @@ def main() -> None:
 
     writer = QuickWinSupabaseWriter()
 
-    writer(
-        candidate.legacy_notion_id,
-        {
-            "Quick Win": {
-                "type": "checkbox",
-                "checkbox": original,
-            }
-        },
-    )
+    properties = {
+        "Quick Win": {
+            "type": "checkbox",
+            "checkbox": original,
+        }
+    }
+
+    writer(candidate.legacy_notion_id, properties)
+    writer(candidate.id, properties)
 
     refreshed = repo.get_task(candidate.id)
 
@@ -62,8 +62,8 @@ def main() -> None:
         )
 
     print(
-        "Supabase Quick Win write smoke test passed. "
-        "Existing value was preserved."
+        "Supabase Quick Win identity smoke test passed. "
+        "Legacy and native task IDs both preserved the existing value."
     )
 
 

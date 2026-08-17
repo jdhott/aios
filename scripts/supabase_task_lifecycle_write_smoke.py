@@ -47,36 +47,36 @@ def main() -> None:
         "completed_at": candidate.completed_at,
     }
 
-    writer.update(
-        candidate.legacy_notion_id,
-        {
-            "Task Name": {
-                "title": [
-                    {
-                        "text": {
-                            "content": candidate.title
-                        }
+    updates = {
+        "Task Name": {
+            "title": [
+                {
+                    "text": {
+                        "content": candidate.title
                     }
-                ]
-            },
-            "Status": {
-                "select": (
-                    {"name": candidate.status}
-                    if candidate.status
-                    else None
-                )
-            },
-            "Open Loop": {
-                "checkbox": candidate.is_open
-            },
-            "Done": {
-                "checkbox": candidate.is_done
-            },
-            "Archived": {
-                "checkbox": candidate.is_archived
-            },
+                }
+            ]
         },
-    )
+        "Status": {
+            "select": (
+                {"name": candidate.status}
+                if candidate.status
+                else None
+            )
+        },
+        "Open Loop": {
+            "checkbox": candidate.is_open
+        },
+        "Done": {
+            "checkbox": candidate.is_done
+        },
+        "Archived": {
+            "checkbox": candidate.is_archived
+        },
+    }
+
+    writer.update(candidate.legacy_notion_id, updates)
+    writer.update(candidate.id, updates)
 
     after_task = repo.get_task(
         candidate.id
@@ -104,8 +104,8 @@ def main() -> None:
         )
 
     print(
-        "Supabase existing-task lifecycle write smoke test passed. "
-        "Title and lifecycle values were preserved."
+        "Supabase task lifecycle identity smoke test passed. "
+        "Legacy and native task IDs both preserved lifecycle values."
     )
 
 

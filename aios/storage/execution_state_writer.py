@@ -51,42 +51,50 @@ class _SupabaseExecutionStateBase:
         self._store = SupabaseStore()
         self._task_repository = TaskRepository(self._store)
         self._execution_repository = ExecutionRepository(self._store)
-        self._notion_to_supabase_task_id: dict[str, str] | None = None
+        self._identity_to_supabase_task_id: dict[str, str] | None = None
 
     def _ensure_task_map(self) -> None:
-        if self._notion_to_supabase_task_id is not None:
+        if self._identity_to_supabase_task_id is not None:
             return
 
         tasks = self._task_repository.get_all_tasks()
 
-        self._notion_to_supabase_task_id = {
-            task.legacy_notion_id: task.id
-            for task in tasks
-            if task.legacy_notion_id
-        }
+        identity_map: dict[str, str] = {}
+
+        for task in tasks:
+            identity_map[task.id] = task.id
+            if task.legacy_notion_id:
+                identity_map[task.legacy_notion_id] = task.id
+
+        self._identity_to_supabase_task_id = identity_map
 
         print(
             "[Supabase Execution Write] "
-            f"Loaded task ID mappings: "
-            f"{len(self._notion_to_supabase_task_id)}"
+            f"Loaded task identity mappings: {len(identity_map)}"
         )
 
     def _supabase_task_id(
         self,
-        notion_task_id: str,
+        task_identity: str,
     ) -> str:
         self._ensure_task_map()
 
-        assert self._notion_to_supabase_task_id is not None
+        assert self._identity_to_supabase_task_id is not None
 
-        task_id = self._notion_to_supabase_task_id.get(
-            notion_task_id
-        )
+        task_id = self._identity_to_supabase_task_id.get(task_identity)
+
+        if not task_id:
+            # Same-process task creation can make a previously-built identity
+            # cache stale. Refresh once before failing.
+            self._identity_to_supabase_task_id = None
+            self._ensure_task_map()
+            assert self._identity_to_supabase_task_id is not None
+            task_id = self._identity_to_supabase_task_id.get(task_identity)
 
         if not task_id:
             raise RuntimeError(
-                "Could not map Notion task ID "
-                f"{notion_task_id} to Supabase."
+                "Could not resolve task identity "
+                f"{task_identity} to Supabase."
             )
 
         return task_id

@@ -88,6 +88,15 @@ def main() -> None:
         updates,
     )
 
+    native_task = {
+        "id": candidate.id,
+        "properties": {},
+    }
+    writer.update(
+        native_task,
+        updates,
+    )
+
     after_task = repo.get_task(candidate.id)
 
     if after_task is None:
@@ -114,8 +123,8 @@ def main() -> None:
         )
 
     print(
-        "Supabase existing-task metadata write smoke test passed. "
-        "All tested values were preserved."
+        "Supabase task metadata identity smoke test passed. "
+        "Legacy and native task IDs both preserved values."
     )
 
 
