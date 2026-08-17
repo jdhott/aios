@@ -361,20 +361,7 @@ def list_open_tasks_http(
         except (TypeError, ValueError):
             return str(raw)[:10] <= today.isoformat()
 
-    used: set[str] = set()
-
-    def take(candidates: list[dict], count: int | None = None):
-        selected = []
-        for row in candidates:
-            task_id = row.get("id")
-            if not task_id or task_id in used:
-                continue
-            selected.append(row)
-            used.add(task_id)
-            if count is not None and len(selected) >= count:
-                break
-        return selected
-
+    # Dashboard sections are independent views, not mutually exclusive buckets.
     # Best Next Action (rank 1) is rendered separately by the focus card.
     # Top 5 means the next five ranked execution tasks: ranks 2 through 6.
     top5 = sorted(
@@ -385,15 +372,6 @@ def list_open_tasks_http(
         ],
         key=lambda row: int(row.get("execution_rank")),
     )
-    used.update(row.get("id") for row in top5 if row.get("id"))
-
-    quick_wins = take(
-        sorted(
-            [row for row in rows if bool(row.get("is_quick_win"))],
-            key=quick_win_key,
-        ),
-        5,
-    )
 
     # Today is a calendar view, not another ranking slice. Show every open
     # task due today or overdue, even when it also appears in another section.
@@ -402,12 +380,26 @@ def list_open_tasks_http(
         key=lambda row: (str(row.get("due_at") or "")[:10], *score_key(row)),
     )
 
-    jdi_items = take(
-        sorted(
-            [row for row in rows if bool(row.get("is_just_do_it"))],
-            key=score_key,
-        )
+    # JDI is also an independent view: show every open JDI task even when it
+    # appears in BNA, Top 5, or Today.
+    jdi_items = sorted(
+        [row for row in rows if bool(row.get("is_just_do_it"))],
+        key=score_key,
     )
+
+    # Quick Wins are the residual lightweight actions. They should never
+    # duplicate a stronger dashboard signal: BNA, Top 5, Today, or JDI.
+    stronger_ids = {str(row.get("id")) for row in top5 + today_items + jdi_items}
+    quick_wins = sorted(
+        [
+            row for row in rows
+            if bool(row.get("is_quick_win"))
+            and not bool(row.get("best_next_action"))
+            and row.get("execution_rank") != 1
+            and str(row.get("id")) not in stronger_ids
+        ],
+        key=quick_win_key,
+    )[:5]
 
     return {
         "count": len(rows),
