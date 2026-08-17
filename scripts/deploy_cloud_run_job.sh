@@ -20,7 +20,6 @@ required_local_vars=(
   TASKS_DATABASE_ID
   BRAIN_DUMP_PAGE_ID
   NOTION_PROJECTS_DATABASE_ID
-  NOTION_AI_LOG_DATABASE_ID
   AIOS_DASHBOARD_BLOCK_ID
   ARCHIVE_TOGGLE_BLOCK_ID
 )
@@ -44,7 +43,7 @@ echo "Schedule: manual only"
 
 gcloud builds submit   --project "$PROJECT"   --config cloudbuild.job.yaml   --substitutions "_IMAGE=${IMAGE}"   .
 
-gcloud run jobs deploy "$JOB"   --project "$PROJECT"   --region "$REGION"   --image "$IMAGE"   --service-account "$RUNTIME_SERVICE_ACCOUNT"   --set-env-vars "AIOS_JOB_ENV=cloudrun,AIOS_DATASTORE=supabase,AIOS_INBOX_SOURCE=supabase,TASKS_DATABASE_ID=${TASKS_DATABASE_ID},BRAIN_DUMP_PAGE_ID=${BRAIN_DUMP_PAGE_ID},NOTION_PROJECTS_DATABASE_ID=${NOTION_PROJECTS_DATABASE_ID},NOTION_AI_LOG_DATABASE_ID=${NOTION_AI_LOG_DATABASE_ID}},AIOS_DASHBOARD_BLOCK_ID=${AIOS_DASHBOARD_BLOCK_ID},ARCHIVE_TOGGLE_BLOCK_ID=${ARCHIVE_TOGGLE_BLOCK_ID}"   --set-secrets "SUPABASE_URL=aios-supabase-url:latest,SUPABASE_SECRET_KEY=aios-supabase-secret-key:latest,OPENAI_API_KEY=aios-openai-api-key:latest,NOTION_TOKEN=aios-notion-token:latest"   --tasks 1   --max-retries 0   --task-timeout 20m
+gcloud run jobs deploy "$JOB"   --project "$PROJECT"   --region "$REGION"   --image "$IMAGE"   --service-account "$RUNTIME_SERVICE_ACCOUNT"   --set-env-vars "AIOS_JOB_ENV=cloudrun,AIOS_DATASTORE=supabase,AIOS_INBOX_SOURCE=supabase,TASKS_DATABASE_ID=${TASKS_DATABASE_ID},BRAIN_DUMP_PAGE_ID=${BRAIN_DUMP_PAGE_ID},NOTION_PROJECTS_DATABASE_ID=${NOTION_PROJECTS_DATABASE_ID},AIOS_DASHBOARD_BLOCK_ID=${AIOS_DASHBOARD_BLOCK_ID},ARCHIVE_TOGGLE_BLOCK_ID=${ARCHIVE_TOGGLE_BLOCK_ID}"   --set-secrets "SUPABASE_URL=aios-supabase-url:latest,SUPABASE_SECRET_KEY=aios-supabase-secret-key:latest,OPENAI_API_KEY=aios-openai-api-key:latest,NOTION_TOKEN=aios-notion-token:latest"   --tasks 1   --max-retries 0   --task-timeout 20m
 
 echo "Deployment complete."
 echo "No scheduler has been created."

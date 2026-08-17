@@ -22,7 +22,6 @@ def _env(*names):
     return ''
 def _task_db(): return _env('TASKS_DATABASE_ID','NOTION_TASKS_DATABASE_ID','NOTION_TASK_DATABASE_ID')
 def _project_db(): return _env('PROJECTS_DATABASE_ID','PROJECT_DATABASE_ID','NOTION_PROJECTS_DATABASE_ID','NOTION_PROJECT_DATABASE_ID')
-def _ai_log_db(): return _env('NOTION_AI_LOG_DATABASE_ID','AI_LOG_DATABASE_ID')
 def _telemetry_db(): return _env('NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID','TOPOLOGY_TELEMETRY_DATABASE_ID')
 
 def _caller():
@@ -73,7 +72,6 @@ def classify_mutation(method,url,payload=None):
         return 'allowed_interface','Notion block presentation / interaction mutation'
     if method=='POST' and url.rstrip('/').endswith('/v1/pages'):
         pid=_parent_db(payload)
-        if pid and pid==_ai_log_db(): return 'allowed_logging','AI Processing Log page creation'
         if pid and pid==_telemetry_db(): return 'allowed_telemetry','Project topology telemetry page creation'
         if pid and pid==_task_db(): return 'allowed_task_mirror','Transitional Notion task mirror page creation'
         if pid and pid==_project_db(): return 'unexpected_authoritative','Project database page creation in Supabase mode'
@@ -119,7 +117,7 @@ def emit_report():
     print('\n=== SUPABASE AUTHORITY AUDIT ===')
     print(f'[Supabase Authority Audit] Version: {VERSION}')
     print(f'[Supabase Authority Audit] Notion mutations observed: {len(_EVENTS)}')
-    for key,label in [('allowed_interface','Allowed interface'),('allowed_logging','Allowed logging'),('allowed_telemetry','Allowed telemetry'),('allowed_task_mirror','Allowed task mirrors'),('unexpected_authoritative','Unexpected authoritative writes'),('unclassified','Unclassified mutations')]:
+    for key,label in [('allowed_interface','Allowed interface'),('allowed_telemetry','Allowed telemetry'),('allowed_task_mirror','Allowed task mirrors'),('unexpected_authoritative','Unexpected authoritative writes'),('unclassified','Unclassified mutations')]:
         print(f'[Supabase Authority Audit] {label}: {c[key]}')
     bad=[e for e in _EVENTS if e.category in {'unexpected_authoritative','unclassified'}]
     for e in bad[:20]:

@@ -152,52 +152,9 @@ def _task_title(item: Dict[str, Any]) -> str:
     return ""
 
 
-def _metadata_log_headers() -> Optional[Dict[str, str]]:
-    token = os.getenv("NOTION_TOKEN", "").strip()
-    if not token:
-        return None
-    return {
-        "Authorization": f"Bearer {token}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
-
-
 def _query_ai_processing_log_for_title(title: str, page_size: int = 8) -> List[Dict[str, Any]]:
-    if requests is None:
-        return []
-    database_id = os.getenv("NOTION_AI_LOG_DATABASE_ID", "").strip()
-    headers = _metadata_log_headers()
-    if not database_id or not headers or not title:
-        return []
-    title = str(title).strip()
-    if not title:
-        return []
-
-    payload = {
-        "page_size": page_size,
-        "filter": {
-            "or": [
-                {"property": "Name", "title": {"contains": title}},
-                {"property": "Original", "rich_text": {"contains": title}},
-                {"property": "Final Task", "rich_text": {"contains": title}},
-            ]
-        },
-        "sorts": [{"property": "Run Time", "direction": "descending"}],
-    }
-    try:
-        response = requests.post(
-            f"https://api.notion.com/v1/databases/{database_id}/query",
-            headers=headers,
-            json=payload,
-            timeout=20,
-        )
-        if not response.ok:
-            return []
-        return response.json().get("results") or []
-    except Exception:
-        return []
-
+    """Legacy Notion provenance lookup retired from runtime analytics."""
+    return []
 
 def _parse_importance_from_reason(reason: str) -> Optional[Dict[str, Any]]:
     if not reason:

@@ -135,64 +135,14 @@ def _number_property_value(prop):
     return prop.get("number")
 
 
-def _metadata_log_headers():
-    token = os.getenv("NOTION_TOKEN", "").strip()
-    if not token:
-        return None
-    return {
-        "Authorization": f"Bearer {token}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
-
-
 def _query_ai_processing_log_for_title(title, page_size=8):
-    """Return recent AI Processing Log entries that mention this task title.
+    """Legacy provenance lookup retired; return no external log matches.
 
-    This is read-only observation. Failures are intentionally nonfatal because
-    execution ranking and persistence must not depend on AI log availability.
+    BNA ranking never depended on this diagnostic lookup. Keeping this
+    compatibility boundary avoids Notion network calls while preserving the
+    existing read-only audit shape as manual_or_unknown.
     """
-    if requests is None:
-        return []
-
-    database_id = os.getenv("NOTION_AI_LOG_DATABASE_ID", "").strip()
-    headers = _metadata_log_headers()
-    if not database_id or not headers or not title:
-        return []
-
-    title = str(title).strip()
-    if not title:
-        return []
-
-    payload = {
-        "page_size": page_size,
-        "filter": {
-            "or": [
-                {"property": "Name", "title": {"contains": title}},
-                {"property": "Original", "rich_text": {"contains": title}},
-                {"property": "Final Task", "rich_text": {"contains": title}},
-            ]
-        },
-        "sorts": [
-            {"property": "Run Time", "direction": "descending"}
-        ],
-    }
-
-    try:
-        response = requests.post(
-            f"https://api.notion.com/v1/databases/{database_id}/query",
-            headers=headers,
-            json=payload,
-            timeout=20,
-        )
-        if not response.ok:
-            print(f"[BNA Provenance] AI log query skipped: {response.status_code}")
-            return []
-        return response.json().get("results") or []
-    except Exception as e:
-        print(f"[BNA Provenance] AI log query failed nonfatally: {e}")
-        return []
-
+    return []
 
 def _parse_importance_from_reason(reason):
     """Parse Importance provenance from AI Processing Log reason text."""

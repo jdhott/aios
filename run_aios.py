@@ -312,6 +312,11 @@ def log_ai_processing_decision(
     if TEST_MODE or DRY_RUN:
         return False
 
+    # Supabase is authoritative in the production runtime. The legacy Notion
+    # AI Processing Log is intentionally retired from this hot path.
+    if AIOS_DATASTORE == "supabase":
+        return False
+
     if not AI_LOG_DATABASE_ID:
         return False
 
