@@ -2988,8 +2988,9 @@ def _page(
             for task in section_tasks
         )
 
+        search_open = ' open' if key == "search_results" else ''
         task_sections += (
-            f'<details class="task-group" data-section="{html.escape(key)}">'
+            f'<details class="task-group" data-section="{html.escape(key)}"{search_open}>'
             f'<summary class="task-group-heading">'
             f'<span>{html.escape(heading)}</span>'
             f'<span class="section-count">{len(section_tasks)}</span>'
@@ -3618,7 +3619,9 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         const state = readSectionState();
         taskSections().forEach((section) => {{
           const key = section.dataset.section;
-          if (key && Object.prototype.hasOwnProperty.call(state, key)) {{
+          if (key === "search_results") {{
+            section.open = true;
+          }} else if (key && Object.prototype.hasOwnProperty.call(state, key)) {{
             section.open = Boolean(state[key]);
           }}
           section.addEventListener("toggle", saveSectionState);
