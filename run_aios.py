@@ -6014,6 +6014,43 @@ if RUN_TASK_CREATION_PIPELINE:
                 review_title
             )
 
+            source_task_id = str(
+                (review.payload or {}).get("source_task_id")
+                or ""
+            ).strip()
+
+            if source_task_id:
+                try:
+                    source_task = (
+                        possible_duplicate_shadow_review_repo
+                        .store.client
+                        .table("tasks")
+                        .select("id,title,is_open,is_done,is_archived")
+                        .eq("id", source_task_id)
+                        .limit(1)
+                        .execute()
+                        .data
+                        or []
+                    )
+
+                    if source_task:
+                        current_source_title = str(
+                            source_task[0].get("title")
+                            or ""
+                        ).strip()
+
+                        if current_source_title:
+                            review_title = current_source_title
+
+                except Exception as exc:
+                    print(
+                        "[Possible Duplicate Review] "
+                        "Current source task lookup failed; "
+                        "using stored review text:",
+                        source_task_id,
+                        exc,
+                    )
+
             if not review_title:
                 print(
                     "[Possible Duplicate Review] "
