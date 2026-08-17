@@ -22,6 +22,7 @@ from aios.api.schemas import (
     ReviewResponse,
     PossibleDuplicateResolutionRequest,
     ClarificationAwaitingAnswerRequest,
+    ClarificationAnswerRequest,
     ClarificationPendingConfirmationRequest,
     ClarificationResolutionRequest,
 )
@@ -1683,6 +1684,68 @@ def resolve_possible_duplicate_http(
     return response
 
 @app.post(
+    "/reviews/{review_id}/clarification/request-question",
+    response_model=ReviewResponse,
+    tags=["reviews"],
+)
+def clarification_request_question_http(
+    review_id: str,
+) -> ReviewResponse:
+    try:
+        updated = (
+            _review_service()
+            .request_clarification_question(
+                review_id
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise _review_error(exc) from exc
+
+    try:
+        _request_processor_run()
+    except Exception as exc:
+        print(
+            "[Clarification] "
+            "Question requested; processor trigger failed:",
+            exc,
+        )
+
+    return ReviewResponse(**updated.to_dict())
+
+
+@app.post(
+    "/reviews/{review_id}/clarification/answer",
+    response_model=ReviewResponse,
+    tags=["reviews"],
+)
+def clarification_answer_http(
+    review_id: str,
+    request: ClarificationAnswerRequest,
+) -> ReviewResponse:
+    try:
+        updated = (
+            _review_service()
+            .submit_clarification_answer(
+                review_id,
+                answer=request.answer,
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise _review_error(exc) from exc
+
+    try:
+        _request_processor_run()
+    except Exception as exc:
+        print(
+            "[Clarification] "
+            "Answer submitted; processor trigger failed:",
+            exc,
+        )
+
+    return ReviewResponse(**updated.to_dict())
+
+
+@app.post(
     "/reviews/{review_id}/clarification/awaiting-answer",
     response_model=ReviewResponse,
     tags=["reviews"],
@@ -1737,5 +1800,6 @@ def clarification_resolve_http(
     except (KeyError, ValueError) as exc:
         raise _review_error(exc) from exc
 
-    # Review-state only. Underlying task mutation remains separate.
-    return ReviewResponse(**resolved.to_dict())
+    response = ReviewResponse(**resolved.to_dict())
+    _mark_review_inbox_processed(response)
+    return response

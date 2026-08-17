@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from aios.review.models import InboxReview
+from aios.ingestion.capture_metadata import parse_capture_metadata
 from aios.review.clarification_transitions import (
     mark_clarification_awaiting_answer,
     mark_clarification_pending_confirmation,
@@ -16,6 +17,7 @@ from aios.review.possible_duplicate_transitions import (
 from aios.review.repository import InboxReviewRepository
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
+from aios.storage.task_repository import TaskRepository
 
 APP_REVIEW_READ_SERVICE_VERSION = "app-service-boundary-v1-phase2.1"
 APP_REVIEW_RESOLUTION_SERVICE_VERSION = "app-service-boundary-v1-phase2.2"
@@ -57,10 +59,12 @@ class ReviewService:
         store: SupabaseStore | None = None,
         review_repository: InboxReviewRepository | None = None,
         inbox_repository: InboxRepository | None = None,
+        task_repository: TaskRepository | None = None,
     ):
         if store is None and (
             review_repository is None
             or inbox_repository is None
+            or task_repository is None
         ):
             store = SupabaseStore()
 
@@ -72,6 +76,62 @@ class ReviewService:
             inbox_repository
             or InboxRepository(store)
         )
+        self.task_repository = (
+            task_repository
+            or TaskRepository(store)
+        )
+
+
+    def request_clarification_question(
+        self,
+        review_id: str,
+    ) -> AppReview:
+        review = self._require_review(
+            review_id,
+            review_type="clarification",
+        )
+
+        payload = dict(review.payload or {})
+        payload["requested_action"] = "ask_question"
+
+        updated = self.review_repository.update_state(
+            review.id,
+            "pending",
+            payload=payload,
+        )
+
+        return self._to_app_review(updated)
+
+
+    def submit_clarification_answer(
+        self,
+        review_id: str,
+        *,
+        answer: str,
+    ) -> AppReview:
+        review = self._require_review(
+            review_id,
+            review_type="clarification",
+        )
+
+        clean_answer = str(answer or "").strip()
+
+        if not clean_answer:
+            raise ValueError(
+                "Clarification answer cannot be blank."
+            )
+
+        payload = dict(review.payload or {})
+        payload["answer"] = clean_answer
+        payload["requested_action"] = "process_answer"
+
+        updated = self.review_repository.update_state(
+            review.id,
+            "awaiting_answer",
+            payload=payload,
+        )
+
+        return self._to_app_review(updated)
 
 
     def mark_clarification_awaiting_answer(
@@ -121,12 +181,68 @@ class ReviewService:
             review_id,
             review_type="clarification",
         )
+
+        task_id = str(
+            (review.payload or {}).get("task_id")
+            or ""
+        ).strip()
+
+        if not task_id:
+            raise ValueError(
+                "Clarification review has no authoritative task_id."
+            )
+
+        capture = parse_capture_metadata(
+            accepted_text
+        )
+
+        clean_title = str(
+            capture.clean_text or ""
+        ).strip()
+
+        if not clean_title:
+            raise ValueError(
+                "Accepted clarification produced an empty task title."
+            )
+
+        values: dict[str, Any] = {
+            "title": clean_title,
+            "status": "Ready",
+            "is_just_do_it": bool(
+                capture.is_jdi
+            ),
+        }
+
+        if capture.is_urgent:
+            values["urgency"] = "High Urgency"
+
+        if capture.is_important:
+            values["importance"] = "High Importance"
+
+        if capture.due_date:
+            values["due_at"] = (
+                capture.due_date.isoformat()
+            )
+
+        if capture.project_hint:
+            values["suggested_project"] = (
+                capture.project_hint
+            )
+
+        # Human acceptance is authoritative. Update the task first.
+        # If this fails, the review remains open.
+        self.task_repository.update_task(
+            task_id,
+            values=values,
+        )
+
         resolved = resolve_clarification_review(
             review_repo=self.review_repository,
             review=review,
             selected_text=selected_text,
-            accepted_text=accepted_text,
+            accepted_text=clean_title,
         )
+
         return self._to_app_review(resolved)
 
     def request_possible_duplicate_reevaluation(

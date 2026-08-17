@@ -152,6 +152,34 @@ class TaskRepository:
 
         return self.row_to_task(rows[0])
 
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        values: dict[str, Any],
+    ) -> Task:
+        """Update an authoritative Supabase task by task ID."""
+        if not values:
+            task = self.get_task(task_id)
+            if task is None:
+                raise KeyError(f"Task not found: {task_id}")
+            return task
+
+        response = (
+            self.store.client
+            .table("tasks")
+            .update(values)
+            .eq("id", task_id)
+            .execute()
+        )
+
+        rows = response.data or []
+
+        if not rows:
+            raise KeyError(f"Task not found: {task_id}")
+
+        return self.row_to_task(rows[0])
+
     def get_task_by_legacy_notion_id(
         self,
         notion_id: str,

@@ -5,23 +5,33 @@ from typing import Any
 from aios.ingestion.models import InboxItem
 
 
-def shadow_clarification_review(
+CLARIFICATION_REVIEW_AUTHORITY_VERSION = (
+    "supabase-clarification-review-v1"
+)
+
+
+def create_clarification_review(
     *,
     inbox_repo,
     review_repo,
     item: InboxItem,
-    first_page: dict[str, Any],
+    task_id: str,
     task_title: str,
     original_title: str,
     suggestions: list[str],
     clarification_mode: str,
     clarification_reason: str,
 ):
-    """Create/reuse a shadow clarification review for the original inbox item."""
-    shadow_row = inbox_repo.get_or_create_shadow_item(item)
+    """Create/reuse the authoritative Supabase clarification review."""
 
-    open_reviews = review_repo.get_open_reviews_for_item(
-        str(shadow_row["id"])
+    review_row = inbox_repo.get_review_row_for_item(
+        item
+    )
+
+    open_reviews = (
+        review_repo.get_open_reviews_for_item(
+            str(review_row["id"])
+        )
     )
 
     for review in open_reviews:
@@ -30,22 +40,26 @@ def shadow_clarification_review(
 
     proposed_text = (
         suggestions[0].strip()
-        if suggestions and suggestions[0].strip()
+        if suggestions
+        and suggestions[0].strip()
         else original_title.strip()
     )
 
-    payload = {
+    payload: dict[str, Any] = {
         "original_text": original_title,
         "proposed_text": proposed_text,
-        "clarification_mode": clarification_mode,
-        "clarification_reason": clarification_reason,
-        "notion_task_page_id": first_page.get("id"),
+        "task_id": str(task_id),
         "task_title": task_title,
-        "authority": "notion_shadow_only",
+        "clarification_mode":
+            clarification_mode,
+        "clarification_reason":
+            clarification_reason,
+        "authority":
+            CLARIFICATION_REVIEW_AUTHORITY_VERSION,
     }
 
     review = review_repo.create_review(
-        inbox_item_id=str(shadow_row["id"]),
+        inbox_item_id=str(review_row["id"]),
         review_type="clarification",
         state="pending",
         payload=payload,

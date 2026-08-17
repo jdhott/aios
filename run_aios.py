@@ -5311,7 +5311,7 @@ if AIOS_DATASTORE == 'supabase':
     notion_task_mirror_title_writer = NotionTaskMirrorTitleWriter(headers=headers)
     print('[Task Mirror Title] Writer configured')
 
-from aios.review.clarification_shadow import shadow_clarification_review
+from aios.review.clarification_shadow import create_clarification_review
 from aios.review.clarification_transitions import (
     mark_clarification_awaiting_answer,
     mark_clarification_pending_confirmation,
@@ -5707,17 +5707,16 @@ if len(open_tasks) >= 100:
 # In[68]:
 
 if RUN_TASK_CREATION_PIPELINE:
-    print("\n--- Processing clarification selections ---")
-
-    for task in open_tasks:
-        title = get_title(task)
-
-        if not title.lower().startswith("clarify next action:"):
-            continue
-
-        process_clarification_selection(task)
+    print(
+        "[Clarification Review] "
+        "Supabase/web review authority active; "
+        "Notion clarification polling disabled."
+    )
 else:
-    print("Task creation pipeline disabled → skipping clarification selection processing.")
+    print(
+        "Task creation pipeline disabled → "
+        "skipping clarification review processing."
+    )
 
 # ## 12. Pipeline run: classify inbox items against existing tasks
 # 
@@ -5756,6 +5755,157 @@ if RUN_TASK_CREATION_PIPELINE:
         for task in open_tasks
         if get_title(task)
     ]
+
+    # Process authoritative clarification review actions from the web UI.
+    if (
+        AIOS_DATASTORE == "supabase"
+        and clarification_shadow_review_repo is not None
+        and clarification_shadow_inbox_repo is not None
+    ):
+        open_clarification_reviews = [
+            review
+            for review in (
+                clarification_shadow_review_repo
+                .get_open_reviews()
+            )
+            if review.review_type == "clarification"
+        ]
+
+        for review in open_clarification_reviews:
+            payload = dict(review.payload or {})
+
+            requested_action = str(
+                payload.get("requested_action")
+                or ""
+            ).strip()
+
+            if requested_action not in {
+                "ask_question",
+                "process_answer",
+            }:
+                continue
+
+            original_text = str(
+                payload.get("original_text")
+                or ""
+            ).strip()
+
+            if not original_text:
+                print(
+                    "[Clarification Review] "
+                    "Requested action skipped; no original text:",
+                    review.id,
+                )
+                continue
+
+            try:
+                if requested_action == "ask_question":
+                    question = (
+                        generate_targeted_clarification_question(
+                            original_text
+                        )
+                    )
+
+                    if not str(question or "").strip():
+                        raise RuntimeError(
+                            "Targeted clarification question was empty."
+                        )
+
+                    updated = mark_clarification_awaiting_answer(
+                        review_repo=clarification_shadow_review_repo,
+                        review=review,
+                        question=str(question).strip(),
+                    )
+
+                    updated_payload = dict(
+                        updated.payload or {}
+                    )
+                    updated_payload.pop(
+                        "requested_action",
+                        None,
+                    )
+
+                    clarification_shadow_review_repo.update_state(
+                        updated.id,
+                        "awaiting_answer",
+                        payload=updated_payload,
+                    )
+
+                    print(
+                        "[Clarification Review] "
+                        "Generated targeted question:",
+                        original_text,
+                    )
+
+                elif requested_action == "process_answer":
+                    answer = str(
+                        payload.get("answer")
+                        or ""
+                    ).strip()
+
+                    if not answer:
+                        raise RuntimeError(
+                            "Clarification answer was empty."
+                        )
+
+                    combined = (
+                        f"Original task: {original_text}\n"
+                        f"User clarification: {answer}"
+                    )
+
+                    proposals = (
+                        generate_clarification_suggestions(
+                            combined
+                        )
+                    )
+
+                    proposed_text = (
+                        str(proposals[0]).strip()
+                        if proposals
+                        else ""
+                    )
+
+                    if not proposed_text:
+                        raise RuntimeError(
+                            "Clarification proposal generation returned no text."
+                        )
+
+                    updated = (
+                        mark_clarification_pending_confirmation(
+                            review_repo=clarification_shadow_review_repo,
+                            review=review,
+                            answer=answer,
+                            proposed_text=proposed_text,
+                        )
+                    )
+
+                    updated_payload = dict(
+                        updated.payload or {}
+                    )
+                    updated_payload.pop(
+                        "requested_action",
+                        None,
+                    )
+
+                    clarification_shadow_review_repo.update_state(
+                        updated.id,
+                        "pending_confirmation",
+                        payload=updated_payload,
+                    )
+
+                    print(
+                        "[Clarification Review] "
+                        "Answer converted to revised proposal:",
+                        proposed_text,
+                    )
+
+            except Exception as exc:
+                print(
+                    "[Clarification Review] "
+                    "Requested action failed; review remains open:",
+                    review.id,
+                    exc,
+                )
 
     # Re-evaluate duplicate reviews from the authoritative Review queue.
     # This is intentionally independent of inbox pending status: an item may
@@ -6956,67 +7106,95 @@ def create_breakdown_tasks(task_title, is_jdi=False, is_urgent=False, is_importa
 
     return task_pages_created
 
-def maybe_add_clarification_blocks(first_page, task_title, original_title, item):
-    """Attach clarification choices to a newly created clarify task.
-
-    Safety guard:
-    Clear setup/process/creative tasks should never receive clarification blocks.
-    They should become breakdown parents with linked subtasks instead.
-    """
-    if DRY_RUN:
-        return
-
-    if not first_page or not task_title.lower().startswith("clarify next action:"):
-        return
-
-    # Hard guard against accidental clarify blocks for clear atomic/process/creative work.
-    if is_atomic_action(original_title) or is_process_task(original_title) or is_immediately_actionable_operational_task(original_title):
-        print("Skipping clarification block for clear atomic/process/creative task:", original_title)
-        return
-
-    suggestions = generate_clarification_suggestions(original_title)
-
-    render_result = append_clarification_blocks(
-        page_id=first_page["id"],
-        original_task=original_title,
-        suggestions=suggestions,
-    )
+def maybe_create_clarification_review(
+    first_page,
+    task_title,
+    original_title,
+    item,
+):
+    """Create the authoritative Supabase clarification review."""
 
     if (
-        render_result is not None
-        and AIOS_DATASTORE == "supabase"
-        and clarification_shadow_inbox_repo is not None
-        and clarification_shadow_review_repo is not None
+        not first_page
+        or not task_title.lower().startswith(
+            "clarify next action:"
+        )
     ):
-        try:
-            mode, reason = clarification_mode_reason(original_title)
-            review, created = shadow_clarification_review(
-                inbox_repo=clarification_shadow_inbox_repo,
-                review_repo=clarification_shadow_review_repo,
-                item=item,
-                first_page=first_page,
-                task_title=task_title,
-                original_title=original_title,
-                suggestions=suggestions,
-                clarification_mode=mode,
-                clarification_reason=reason,
-            )
+        return None
 
-            if created:
-                print(
-                    "[Clarification Shadow] Created Supabase review:",
-                    original_title,
-                )
-            else:
-                print(
-                    "[Clarification Shadow] Existing open review reused:",
-                    original_title,
-                )
-        except Exception as exc:
-            print(
-                "[Clarification Shadow] Write failed:",
-                exc,
-            )
+    if (
+        is_atomic_action(original_title)
+        or is_process_task(original_title)
+        or is_immediately_actionable_operational_task(
+            original_title
+        )
+    ):
+        print(
+            "Skipping clarification review for clear "
+            "atomic/process/creative task:",
+            original_title,
+        )
+        return None
+
+    if (
+        AIOS_DATASTORE != "supabase"
+        or clarification_shadow_inbox_repo is None
+        or clarification_shadow_review_repo is None
+    ):
+        raise RuntimeError(
+            "Authoritative clarification review "
+            "repositories are unavailable."
+        )
+
+    task_id = str(
+        first_page.get("_supabase_id")
+        or ""
+    ).strip()
+
+    if not task_id:
+        raise RuntimeError(
+            "Clarification task has no authoritative "
+            "Supabase task ID."
+        )
+
+    suggestions = (
+        generate_clarification_suggestions(
+            original_title
+        )
+    )
+
+    mode, reason = clarification_mode_reason(
+        original_title
+    )
+
+    review, created = create_clarification_review(
+        inbox_repo=
+            clarification_shadow_inbox_repo,
+        review_repo=
+            clarification_shadow_review_repo,
+        item=item,
+        task_id=task_id,
+        task_title=task_title,
+        original_title=original_title,
+        suggestions=suggestions,
+        clarification_mode=mode,
+        clarification_reason=reason,
+    )
+
+    if created:
+        print(
+            "[Clarification Review] Created:",
+            original_title,
+        )
+    else:
+        print(
+            "[Clarification Review] Existing open "
+            "review reused:",
+            original_title,
+        )
+
+    return review
+
 
 def process_task_item(item):
     """Create Notion task page(s) for one inbox item.
@@ -7107,12 +7285,13 @@ def process_task_item(item):
             confidence=None,
         )
 
-        maybe_add_clarification_blocks(
-            first_page=task_pages_created[0],
-            task_title=task_title,
-            original_title=original_title,
-            item=item,
-        )
+        if decision == "clarify":
+            maybe_create_clarification_review(
+                first_page=task_pages_created[0],
+                task_title=task_title,
+                original_title=original_title,
+                item=item,
+            )
 
     return task_pages_created
 

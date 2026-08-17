@@ -15,7 +15,10 @@ class FakeReviewRepository:
                 inbox_item_id="inbox-1",
                 review_type="clarification",
                 state="pending",
-                payload={"original_text": "Plan canning"},
+                payload={
+                    "original_text": "Plan canning",
+                    "task_id": "task-clarify",
+                },
                 created_at=now,
                 updated_at=now,
             ),
@@ -69,6 +72,39 @@ class FakeReviewRepository:
         return updated
 
 
+class FakeTaskRepository:
+    def __init__(self):
+        self.updated = []
+        self.tasks = {
+            "task-clarify": {
+                "id": "task-clarify",
+                "title": "Clarify next action: Plan canning",
+            }
+        }
+
+    def update_task(
+        self,
+        task_id,
+        *,
+        values,
+    ):
+        if task_id not in self.tasks:
+            raise KeyError(
+                f"Task not found: {task_id}"
+            )
+
+        self.tasks[task_id].update(values)
+
+        self.updated.append(
+            {
+                "task_id": task_id,
+                "values": dict(values),
+            }
+        )
+
+        return self.tasks[task_id]
+
+
 class FakeInboxRepository:
     rows = {
         "inbox-1": {"id": "inbox-1", "clean_text": "Plan canning"},
@@ -80,9 +116,12 @@ class FakeInboxRepository:
         return self.rows.get(inbox_id)
 
 
+task_repo = FakeTaskRepository()
+
 service = ReviewService(
     review_repository=FakeReviewRepository(),
     inbox_repository=FakeInboxRepository(),
+    task_repository=task_repo,
 )
 
 r = service.mark_clarification_awaiting_answer(
@@ -106,6 +145,18 @@ r = service.resolve_clarification(
     accepted_text="List tomatoes and peaches to preserve by canning",
 )
 assert r.state == "resolved"
+
+assert task_repo.updated == [
+    {
+        "task_id": "task-clarify",
+        "values": {
+            "title":
+                "List tomatoes and peaches to preserve by canning",
+            "status": "Ready",
+            "is_just_do_it": False,
+        },
+    }
+]
 
 r = service.resolve_possible_duplicate(
     "duplicate-1",

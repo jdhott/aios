@@ -54,6 +54,10 @@ class PossibleDuplicateResolutionRequest(BaseModel):
 class ClarificationAwaitingAnswerRequest(BaseModel):
     question: str = Field(min_length=1, max_length=5000)
 
+
+class ClarificationAnswerRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=10000)
+
 class ClarificationPendingConfirmationRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=10000)
     proposed_text: str = Field(min_length=1, max_length=10000)

@@ -1552,8 +1552,16 @@ def _reviews_page(
         and review.get("state") != "resolved"
     ]
 
+    clarifications = [
+        review
+        for review in reviews
+        if review.get("review_type") == "clarification"
+        and review.get("state") != "resolved"
+    ]
+
     cards = ""
     reevaluation_pending = False
+    clarification_processing_pending = False
 
     for review in possible_duplicates:
         review_id = html.escape(str(review.get("id") or ""))
@@ -1706,6 +1714,251 @@ def _reviews_page(
         </section>
         '''
 
+    for review in clarifications:
+        review_id = html.escape(
+            str(review.get("id") or "")
+        )
+
+        payload = review.get("payload") or {}
+
+        state = str(
+            review.get("state") or "pending"
+        ).strip()
+
+        requested_action = str(
+            payload.get("requested_action")
+            or ""
+        ).strip()
+
+        original_text = html.escape(
+            str(
+                payload.get("original_text")
+                or review.get("subject_text")
+                or ""
+            )
+        )
+
+        proposed_raw = str(
+            payload.get("proposed_text")
+            or ""
+        ).strip()
+
+        proposed_text = html.escape(
+            proposed_raw
+        )
+
+        # -------------------------------------------------------------
+        # Processor is generating the targeted question.
+        # -------------------------------------------------------------
+        if (
+            state == "pending"
+            and requested_action == "ask_question"
+        ):
+            clarification_processing_pending = True
+
+            clarification_action_html = """
+            <div class="review-pending">
+              <span class="review-spinner"
+                    aria-hidden="true"></span>
+              <div>
+                <strong>
+                  Generating one targeted question…
+                </strong>
+                <div class="review-stale-note">
+                  AIOS is identifying the one piece of
+                  information it needs most.
+                </div>
+              </div>
+            </div>
+            """
+
+        # -------------------------------------------------------------
+        # Initial proposal.
+        # -------------------------------------------------------------
+        elif state == "pending":
+            selected_value = html.escape(
+                proposed_raw,
+                quote=True,
+            )
+
+            clarification_action_html = f"""
+            <form method="post"
+                  action="/reviews/{review_id}/clarification/use">
+              <input type="hidden"
+                     name="selected_text"
+                     value="{selected_value}">
+
+              <label class="review-section-label"
+                     for="clarification-{review_id}">
+                AIOS suggests this clearer next action
+              </label>
+
+              <textarea
+                id="clarification-{review_id}"
+                class="clarification-edit"
+                name="accepted_text"
+                required>{proposed_text}</textarea>
+
+              <div class="review-stale-note">
+                You can edit the wording before accepting it.
+              </div>
+
+              <div class="review-actions">
+                <button class="review-primary"
+                        type="submit">
+                  Use this clarification
+                </button>
+              </div>
+            </form>
+
+            <form method="post"
+                  action="/reviews/{review_id}/clarification/request-question">
+              <div class="review-actions">
+                <button class="review-secondary"
+                        type="submit">
+                  Ask me one targeted question
+                </button>
+              </div>
+            </form>
+            """
+
+        # -------------------------------------------------------------
+        # Processor is converting the user's answer to a proposal.
+        # -------------------------------------------------------------
+        elif (
+            state == "awaiting_answer"
+            and requested_action == "process_answer"
+        ):
+            clarification_processing_pending = True
+
+            clarification_action_html = """
+            <div class="review-pending">
+              <span class="review-spinner"
+                    aria-hidden="true"></span>
+              <div>
+                <strong>
+                  Turning your answer into a clearer task…
+                </strong>
+                <div class="review-stale-note">
+                  AIOS is preparing a revised next action
+                  for you to review.
+                </div>
+              </div>
+            </div>
+            """
+
+        # -------------------------------------------------------------
+        # Targeted question ready for the user.
+        # -------------------------------------------------------------
+        elif state == "awaiting_answer":
+            question = html.escape(
+                str(payload.get("question") or "")
+            )
+
+            clarification_action_html = f"""
+            <div class="review-section-label">
+              One targeted question
+            </div>
+
+            <div class="review-existing">
+              {question}
+            </div>
+
+            <form method="post"
+                  action="/reviews/{review_id}/clarification/answer">
+              <label class="review-section-label"
+                     for="clarification-answer-{review_id}">
+                Your answer
+              </label>
+
+              <textarea
+                id="clarification-answer-{review_id}"
+                class="clarification-edit"
+                name="answer"
+                placeholder="Type your answer here"
+                required></textarea>
+
+              <div class="review-actions">
+                <button class="review-primary"
+                        type="submit">
+                  Continue
+                </button>
+              </div>
+            </form>
+            """
+
+        # -------------------------------------------------------------
+        # Revised proposal after the targeted answer.
+        # -------------------------------------------------------------
+        elif state == "pending_confirmation":
+            selected_value = html.escape(
+                proposed_raw,
+                quote=True,
+            )
+
+            answer = html.escape(
+                str(payload.get("answer") or "")
+            )
+
+            clarification_action_html = f"""
+            <div class="review-section-label">
+              Your clarification
+            </div>
+            <div class="review-existing">
+              {answer}
+            </div>
+
+            <form method="post"
+                  action="/reviews/{review_id}/clarification/use">
+              <input type="hidden"
+                     name="selected_text"
+                     value="{selected_value}">
+
+              <label class="review-section-label"
+                     for="clarification-{review_id}">
+                AIOS suggests this revised next action
+              </label>
+
+              <textarea
+                id="clarification-{review_id}"
+                class="clarification-edit"
+                name="accepted_text"
+                required>{proposed_text}</textarea>
+
+              <div class="review-stale-note">
+                You can edit the wording before accepting it.
+              </div>
+
+              <div class="review-actions">
+                <button class="review-primary"
+                        type="submit">
+                  Use this clarification
+                </button>
+              </div>
+            </form>
+            """
+
+        else:
+            clarification_action_html = ""
+
+        cards += f"""
+        <section class="review-card">
+          <div class="review-label">
+            Clarification needed
+          </div>
+
+          <div class="review-section-label">
+            Original task
+          </div>
+
+          <div class="review-task">
+            {original_text}
+          </div>
+
+          {clarification_action_html}
+        </section>
+        """
+
     if not cards:
         cards = (
             '<div class="empty-state">'
@@ -1758,11 +2011,14 @@ def _reviews_page(
         else ""
     )
 
-    if reevaluation_pending:
+    if (
+        reevaluation_pending
+        or clarification_processing_pending
+    ):
         pending_refresh_script = """
 <script>
 (() => {
-  const key = "aios-duplicate-reevaluation-refresh-count";
+  const key = "aios-review-processing-refresh-count";
   const count = Number(sessionStorage.getItem(key) || "0");
 
   if (count < 45) {
@@ -1776,7 +2032,7 @@ def _reviews_page(
         pending_refresh_script = """
 <script>
 sessionStorage.removeItem(
-  "aios-duplicate-reevaluation-refresh-count"
+  "aios-review-processing-refresh-count"
 );
 </script>
 """
@@ -1838,6 +2094,23 @@ h1 {{
 .auto-merge-notice > strong {{
   display:block;
   margin-bottom:4px;
+}}
+.clarification-edit {{
+  width:100%;
+  min-height:88px;
+  margin:8px 0 4px;
+  padding:11px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:#fff;
+  color:var(--ink);
+  font:inherit;
+  line-height:1.45;
+  resize:vertical;
+}}
+.clarification-edit:focus {{
+  outline:2px solid rgba(38,65,85,.18);
+  border-color:var(--navy);
 }}
 .review-card {{
   background:var(--card);
@@ -2111,6 +2384,92 @@ def _resolve_possible_duplicate(
     return dict(response.json() or {})
 
 
+def _request_clarification_question(
+    review_id: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/clarification/request-question",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned "
+            f"{response.status_code}: "
+            f"{response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _submit_clarification_answer(
+    review_id: str,
+    *,
+    answer: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/clarification/answer",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "answer": answer,
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned "
+            f"{response.status_code}: "
+            f"{response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _resolve_clarification(
+    review_id: str,
+    *,
+    selected_text: str,
+    accepted_text: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/clarification/resolve",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "selected_text": selected_text,
+            "accepted_text": accepted_text,
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned "
+            f"{response.status_code}: "
+            f"{response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _fetch_project_options() -> list[dict]:
     api_url = _api_url()
     token = _identity_token(api_url)
@@ -2329,6 +2688,7 @@ def _page(
     search: str = "",
     focus: dict | None = None,
     refresh_focus: bool = False,
+    review_count: int = 0,
 ) -> str:
     tasks = tasks or {}
     focus_id = str(focus.get("id") or "") if focus else ""
@@ -2900,6 +3260,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       </div>
       <nav class="dashboard-nav" aria-label="Primary">
         <a href="/projects">Projects</a>
+        <a href="/reviews">{f"Reviews ({review_count})" if review_count else "Reviews"}</a>
         <a class="new-task-link" href="/tasks/new">New Task</a>
       </nav>
     </div>
@@ -3056,6 +3417,21 @@ def index(
         print("[Dashboard Focus] Focus could not be loaded:", focus_exc)
         focus=None
 
+    try:
+        review_count = len(
+            [
+                review
+                for review in _fetch_reviews()
+                if review.get("state") != "resolved"
+            ]
+        )
+    except Exception as review_exc:
+        print(
+            "[Dashboard] Review count could not be loaded:",
+            review_exc,
+        )
+        review_count = 0
+
     refresh_focus = (
         request.query_params.get("refresh_focus") == "1"
     )
@@ -3068,6 +3444,7 @@ def index(
             search=search,
             focus=focus,
             refresh_focus=refresh_focus,
+            review_count=review_count,
         )
     )
 
@@ -3324,6 +3701,133 @@ def possible_duplicate_create_new_web(
             url=(
                 "/reviews?"
                 "error=New+task+could+not+be+requested."
+            ),
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/clarification/request-question"
+)
+def clarification_request_question_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _request_clarification_question(
+            review_id
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Clarification] "
+            "Request question failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+question+could+not+be+generated."
+            ),
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/clarification/answer"
+)
+def clarification_answer_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    answer: Annotated[str, Form()] = "",
+):
+    clean_answer = answer.strip()
+
+    if not clean_answer:
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+answer+cannot+be+blank."
+            ),
+            status_code=303,
+        )
+
+    try:
+        _submit_clarification_answer(
+            review_id,
+            answer=clean_answer,
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Clarification] "
+            "Submit answer failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+answer+could+not+be+processed."
+            ),
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/clarification/use"
+)
+def clarification_use_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    selected_text: Annotated[str, Form()] = "",
+    accepted_text: Annotated[str, Form()] = "",
+):
+    selected = selected_text.strip()
+    accepted = accepted_text.strip()
+
+    if not accepted:
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+cannot+be+blank."
+            ),
+            status_code=303,
+        )
+
+    try:
+        _resolve_clarification(
+            review_id,
+            selected_text=selected or accepted,
+            accepted_text=accepted,
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Clarification] Use clarification failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+could+not+be+accepted."
             ),
             status_code=303,
         )
