@@ -122,6 +122,60 @@ class InboxRepository:
         rows = response.data or []
         return rows[0] if rows else None
 
+    def get_review_rows_for_item(
+        self,
+        item: InboxItem,
+    ) -> list[dict[str, Any]]:
+        """Return inbox rows that may own reviews for this item.
+
+        Supabase-native inbox rows are authoritative. A source-identity
+        shadow row is also returned when present for compatibility with
+        reviews created before native review authority.
+        """
+        rows: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        if item.inbox_row_id:
+            native = self.get_row(
+                str(item.inbox_row_id)
+            )
+
+            if native:
+                row_id = str(native.get("id") or "")
+                if row_id:
+                    seen_ids.add(row_id)
+                rows.append(native)
+
+        if item.source and item.source_item_id:
+            legacy = self.get_by_source_identity(
+                source=item.source,
+                source_item_id=item.source_item_id,
+            )
+
+            if legacy:
+                row_id = str(legacy.get("id") or "")
+
+                if row_id not in seen_ids:
+                    rows.append(legacy)
+
+        return rows
+
+
+    def get_review_row_for_item(
+        self,
+        item: InboxItem,
+    ) -> dict[str, Any]:
+        """Return the authoritative row to own a newly created review."""
+        rows = self.get_review_rows_for_item(item)
+
+        if rows:
+            # Native row is returned first when available.
+            return rows[0]
+
+        # Legacy/Notion-origin items still require a shadow row.
+        return self.get_or_create_shadow_item(item)
+
+
     def get_or_create_shadow_item(
         self,
         item: InboxItem,

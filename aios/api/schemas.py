@@ -48,6 +48,7 @@ class PossibleDuplicateResolutionRequest(BaseModel):
     action: str
     candidate_task_id: str | None = None
     candidate_task_title: str | None = None
+    title_choice: str | None = None
     created_task_ids: list[str] = Field(default_factory=list)
 
 class ClarificationAwaitingAnswerRequest(BaseModel):

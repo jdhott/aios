@@ -2,7 +2,12 @@ from __future__ import annotations
 from typing import Any
 from aios.review.models import InboxReview
 
-POSSIBLE_DUPLICATE_ACTIONS = {"link_existing", "create_anyway", "ignore"}
+POSSIBLE_DUPLICATE_ACTIONS = {
+    "link_existing",
+    "create_anyway",
+    "ignore",
+    "reevaluated_distinct",
+}
 
 def resolve_possible_duplicate_review(*, review_repo, review: InboxReview, action: str, candidate_task_id: str | None = None, candidate_task_title: str | None = None, created_task_ids: list[str] | None = None) -> InboxReview:
     if review.review_type != "possible_duplicate":

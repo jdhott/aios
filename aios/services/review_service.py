@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from aios.review.models import InboxReview
@@ -129,6 +129,48 @@ class ReviewService:
         )
         return self._to_app_review(resolved)
 
+    def request_possible_duplicate_reevaluation(
+        self,
+        review_id: str,
+    ) -> AppReview:
+        review = self._require_review(
+            review_id,
+            review_type="possible_duplicate",
+        )
+
+        payload = dict(review.payload or {})
+        payload["requested_action"] = "reevaluate"
+
+        updated = self.review_repository.update_state(
+            review.id,
+            "pending",
+            payload=payload,
+        )
+
+        return self._to_app_review(updated)
+
+
+    def request_possible_duplicate_create_anyway(
+        self,
+        review_id: str,
+    ) -> AppReview:
+        review = self._require_review(
+            review_id,
+            review_type="possible_duplicate",
+        )
+
+        payload = dict(review.payload or {})
+        payload["requested_action"] = "create_anyway"
+
+        updated = self.review_repository.update_state(
+            review.id,
+            "pending",
+            payload=payload,
+        )
+
+        return self._to_app_review(updated)
+
+
     def resolve_possible_duplicate(
         self,
         review_id: str,
@@ -195,6 +237,57 @@ class ReviewService:
             ]
 
         return [self._to_app_review(review) for review in reviews]
+
+    def list_recent_auto_merge_notices(
+        self,
+        *,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        reviews = (
+            self.review_repository
+            .get_recent_resolved_reviews(
+                limit=limit,
+            )
+        )
+
+        notices = []
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(minutes=10)
+        )
+
+        for review in reviews:
+            if review.review_type != "possible_duplicate":
+                continue
+
+            if (
+                review.resolved_at is None
+                or review.resolved_at < cutoff
+            ):
+                continue
+
+            payload = dict(review.payload or {})
+            notice = payload.get("auto_merge_notice")
+
+            if not isinstance(notice, dict):
+                continue
+
+            notices.append(
+                {
+                    "id": review.id,
+                    "review_type":
+                        review.review_type,
+                    "resolved_at": (
+                        review.resolved_at.isoformat()
+                        if review.resolved_at
+                        else None
+                    ),
+                    **notice,
+                }
+            )
+
+        return notices
+
 
     def get_review(
         self,

@@ -213,6 +213,23 @@ def list_reviews() -> list[ReviewResponse]:
 
 
 @app.get(
+    "/reviews/notices/recent",
+    tags=["reviews"],
+)
+def list_recent_review_notices() -> dict:
+    notices = (
+        _review_service()
+        .list_recent_auto_merge_notices(
+            limit=10,
+        )
+    )
+
+    return {
+        "notices": notices,
+    }
+
+
+@app.get(
     "/reviews/{review_id}",
     response_model=ReviewResponse,
     tags=["reviews"],
@@ -1485,6 +1502,66 @@ def _mark_review_inbox_processed(review: ReviewResponse) -> None:
     repo.mark_processed(original_inbox_id)
 
 @app.post(
+    "/reviews/{review_id}/possible-duplicate/reevaluate",
+    response_model=ReviewResponse,
+    tags=["reviews"],
+)
+def request_possible_duplicate_reevaluation_http(
+    review_id: str,
+) -> ReviewResponse:
+    try:
+        updated = (
+            _review_service()
+            .request_possible_duplicate_reevaluation(
+                review_id
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise _review_error(exc) from exc
+
+    try:
+        _request_processor_run()
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] "
+            "Re-evaluation requested; processor trigger failed:",
+            exc,
+        )
+
+    return ReviewResponse(**updated.to_dict())
+
+
+@app.post(
+    "/reviews/{review_id}/possible-duplicate/create-new",
+    response_model=ReviewResponse,
+    tags=["reviews"],
+)
+def request_possible_duplicate_create_new_http(
+    review_id: str,
+) -> ReviewResponse:
+    try:
+        updated = (
+            _review_service()
+            .request_possible_duplicate_create_anyway(
+                review_id
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise _review_error(exc) from exc
+
+    try:
+        _request_processor_run()
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] "
+            "Create-new requested; processor trigger failed:",
+            exc,
+        )
+
+    return ReviewResponse(**updated.to_dict())
+
+
+@app.post(
     "/reviews/{review_id}/possible-duplicate",
     response_model=ReviewResponse,
     tags=["reviews"],
@@ -1498,12 +1575,104 @@ def resolve_possible_duplicate_http(
             status_code=422,
             detail="Unsupported possible duplicate action",
         )
+
+    if request.title_choice not in {None, "existing", "new"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Unsupported duplicate title choice",
+        )
+
+    if (
+        request.action != "link_existing"
+        and request.title_choice is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="title_choice is only valid for link_existing",
+        )
+
+    candidate_task_title = request.candidate_task_title
+
+    if request.action == "link_existing":
+        candidate_task_id = str(
+            request.candidate_task_id or ""
+        ).strip()
+
+        if not candidate_task_id:
+            raise HTTPException(
+                status_code=422,
+                detail="candidate_task_id is required for link_existing",
+            )
+
+        task_rows = (
+            _store().client
+            .table("tasks")
+            .select("id,title,is_done,is_archived")
+            .eq("id", candidate_task_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+
+        if not task_rows:
+            raise HTTPException(
+                status_code=404,
+                detail="Candidate task not found",
+            )
+
+        task_row = task_rows[0]
+
+        if task_row.get("is_done") or task_row.get("is_archived"):
+            raise HTTPException(
+                status_code=409,
+                detail="Closed or archived candidate task cannot be merged",
+            )
+
+        title_choice = request.title_choice or "existing"
+
+        if title_choice == "new":
+            review = _review_service().get_review(
+                review_id
+            )
+
+            if review is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Review not found",
+                )
+
+            new_title = str(
+                review.subject_text or ""
+            ).strip()
+
+            if not new_title:
+                raise HTTPException(
+                    status_code=409,
+                    detail="New task wording is unavailable",
+                )
+
+            (
+                _store().client
+                .table("tasks")
+                .update({"title": new_title})
+                .eq("id", candidate_task_id)
+                .execute()
+            )
+
+            candidate_task_title = new_title
+
+        else:
+            candidate_task_title = str(
+                task_row.get("title") or ""
+            ).strip()
+
     try:
         resolved = _review_service().resolve_possible_duplicate(
             review_id,
             action=request.action,
             candidate_task_id=request.candidate_task_id,
-            candidate_task_title=request.candidate_task_title,
+            candidate_task_title=candidate_task_title,
             created_task_ids=request.created_task_ids or None,
         )
     except (KeyError, ValueError) as exc:

@@ -172,6 +172,32 @@ class InboxReviewRepository:
             )
         ]
 
+    def get_recent_resolved_reviews(
+        self,
+        *,
+        limit: int = 10,
+    ) -> list[InboxReview]:
+        response = (
+            self.store.client
+            .table("inbox_reviews")
+            .select("*")
+            .eq("state", "resolved")
+            .order(
+                "resolved_at",
+                desc=True,
+            )
+            .limit(limit)
+            .execute()
+        )
+
+        return [
+            self.row_to_review(row)
+            for row in (
+                response.data or []
+            )
+        ]
+
+
     def update_state(
         self,
         review_id: str,

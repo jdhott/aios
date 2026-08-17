@@ -95,10 +95,81 @@ class FakeInboxRepository:
     def mark_processed(self, inbox_id):
         self.processed.append(inbox_id)
 
+class FakeResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeTaskTable:
+    def __init__(self):
+        self.rows = {
+            "task-existing": {
+                "id": "task-existing",
+                "title": "Kitchen flashlight",
+                "is_done": False,
+                "is_archived": False,
+            }
+        }
+        self.filters = {}
+        self.update_values = None
+
+    def select(self, *_args, **_kwargs):
+        self.filters = {}
+        self.update_values = None
+        return self
+
+    def update(self, values):
+        self.filters = {}
+        self.update_values = dict(values)
+        return self
+
+    def eq(self, field, value):
+        self.filters[field] = value
+        return self
+
+    def limit(self, _limit):
+        return self
+
+    def execute(self):
+        rows = [
+            row
+            for row in self.rows.values()
+            if all(
+                row.get(field) == value
+                for field, value in self.filters.items()
+            )
+        ]
+
+        if self.update_values is not None:
+            for row in rows:
+                row.update(self.update_values)
+
+        return FakeResult(
+            [dict(row) for row in rows]
+        )
+
+
+class FakeClient:
+    def __init__(self):
+        self.tasks = FakeTaskTable()
+
+    def table(self, name):
+        assert name == "tasks"
+        return self.tasks
+
+
+class FakeStore:
+    def __init__(self):
+        self.client = FakeClient()
+
+
 fake_service = FakeReviewService()
 fake_inbox = FakeInboxRepository()
+fake_store = FakeStore()
+
 api_module._review_service = lambda: fake_service
 api_module._inbox_repository = lambda: fake_inbox
+api_module._store = lambda: fake_store
 
 with TestClient(api_module.app) as client:
     r = client.post(

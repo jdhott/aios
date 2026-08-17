@@ -5423,6 +5423,7 @@ inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
 from aios.review.possible_duplicate_transitions import (
     resolve_possible_duplicate_review,
 )
+from aios.duplicate_detection import judge_duplicate
 
 possible_duplicate_shadow_inbox_repo = None
 possible_duplicate_shadow_review_repo = None
@@ -5462,8 +5463,60 @@ def score_label(score):
     else:
         return "Low"
 
+def _find_open_possible_duplicate_review_for_item(item):
+    """Find an existing duplicate review on native or legacy shadow rows."""
+    if AIOS_DATASTORE != "supabase":
+        return None
+
+    if (
+        possible_duplicate_shadow_inbox_repo is None
+        or possible_duplicate_shadow_review_repo is None
+    ):
+        return None
+
+    rows = (
+        possible_duplicate_shadow_inbox_repo
+        .get_review_rows_for_item(item)
+    )
+
+    for row in rows:
+        reviews = (
+            possible_duplicate_shadow_review_repo
+            .get_open_reviews_for_item(
+                str(row["id"])
+            )
+        )
+
+        for review in reviews:
+            if review.review_type == "possible_duplicate":
+                return review
+
+    return None
+
+
 # Possible-duplicate shadow helper must be defined before the
 # top-level Brain Dump classification loop executes.
+def _pending_duplicate_reevaluation(item):
+    review = (
+        _find_open_possible_duplicate_review_for_item(
+            item
+        )
+    )
+
+    if review is None:
+        return None
+
+    requested = str(
+        (review.payload or {}).get("requested_action")
+        or ""
+    ).strip()
+
+    if requested != "reevaluate":
+        return None
+
+    return review
+
+
 def shadow_possible_duplicate_review(match):
     """Write an observational Supabase review for a real possible duplicate.
 
@@ -5486,25 +5539,72 @@ def shadow_possible_duplicate_review(match):
     score = match["score"]
 
     try:
-        shadow_row = (
-            possible_duplicate_shadow_inbox_repo
-            .get_or_create_shadow_item(item)
-        )
-
-        existing_reviews = (
-            possible_duplicate_shadow_review_repo
-            .get_open_reviews_for_item(
-                str(shadow_row["id"])
+        review = (
+            _find_open_possible_duplicate_review_for_item(
+                item
             )
         )
 
-        for review in existing_reviews:
-            if review.review_type == "possible_duplicate":
-                print(
-                    "[Possible Duplicate Shadow] Existing open review reused:",
-                    item["text"],
+        if review is not None:
+            matched_task_id = (
+                matched_task.get("_supabase_id")
+                or matched_task.get("id")
+            )
+
+            payload = dict(review.payload or {})
+            payload.update(
+                {
+                    "original_text": item["text"],
+                    "candidate_task_id": (
+                        str(matched_task_id)
+                        if matched_task_id
+                        else None
+                    ),
+                    "candidate_task_title":
+                        get_title(matched_task),
+                    "match_score": score,
+                    "semantic_state": match.get(
+                        "duplicate_state",
+                        "possible_duplicate",
+                    ),
+                    "semantic_reason": match.get(
+                        "duplicate_reason",
+                    ),
+                    "confidence": score_label(score),
+                    "allowed_decisions": [
+                        "link_existing",
+                        "create_anyway",
+                        "ignore",
+                    ],
+                    "authority":
+                        "supabase_review_authority_v1",
+                }
+            )
+
+            # A fresh processor judgment satisfies any pending
+            # re-evaluation request.
+            payload.pop("requested_action", None)
+
+            updated = (
+                possible_duplicate_shadow_review_repo
+                .update_state(
+                    review.id,
+                    "pending",
+                    payload=payload,
                 )
-                return review
+            )
+
+            print(
+                "[Possible Duplicate Shadow] "
+                "Existing open review refreshed:",
+                item["text"],
+            )
+            return updated
+
+        shadow_row = (
+            possible_duplicate_shadow_inbox_repo
+            .get_review_row_for_item(item)
+        )
 
         matched_task_id = (
             matched_task.get("_supabase_id")
@@ -5520,6 +5620,13 @@ def shadow_possible_duplicate_review(match):
             ),
             "candidate_task_title": get_title(matched_task),
             "match_score": score,
+            "semantic_state": match.get(
+                "duplicate_state",
+                "possible_duplicate",
+            ),
+            "semantic_reason": match.get(
+                "duplicate_reason",
+            ),
             "confidence": score_label(score),
             "allowed_decisions": [
                 "link_existing",
@@ -5621,6 +5728,9 @@ matches = []
 possible_matches = []
 tasks_to_create = []
 duplicate_inbox_items = []
+pending_reevaluated_distinct = []
+pending_reevaluated_distinct_inbox_ids = set()
+pending_reevaluated_duplicates = []
 
 if RUN_TASK_CREATION_PIPELINE:
     seen_new_titles = set()
@@ -5634,10 +5744,244 @@ if RUN_TASK_CREATION_PIPELINE:
         if title:
             existing_tasks_by_title[normalize(title)] = task
 
+    # Semantic duplicate detection operates on a small datastore-neutral
+    # surface while retaining the original runtime task for downstream
+    # metadata/review handling.
+    semantic_existing_tasks = [
+        {
+            "id": str(task.get("id") or ""),
+            "title": get_title(task),
+            "original_task": task,
+        }
+        for task in open_tasks
+        if get_title(task)
+    ]
+
+    # Re-evaluate duplicate reviews from the authoritative Review queue.
+    # This is intentionally independent of inbox pending status: an item may
+    # already be processed while its human review remains open.
+    if (
+        AIOS_DATASTORE == "supabase"
+        and possible_duplicate_shadow_review_repo is not None
+        and possible_duplicate_shadow_inbox_repo is not None
+    ):
+        open_duplicate_reviews = [
+            review
+            for review in (
+                possible_duplicate_shadow_review_repo
+                .get_open_reviews()
+            )
+            if review.review_type == "possible_duplicate"
+            and str(
+                (review.payload or {}).get("requested_action")
+                or ""
+            ).strip() == "reevaluate"
+        ]
+
+        for review in open_duplicate_reviews:
+            inbox_row = (
+                possible_duplicate_shadow_inbox_repo
+                .get_row(review.inbox_item_id)
+                or {}
+            )
+
+            review_text = str(
+                inbox_row.get("clean_text")
+                or inbox_row.get("text")
+                or (review.payload or {}).get("original_text")
+                or ""
+            ).strip()
+
+            if not review_text:
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluation skipped; no source text:",
+                    review.id,
+                )
+                continue
+
+            parsed = parse_task_flags(review_text)
+            review_title = strip_due_date_phrases(
+                parsed["clean_title"]
+            )
+            review_title = rewrite_safe_noun_task(
+                review_title,
+                allow_ai=False,
+            )
+            review_title = restore_preferred_proper_nouns(
+                review_title
+            )
+
+            if not review_title:
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluation skipped; no task title:",
+                    review.id,
+                )
+                continue
+
+            result = judge_duplicate(
+                client,
+                task_title=review_title,
+                existing_tasks=semantic_existing_tasks,
+            )
+
+            state = str(
+                result.get("state") or "distinct"
+            )
+
+            matched_surface = result.get("task") or {}
+            matched_task = matched_surface.get(
+                "original_task"
+            )
+
+            score = float(
+                result.get("confidence") or 0.0
+            )
+
+            if state == "duplicate" and matched_task:
+                candidate_id = (
+                    matched_task.get("_supabase_id")
+                    or matched_task.get("id")
+                )
+
+                pending_reevaluated_duplicates.append(
+                    {
+                        "review": review,
+                        "candidate_task_id": (
+                            str(candidate_id)
+                            if candidate_id
+                            else None
+                        ),
+                        "candidate_task_title":
+                            get_title(matched_task),
+                        "match_score": score,
+                        "semantic_reason":
+                            result.get("reason"),
+                    }
+                )
+
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluated:",
+                    review_title,
+                    "→ duplicate; staged for automatic merge with",
+                    get_title(matched_task),
+                    f"({score:.2f})",
+                )
+
+            elif (
+                state == "possible_duplicate"
+                and matched_task
+            ):
+                candidate_id = (
+                    matched_task.get("_supabase_id")
+                    or matched_task.get("id")
+                )
+
+                payload = dict(review.payload or {})
+                payload.update(
+                    {
+                        "original_text": review_text,
+                        "candidate_task_id": (
+                            str(candidate_id)
+                            if candidate_id
+                            else None
+                        ),
+                        "candidate_task_title":
+                            get_title(matched_task),
+                        "match_score": score,
+                        "semantic_state":
+                            "possible_duplicate",
+                        "semantic_reason":
+                            result.get("reason"),
+                        "confidence":
+                            score_label(score),
+                        "allowed_decisions": [
+                            "link_existing",
+                            "create_anyway",
+                            "ignore",
+                        ],
+                        "authority":
+                            "supabase_review_authority_v1",
+                    }
+                )
+
+                payload.pop(
+                    "requested_action",
+                    None,
+                )
+
+                possible_duplicate_shadow_review_repo.update_state(
+                    review.id,
+                    "pending",
+                    payload=payload,
+                )
+
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluated:",
+                    review_title,
+                    "→ possible_duplicate",
+                    get_title(matched_task),
+                    f"({score:.2f})",
+                )
+
+            else:
+                pending_reevaluated_distinct_inbox_ids.add(
+                    str(review.inbox_item_id)
+                )
+
+                source_metadata = (
+                    inbox_row.get("source_metadata")
+                    or {}
+                )
+
+                if bool(source_metadata.get("shadow")):
+                    original_inbox_id = str(
+                        inbox_row.get("source_item_id")
+                        or ""
+                    ).strip()
+
+                    if original_inbox_id:
+                        pending_reevaluated_distinct_inbox_ids.add(
+                            original_inbox_id
+                        )
+
+                pending_reevaluated_distinct.append(
+                    {
+                        "review": review,
+                        "inbox_row": inbox_row,
+                        "review_text": review_text,
+                        "review_title": review_title,
+                        "parsed": parsed,
+                        "semantic_reason": result.get("reason"),
+                    }
+                )
+
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluated:",
+                    review_title,
+                    "→ distinct; staged for task creation",
+                )
+
     non_task_note_items = []
     non_task_idea_items = []
 
     for item in inbox_items:
+        if (
+            str(item.inbox_row_id or "")
+            in pending_reevaluated_distinct_inbox_ids
+        ):
+            print(
+                "[Possible Duplicate Review] "
+                "Skipping normal inbox classification; "
+                "distinct re-evaluation is staged:",
+                item["text"],
+            )
+            continue
+
         non_task_decision = rule_based_non_task_decision(item["text"])
 
         if non_task_decision == "note":
@@ -5676,26 +6020,72 @@ if RUN_TASK_CREATION_PIPELINE:
 
         normalized_title = normalize(task_title)
 
-        matched_task, match_score = find_best_task_match(
-            task_title,
-            existing_tasks_by_title,
+        reevaluation_review = (
+            _pending_duplicate_reevaluation(item)
+        )
+        reevaluation_requested = (
+            reevaluation_review is not None
         )
 
-        if matched_task and match_score >= HIGH_MATCH_THRESHOLD:
-            matches.append({
+        duplicate_result = judge_duplicate(
+            client,
+            task_title=task_title,
+            existing_tasks=semantic_existing_tasks,
+        )
+
+        duplicate_state = str(
+            duplicate_result.get("state") or "distinct"
+        )
+
+        matched_surface = duplicate_result.get("task") or {}
+        matched_task = matched_surface.get("original_task")
+        match_score = float(
+            duplicate_result.get("confidence") or 0.0
+        )
+
+        if duplicate_state == "duplicate" and matched_task:
+            result_match = {
                 "item": item,
                 "task": matched_task,
                 "score": match_score,
-            })
+                "duplicate_reason": duplicate_result.get("reason"),
+                "duplicate_state": duplicate_state,
+                "reevaluation_requested": reevaluation_requested,
+            }
 
-        elif matched_task and match_score >= MEDIUM_MATCH_THRESHOLD:
+            # After an explicit re-evaluation, even a high-confidence
+            # duplicate returns to human review rather than auto-linking.
+            if reevaluation_requested:
+                possible_matches.append(result_match)
+            else:
+                matches.append(result_match)
+
+        elif (
+            duplicate_state == "possible_duplicate"
+            and matched_task
+        ):
             possible_matches.append({
                 "item": item,
                 "task": matched_task,
                 "score": match_score,
+                "duplicate_reason": duplicate_result.get("reason"),
+                "duplicate_state": duplicate_state,
+                "reevaluation_requested": reevaluation_requested,
             })
 
         else:
+            if reevaluation_requested:
+                resolved = resolve_possible_duplicate_review(
+                    review_repo=possible_duplicate_shadow_review_repo,
+                    review=reevaluation_review,
+                    action="reevaluated_distinct",
+                )
+
+                print(
+                    "[Possible Duplicate Review] "
+                    "Re-evaluation → distinct; obsolete review resolved"
+                )
+
             if normalized_title in seen_new_titles:
                 duplicate_inbox_items.append(item)
                 print("Duplicate within inbox:", task_title)
@@ -5979,19 +6369,50 @@ _pending_possible_duplicate_create_anyway = {}
 def _open_possible_duplicate_review(item):
     if AIOS_DATASTORE != "supabase":
         return None
-    if possible_duplicate_shadow_inbox_repo is None or possible_duplicate_shadow_review_repo is None:
-        raise RuntimeError("Possible duplicate Supabase review repositories are unavailable.")
-    shadow_row = possible_duplicate_shadow_inbox_repo.get_or_create_shadow_item(item)
-    reviews = possible_duplicate_shadow_review_repo.get_open_reviews_for_item(str(shadow_row["id"]))
-    for review in reviews:
-        if review.review_type == "possible_duplicate":
-            return review
-    raise RuntimeError("No pending Supabase possible_duplicate review found for inbox item: " + item["text"])
+
+    if (
+        possible_duplicate_shadow_inbox_repo is None
+        or possible_duplicate_shadow_review_repo is None
+    ):
+        raise RuntimeError(
+            "Possible duplicate Supabase review "
+            "repositories are unavailable."
+        )
+
+    rows = (
+        possible_duplicate_shadow_inbox_repo
+        .get_review_rows_for_item(item)
+    )
+
+    for row in rows:
+        reviews = (
+            possible_duplicate_shadow_review_repo
+            .get_open_reviews_for_item(
+                str(row["id"])
+            )
+        )
+
+        for review in reviews:
+            if review.review_type == "possible_duplicate":
+                return review
+
+    raise RuntimeError(
+        "No pending Supabase possible_duplicate review "
+        "found for inbox item: "
+        + item["text"]
+    )
 
 
 def _duplicate_candidate_identity(match):
     task = match.get("task") or {}
-    return str(task.get("id") or ""), get_title(task)
+
+    task_id = (
+        task.get("_supabase_id")
+        or task.get("id")
+        or ""
+    )
+
+    return str(task_id), get_title(task)
 
 
 def _resolve_possible_duplicate_now(match, action):
@@ -6047,12 +6468,52 @@ def _resolve_staged_possible_duplicate_create_anyway(item, created_pages):
     return True
 
 
+def _requested_possible_duplicate_action(match):
+    """Return a pending app-requested duplicate action, if any."""
+    if AIOS_DATASTORE != "supabase":
+        return None
+
+    try:
+        review = _open_possible_duplicate_review(
+            match["item"]
+        )
+    except Exception:
+        return None
+
+    requested = str(
+        (review.payload or {}).get("requested_action")
+        or ""
+    ).strip()
+
+    if requested == "create_anyway":
+        return CREATE_ANYWAY_COMMAND
+
+    return None
+
+
 def review_possible_duplicate_items(possible_matches):
     reviewed_possible_items = []
     possible_items_to_create_anyway = []
     for match in possible_matches:
         item = match["item"]
-        action = inbox_review_ui.get_possible_duplicate_action(item)
+
+        if match.get("reevaluation_requested"):
+            print(
+                "[Possible Duplicate Review] "
+                "Fresh re-evaluation returned to app review"
+            )
+            continue
+
+        action = _requested_possible_duplicate_action(
+            match
+        )
+
+        if not action:
+            action = (
+                inbox_review_ui
+                .get_possible_duplicate_action(item)
+            )
+
         if not action:
             continue
         if action == LINK_EXISTING_COMMAND:
@@ -6713,6 +7174,55 @@ def limit_items_for_controlled_production(items):
 
     return limited_items
 
+def _mark_duplicate_review_inbox_processed(
+    review,
+):
+    """Close native and legacy-shadow inbox lifecycle after review success."""
+    if possible_duplicate_shadow_inbox_repo is None:
+        return
+
+    review_row = (
+        possible_duplicate_shadow_inbox_repo
+        .get_row(review.inbox_item_id)
+    )
+
+    possible_duplicate_shadow_inbox_repo.mark_processed(
+        review.inbox_item_id
+    )
+
+    if not review_row:
+        return
+
+    source_metadata = (
+        review_row.get("source_metadata")
+        or {}
+    )
+
+    if not bool(source_metadata.get("shadow")):
+        return
+
+    original_inbox_id = str(
+        review_row.get("source_item_id")
+        or ""
+    ).strip()
+
+    if (
+        not original_inbox_id
+        or original_inbox_id == review.inbox_item_id
+    ):
+        return
+
+    original_row = (
+        possible_duplicate_shadow_inbox_repo
+        .get_row(original_inbox_id)
+    )
+
+    if original_row is not None:
+        possible_duplicate_shadow_inbox_repo.mark_processed(
+            original_inbox_id
+        )
+
+
 def run_task_creation_pipeline():
     """Create tasks, handle reviewed duplicates, then archive processed inbox blocks."""
     if TEST_MODE:
@@ -6743,6 +7253,153 @@ def run_task_creation_pipeline():
     print("DRY_RUN:", DRY_RUN)
     print("MAX_ITEMS_PER_RUN:", MAX_ITEMS_PER_RUN)
     print("ARCHIVE_PROCESSED_ITEMS:", ARCHIVE_PROCESSED_ITEMS)
+
+    # High-confidence duplicate re-evaluations use the existing task
+    # automatically. Existing wording is preserved.
+    for staged in pending_reevaluated_duplicates:
+        review = staged["review"]
+
+        try:
+            payload = dict(review.payload or {})
+            payload["auto_merge_notice"] = {
+                "message": "Merged automatically",
+                "candidate_task_id": staged[
+                    "candidate_task_id"
+                ],
+                "candidate_task_title": staged[
+                    "candidate_task_title"
+                ],
+                "match_score": staged[
+                    "match_score"
+                ],
+                "kept_wording": "existing",
+            }
+            payload["semantic_state"] = "duplicate"
+            payload["semantic_reason"] = staged[
+                "semantic_reason"
+            ]
+            payload.pop(
+                "requested_action",
+                None,
+            )
+
+            review = (
+                possible_duplicate_shadow_review_repo
+                .update_state(
+                    review.id,
+                    "pending",
+                    payload=payload,
+                )
+            )
+
+            resolved = resolve_possible_duplicate_review(
+                review_repo=possible_duplicate_shadow_review_repo,
+                review=review,
+                action="link_existing",
+                candidate_task_id=staged[
+                    "candidate_task_id"
+                ],
+                candidate_task_title=staged[
+                    "candidate_task_title"
+                ],
+            )
+
+            _mark_duplicate_review_inbox_processed(
+                resolved
+            )
+
+            print(
+                "[Possible Duplicate Review] "
+                "Automatic duplicate merge:",
+                staged["candidate_task_title"],
+                f"({staged['match_score']:.2f})",
+            )
+
+        except Exception as exc:
+            print(
+                "[Possible Duplicate Review] "
+                "Automatic duplicate merge failed; "
+                "review remains pending:",
+                review.id,
+                exc,
+            )
+
+    # Re-evaluated duplicate reviews that are now distinct resume normal
+    # task processing here. The review is resolved only after creation succeeds.
+    for staged in pending_reevaluated_distinct:
+        review = staged["review"]
+        inbox_row = staged["inbox_row"]
+
+        item = (
+            possible_duplicate_shadow_inbox_repo
+            .row_to_inbox_item(inbox_row)
+        )
+
+        print(
+            "\nPROCESSING RE-EVALUATED DISTINCT:",
+            item["text"],
+        )
+
+        try:
+            created_pages = process_task_item(item)
+
+            if not created_pages:
+                print(
+                    "[Possible Duplicate Review] "
+                    "Distinct task creation produced no task; "
+                    "review remains pending:",
+                    review.id,
+                )
+                continue
+
+            created_task_ids = [
+                str(
+                    page.get("_supabase_id")
+                    or page.get("id")
+                )
+                for page in created_pages
+                if (
+                    page
+                    and (
+                        page.get("_supabase_id")
+                        or page.get("id")
+                    )
+                )
+            ]
+
+            if not created_task_ids:
+                print(
+                    "[Possible Duplicate Review] "
+                    "Distinct creation returned no task IDs; "
+                    "review remains pending:",
+                    review.id,
+                )
+                continue
+
+            resolved = resolve_possible_duplicate_review(
+                review_repo=possible_duplicate_shadow_review_repo,
+                review=review,
+                action="reevaluated_distinct",
+                created_task_ids=created_task_ids,
+            )
+
+            _mark_duplicate_review_inbox_processed(
+                resolved
+            )
+
+            print(
+                "[Possible Duplicate Review] "
+                "Distinct re-evaluation created task and resolved review:",
+                created_task_ids,
+            )
+
+        except Exception as exc:
+            print(
+                "[Possible Duplicate Review] "
+                "Distinct task creation failed; review remains pending:",
+                review.id,
+                exc,
+            )
 
     # 1) Create new tasks, with optional breakdown, then archive/delete them.
     for item in final_tasks_to_create:

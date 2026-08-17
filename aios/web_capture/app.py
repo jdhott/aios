@@ -1538,6 +1538,579 @@ h1 {{
 
 
 
+def _reviews_page(
+    reviews: list[dict],
+    *,
+    notices: list[dict] | None = None,
+    error: str = "",
+) -> str:
+    notices = notices or []
+    possible_duplicates = [
+        review
+        for review in reviews
+        if review.get("review_type") == "possible_duplicate"
+        and review.get("state") != "resolved"
+    ]
+
+    cards = ""
+    reevaluation_pending = False
+
+    for review in possible_duplicates:
+        review_id = html.escape(str(review.get("id") or ""))
+        subject = html.escape(
+            str(review.get("subject_text") or "")
+        )
+
+        payload = review.get("payload") or {}
+
+        candidate_id = html.escape(
+            str(payload.get("candidate_task_id") or "")
+        )
+        candidate_title = html.escape(
+            str(payload.get("candidate_task_title") or "")
+        )
+
+        candidate_changed = bool(
+            payload.get("candidate_task_changed")
+        )
+
+        if candidate_changed:
+            score_html = (
+                '<span class="review-score">'
+                'Task changed since this match was evaluated'
+                '</span>'
+            )
+
+            requested_action = str(
+                payload.get("requested_action") or ""
+            ).strip()
+
+            if requested_action == "reevaluate":
+                reevaluation_pending = True
+
+                use_existing_html = (
+                    '<div class="review-pending">'
+                    '<span class="review-spinner" aria-hidden="true"></span>'
+                    '<div>'
+                    '<strong>Re-evaluating match…</strong>'
+                    '<div class="review-stale-note">'
+                    'AIOS is checking the edited task against the new task.'
+                    '</div>'
+                    '</div>'
+                    '</div>'
+                )
+
+                create_new_html = ""
+
+            else:
+                use_existing_html = f"""
+                <div class="review-stale-note">
+                  Re-evaluate this match before using the existing task.
+                </div>
+                <form method="post"
+                      action="/reviews/{review_id}/possible-duplicate/reevaluate">
+                  <button class="review-primary" type="submit">
+                    Re-evaluate match
+                  </button>
+                </form>
+                """
+
+                create_new_html = f"""
+                <form method="post"
+                      action="/reviews/{review_id}/possible-duplicate/create-new">
+                  <button class="review-secondary" type="submit">
+                    Keep separate
+                  </button>
+                </form>
+                """
+
+        else:
+            try:
+                score = float(payload.get("match_score"))
+                score_text = f"{round(score * 100)}% match"
+            except (TypeError, ValueError):
+                score_text = ""
+
+            score_html = (
+                f'<span class="review-score">'
+                f'{html.escape(score_text)}</span>'
+                if score_text
+                else ""
+            )
+
+            use_existing_html = f'''
+            <form method="post"
+                  action="/reviews/{review_id}/possible-duplicate/use-existing">
+              <input type="hidden"
+                     name="candidate_task_id"
+                     value="{candidate_id}">
+              <input type="hidden"
+                     name="candidate_task_title"
+                     value="{candidate_title}">
+              <input type="hidden"
+                     name="title_choice"
+                     value="existing">
+              <button class="review-primary" type="submit">
+                Use existing wording
+              </button>
+            </form>
+
+            <form method="post"
+                  action="/reviews/{review_id}/possible-duplicate/use-existing">
+              <input type="hidden"
+                     name="candidate_task_id"
+                     value="{candidate_id}">
+              <input type="hidden"
+                     name="candidate_task_title"
+                     value="{candidate_title}">
+              <input type="hidden"
+                     name="title_choice"
+                     value="new">
+              <button class="review-secondary" type="submit">
+                Use new wording
+              </button>
+            </form>
+            '''
+
+            create_new_html = f"""
+            <form method="post"
+                  action="/reviews/{review_id}/possible-duplicate/create-new">
+              <button class="review-secondary" type="submit">
+                Keep separate
+              </button>
+            </form>
+            """
+
+        cards += f'''
+        <section class="review-card">
+          <div class="review-label">Possible duplicate</div>
+
+          <div class="review-section-label">New task</div>
+          <div class="review-task">{subject}</div>
+
+          <div class="review-section-label">Possible existing task</div>
+          <div class="review-existing">
+            <strong>
+              <a class="review-task-link"
+                 href="/tasks/{candidate_id}?return_to=%2Freviews">
+                {candidate_title}
+              </a>
+            </strong>
+            {score_html}
+          </div>
+
+          <div class="review-actions">
+            {use_existing_html}
+            {create_new_html}
+          </div>
+        </section>
+        '''
+
+    if not cards:
+        cards = (
+            '<div class="empty-state">'
+            'No possible duplicate reviews need attention.'
+            '</div>'
+        )
+
+    auto_notice_html = ""
+
+    for auto_notice in notices:
+        notice_id = html.escape(
+            str(auto_notice.get("id") or "")
+        )
+        candidate_title = html.escape(
+            str(
+                auto_notice.get(
+                    "candidate_task_title"
+                )
+                or ""
+            )
+        )
+
+        try:
+            score = float(
+                auto_notice.get("match_score")
+            )
+            score_text = (
+                f" ({round(score * 100)}% match)"
+            )
+        except (TypeError, ValueError):
+            score_text = ""
+
+        auto_notice_html += f"""
+        <div class="auto-merge-notice"
+             data-auto-merge-id="{notice_id}">
+          <strong>Merged automatically</strong>
+          <div>
+            AIOS matched this task to
+            <strong>{candidate_title}</strong>{score_text}
+            and kept the existing wording.
+          </div>
+        </div>
+        """
+
+    notice = (
+        '<div class="notice">'
+        + html.escape(error)
+        + '</div>'
+        if error
+        else ""
+    )
+
+    if reevaluation_pending:
+        pending_refresh_script = """
+<script>
+(() => {
+  const key = "aios-duplicate-reevaluation-refresh-count";
+  const count = Number(sessionStorage.getItem(key) || "0");
+
+  if (count < 45) {
+    sessionStorage.setItem(key, String(count + 1));
+    setTimeout(() => window.location.reload(), 2000);
+  }
+})();
+</script>
+"""
+    else:
+        pending_refresh_script = """
+<script>
+sessionStorage.removeItem(
+  "aios-duplicate-reevaluation-refresh-count"
+);
+</script>
+"""
+
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#264155">
+<title>AIOS Review</title>
+<style>
+:root {{
+  --navy:#264155;
+  --paper:#f7f7f3;
+  --ink:#17242d;
+  --muted:#66747d;
+  --border:#d9dedf;
+  --card:#fff;
+}}
+* {{ box-sizing:border-box; }}
+body {{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}}
+main {{
+  width:min(760px,100%);
+  margin:0 auto;
+  padding:max(26px,env(safe-area-inset-top)) 18px 42px;
+}}
+.back {{
+  color:var(--navy);
+  text-decoration:none;
+  font-weight:750;
+}}
+h1 {{
+  margin:22px 0 6px;
+}}
+.intro {{
+  margin:0 0 22px;
+  color:var(--muted);
+}}
+.auto-merge-notice {{
+  display:none;
+  background:#fff;
+  border:1px solid var(--border);
+  border-left:4px solid var(--navy);
+  border-radius:12px;
+  padding:14px 16px;
+  margin:0 0 16px;
+  line-height:1.45;
+}}
+.auto-merge-notice strong {{
+  color:var(--navy);
+}}
+.auto-merge-notice > strong {{
+  display:block;
+  margin-bottom:4px;
+}}
+.review-card {{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:18px;
+  margin-bottom:14px;
+}}
+.review-label {{
+  color:var(--muted);
+  font-size:.8rem;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+  margin-bottom:16px;
+}}
+.review-section-label {{
+  color:var(--muted);
+  font-size:.78rem;
+  font-weight:750;
+  margin-top:10px;
+}}
+.review-task,
+.review-existing {{
+  margin-top:4px;
+  font-size:1rem;
+  line-height:1.4;
+}}
+.review-existing {{
+  display:flex;
+  gap:9px;
+  align-items:baseline;
+  flex-wrap:wrap;
+}}
+.review-task-link {{
+  color:var(--navy);
+  text-decoration:none;
+}}
+.review-task-link:hover {{
+  text-decoration:underline;
+}}
+.review-score {{
+  color:var(--muted);
+  font-size:.82rem;
+}}
+.review-pending {{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  padding:8px 0;
+}}
+.review-spinner {{
+  width:20px;
+  height:20px;
+  flex:0 0 20px;
+  border:3px solid var(--border);
+  border-top-color:var(--navy);
+  border-radius:50%;
+  animation:review-spin .8s linear infinite;
+}}
+@keyframes review-spin {{
+  to {{ transform:rotate(360deg); }}
+}}
+.review-stale-note {{
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.4;
+  padding:8px 0;
+}}
+.review-actions {{
+  display:flex;
+  gap:9px;
+  flex-wrap:wrap;
+  margin-top:18px;
+}}
+.review-actions form {{
+  margin:0;
+}}
+.review-primary,
+.review-secondary {{
+  border-radius:9px;
+  padding:8px 12px;
+  font:inherit;
+  font-weight:750;
+  cursor:pointer;
+}}
+.review-primary {{
+  border:1px solid var(--navy);
+  background:var(--navy);
+  color:white;
+}}
+.review-secondary {{
+  border:1px solid var(--border);
+  background:white;
+  color:var(--navy);
+}}
+.empty-state {{
+  padding:20px;
+  background:white;
+  border:1px solid var(--border);
+  border-radius:12px;
+  color:var(--muted);
+}}
+.notice {{
+  margin:14px 0;
+  padding:12px;
+  background:white;
+  border:1px solid var(--border);
+  border-radius:10px;
+}}
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← Home</a>
+  <h1>Review</h1>
+  <p class="intro">
+    Resolve tasks that AIOS thinks may already exist.
+  </p>
+  {notice}
+  {auto_notice_html}
+  {cards}
+</main>
+{pending_refresh_script}
+<script>
+(() => {{
+  document
+    .querySelectorAll(".auto-merge-notice")
+    .forEach((notice) => {{
+      const id = notice.dataset.autoMergeId;
+      if (!id) return;
+
+      const key = "aios-auto-merge-notice-" + id;
+
+      if (sessionStorage.getItem(key)) {{
+        notice.remove();
+        return;
+      }}
+
+      notice.style.display = "block";
+      sessionStorage.setItem(key, "seen");
+    }});
+}})();
+</script>
+</body>
+</html>'''
+
+
+def _fetch_reviews() -> list[dict]:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.get(
+        f"{api_url}/reviews",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return list(response.json() or [])
+
+
+def _fetch_review_notices() -> list[dict]:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.get(
+        f"{api_url}/reviews/notices/recent",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned "
+            f"{response.status_code}: "
+            f"{response.text}"
+        )
+
+    return list(
+        (response.json() or {}).get(
+            "notices",
+            [],
+        )
+    )
+
+
+def _request_possible_duplicate_reevaluation(
+    review_id: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/possible-duplicate/reevaluate",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _request_possible_duplicate_create_new(
+    review_id: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/possible-duplicate/create-new",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _resolve_possible_duplicate(
+    review_id: str,
+    *,
+    action: str,
+    candidate_task_id: str | None = None,
+    candidate_task_title: str | None = None,
+    title_choice: str | None = None,
+    created_task_ids: list[str] | None = None,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/possible-duplicate",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "action": action,
+            "candidate_task_id": candidate_task_id,
+            "candidate_task_title": candidate_task_title,
+            "title_choice": title_choice,
+            "created_task_ids": created_task_ids or [],
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
 def _fetch_project_options() -> list[dict]:
     api_url = _api_url()
     token = _identity_token(api_url)
@@ -2572,6 +3145,188 @@ def projects_web(
             status_code=200,
         )
 
+
+
+@app.get("/reviews")
+def reviews_web(
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    error: str = "",
+):
+    try:
+        reviews = _fetch_reviews()
+
+        try:
+            notices = _fetch_review_notices()
+        except Exception as exc:
+            print(
+                "[Review] Notice load failed:",
+                exc,
+            )
+            notices = []
+
+        # A duplicate review stores the candidate title as it existed
+        # when the match was evaluated. Refresh the current task title
+        # and mark the review stale if that title has since changed.
+        for review in reviews:
+            if review.get("review_type") != "possible_duplicate":
+                continue
+
+            payload = dict(review.get("payload") or {})
+
+            candidate_id = str(
+                payload.get("candidate_task_id") or ""
+            ).strip()
+
+            if not candidate_id:
+                continue
+
+            stored_title = str(
+                payload.get("candidate_task_title") or ""
+            ).strip()
+
+            try:
+                current_task = _fetch_task_detail(candidate_id)
+
+                current_title = str(
+                    current_task.get("title") or ""
+                ).strip()
+
+                if current_title:
+                    payload["candidate_task_changed"] = (
+                        bool(stored_title)
+                        and current_title != stored_title
+                    )
+                    payload["stored_candidate_task_title"] = (
+                        stored_title
+                    )
+                    payload["candidate_task_title"] = (
+                        current_title
+                    )
+
+                    review["payload"] = payload
+
+            except Exception as exc:
+                print(
+                    "[Review] Candidate task refresh failed:",
+                    candidate_id,
+                    exc,
+                )
+
+        return HTMLResponse(
+            _reviews_page(
+                reviews,
+                notices=notices,
+                error=error,
+            )
+        )
+    except Exception as exc:
+        print("[Review] Load failed:", exc)
+        return HTMLResponse(
+            _reviews_page(
+                [],
+                error="Reviews could not be loaded.",
+            )
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/possible-duplicate/reevaluate"
+)
+def possible_duplicate_reevaluate_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _request_possible_duplicate_reevaluation(
+            review_id
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] Re-evaluate failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Duplicate+match+could+not+be+re-evaluated."
+            ),
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/possible-duplicate/use-existing"
+)
+def possible_duplicate_use_existing_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    candidate_task_id: Annotated[str, Form()] = "",
+    candidate_task_title: Annotated[str, Form()] = "",
+    title_choice: Annotated[str, Form()] = "existing",
+):
+    try:
+        _resolve_possible_duplicate(
+            review_id,
+            action="link_existing",
+            candidate_task_id=candidate_task_id.strip() or None,
+            candidate_task_title=candidate_task_title.strip() or None,
+            title_choice=title_choice.strip() or "existing",
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] Use existing failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url="/reviews?error=Duplicate+review+could+not+be+resolved.",
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/possible-duplicate/create-new"
+)
+def possible_duplicate_create_new_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _request_possible_duplicate_create_new(
+            review_id
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] Create new failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=New+task+could+not+be+requested."
+            ),
+            status_code=303,
+        )
 
 
 @app.post("/projects/{project_id}/outcome")
