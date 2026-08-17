@@ -22,6 +22,20 @@ CAPTURE_METADATA_PROTECTED_GLOBALS = {
 }
 
 
+def has_meaningful_capture_text(text: str) -> bool:
+    """Return False for blank or bullet-only capture text."""
+    clean = str(text or "").strip()
+
+    if not clean:
+        return False
+
+    # Brain Dump UI bullet/list markers are not tasks by themselves.
+    if re.fullmatch(r"[•*\-–—·\s]+", clean):
+        return False
+
+    return True
+
+
 def configure_capture_metadata(namespace):
     for key, value in namespace.items():
         if key in CAPTURE_METADATA_PROTECTED_GLOBALS:

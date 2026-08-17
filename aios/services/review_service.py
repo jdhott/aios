@@ -182,14 +182,13 @@ class ReviewService:
             review_type="clarification",
         )
 
-        task_id = str(
-            (review.payload or {}).get("task_id")
-            or ""
-        ).strip()
+        task_id = self._task_id_for_review(
+            review
+        )
 
         if not task_id:
             raise ValueError(
-                "Clarification review has no authoritative task_id."
+                "Clarification review has no authoritative task."
             )
 
         capture = parse_capture_metadata(
@@ -315,6 +314,91 @@ class ReviewService:
         )
         return self._to_app_review(resolved)
 
+    def _task_id_for_review(
+        self,
+        review: InboxReview,
+    ) -> str:
+        """Return the authoritative Supabase task ID for a review.
+
+        Native clarification reviews carry task_id directly.
+        Legacy clarification reviews may only carry the old
+        Notion mirror page ID.
+        """
+        payload = dict(review.payload or {})
+
+        task_id = str(
+            payload.get("task_id")
+            or ""
+        ).strip()
+
+        if task_id:
+            return task_id
+
+        notion_page_id = str(
+            payload.get("notion_task_page_id")
+            or ""
+        ).strip()
+
+        if not notion_page_id:
+            return ""
+
+        task = (
+            self.task_repository
+            .get_task_by_legacy_notion_id(
+                notion_page_id
+            )
+        )
+
+        if task is None:
+            return ""
+
+        return str(task.id)
+
+
+    def delete_review_task(
+        self,
+        review_id: str,
+    ) -> AppReview:
+        review = self._require_review(
+            review_id,
+            review_type="clarification",
+        )
+
+        task_id = self._task_id_for_review(
+            review
+        )
+
+        if not task_id:
+            raise ValueError(
+                "Clarification review has no authoritative task."
+            )
+
+        # Match the normal task-delete semantics:
+        # archive it and remove it from the open population.
+        self.task_repository.update_task(
+            task_id,
+            values={
+                "is_archived": True,
+                "is_open": False,
+            },
+        )
+
+        resolved = (
+            self.review_repository
+            .resolve_review(
+                review.id,
+                decision={
+                    "action": "delete_task",
+                    "task_id": task_id,
+                },
+            )
+        )
+
+        return self._to_app_review(
+            resolved
+        )
+
+
     def _require_review(
         self,
         review_id: str,
@@ -430,12 +514,21 @@ class ReviewService:
             or ""
         ).strip()
 
+        payload = dict(review.payload or {})
+
+        if review.review_type == "clarification":
+            task_id = self._task_id_for_review(
+                review
+            )
+            if task_id:
+                payload["task_id"] = task_id
+
         return AppReview(
             id=review.id,
             review_type=review.review_type,
             state=review.state,
             subject_text=subject_text,
-            payload=dict(review.payload or {}),
+            payload=payload,
             options=self._options_for(review),
             inbox_item_id=review.inbox_item_id,
             created_at=review.created_at,

@@ -22,6 +22,19 @@ class FakeReviewRepository:
                 created_at=now,
                 updated_at=now,
             ),
+            "clarify-legacy": InboxReview(
+                id="clarify-legacy",
+                inbox_item_id="inbox-legacy",
+                review_type="clarification",
+                state="pending",
+                payload={
+                    "original_text": "Legacy clarification",
+                    "notion_task_page_id": "notion-legacy-1",
+                    "authority": "notion_shadow_only",
+                },
+                created_at=now,
+                updated_at=now,
+            ),
             "duplicate-1": InboxReview(
                 id="duplicate-1",
                 inbox_item_id="inbox-2",
@@ -79,8 +92,26 @@ class FakeTaskRepository:
             "task-clarify": {
                 "id": "task-clarify",
                 "title": "Clarify next action: Plan canning",
-            }
+            },
+            "task-legacy": {
+                "id": "task-legacy",
+                "title": "Clarify next action: Legacy clarification",
+                "legacy_notion_id": "notion-legacy-1",
+            },
         }
+
+    def get_task_by_legacy_notion_id(
+        self,
+        notion_id,
+    ):
+        for task in self.tasks.values():
+            if task.get("legacy_notion_id") == notion_id:
+                class TaskRow:
+                    pass
+                result = TaskRow()
+                result.id = task["id"]
+                return result
+        return None
 
     def update_task(
         self,
@@ -110,6 +141,10 @@ class FakeInboxRepository:
         "inbox-1": {"id": "inbox-1", "clean_text": "Plan canning"},
         "inbox-2": {"id": "inbox-2", "clean_text": "Check generator quote"},
         "inbox-3": {"id": "inbox-3", "clean_text": "Check generator quote again"},
+        "inbox-legacy": {
+            "id": "inbox-legacy",
+            "clean_text": "Legacy clarification",
+        },
     }
 
     def get_row(self, inbox_id):
@@ -183,6 +218,33 @@ r = service.resolve_possible_duplicate(
 )
 assert r.state == "resolved"
 
+legacy = service.get_review(
+    "clarify-legacy"
+)
+assert legacy is not None
+assert legacy.payload["task_id"] == "task-legacy"
+
+r = service.delete_review_task(
+    "clarify-legacy"
+)
+assert r.state == "resolved"
+
+legacy_updates = [
+    item
+    for item in task_repo.updated
+    if item["task_id"] == "task-legacy"
+]
+
+assert legacy_updates == [
+    {
+        "task_id": "task-legacy",
+        "values": {
+            "is_archived": True,
+            "is_open": False,
+        },
+    }
+]
+
 try:
     service.resolve_clarification(
         "clarify-1",
@@ -200,5 +262,7 @@ print("Clarification pending_confirmation → resolved: PASS")
 print("Possible duplicate ignore resolution: PASS")
 print("create_anyway sequencing guard: PASS")
 print("create_anyway post-create resolution: PASS")
+print("legacy clarification task-ID fallback: PASS")
+print("clarification delete-task lifecycle: PASS")
 print("resolved-review double transition rejection: PASS")
 print("RESULT: APP REVIEW RESOLUTION SERVICE PHASE 2.2 SMOKE TEST PASSED")

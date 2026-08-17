@@ -8,6 +8,7 @@ from typing import Annotated
 import google.auth
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from aios.ingestion.capture_metadata import has_meaningful_capture_text
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token
@@ -137,16 +138,19 @@ def _split_brain_dump(text: str) -> list[str]:
 
     for line in text.splitlines():
         clean = line.strip()
-        if not clean:
+
+        if not has_meaningful_capture_text(clean):
             continue
 
-        for prefix in ("• ", "- ", "* "):
-            if clean.startswith(prefix):
-                clean = clean[len(prefix):].strip()
-                break
+        # Strip one ordinary Brain Dump list marker whether or not
+        # the user/browser left whitespace after it.
+        if clean[:1] in {"•", "-", "*"}:
+            clean = clean[1:].strip()
 
-        if clean:
-            items.append(clean)
+        if not has_meaningful_capture_text(clean):
+            continue
+
+        items.append(clean)
 
     return items
 
@@ -1721,6 +1725,14 @@ def _reviews_page(
 
         payload = review.get("payload") or {}
 
+        task_id = html.escape(
+            str(
+                payload.get("task_id")
+                or ""
+            ),
+            quote=True,
+        )
+
         state = str(
             review.get("state") or "pending"
         ).strip()
@@ -1951,8 +1963,27 @@ def _reviews_page(
             Original task
           </div>
 
-          <div class="review-task">
-            {original_text}
+          <div class="review-task-row">
+            {
+                f'<a class="review-task-link" '
+                f'href="/tasks/{task_id}?return_to=%2Freviews">'
+                f'{original_text}</a>'
+                if task_id
+                else f'<div class="review-task">{original_text}</div>'
+            }
+
+            {
+                f'<form method="post" '
+                f'action="/reviews/{review_id}/clarification/delete-task" '
+                f'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
+                f'<button class="review-delete-button" '
+                f'type="submit" '
+                f'aria-label="Delete task" '
+                f'title="Delete task">🗑️</button>'
+                f'</form>'
+                if task_id
+                else ''
+            }
           </div>
 
           {clarification_action_html}
@@ -2094,6 +2125,34 @@ h1 {{
 .auto-merge-notice > strong {{
   display:block;
   margin-bottom:4px;
+}}
+.review-task-row {{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:4px;
+}}
+.review-task-row .review-task-link {{
+  flex:1;
+  font-size:1.05rem;
+}}
+.review-delete-button {{
+  width:40px;
+  height:40px;
+  flex:0 0 40px;
+  padding:0;
+  border:0;
+  border-radius:9px;
+  background:transparent;
+  cursor:pointer;
+  font-size:1rem;
+  opacity:.68;
+}}
+.review-delete-button:hover,
+.review-delete-button:focus-visible {{
+  opacity:1;
+  background:#eceeed;
 }}
 .clarification-edit {{
   width:100%;
@@ -2379,6 +2438,30 @@ def _resolve_possible_duplicate(
     if not response.ok:
         raise RuntimeError(
             f"AIOS API returned {response.status_code}: {response.text}"
+        )
+
+    return dict(response.json() or {})
+
+
+def _delete_clarification_task(
+    review_id: str,
+) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+
+    response = requests.post(
+        f"{api_url}/reviews/{review_id}/clarification/delete-task",
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+        timeout=30,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned "
+            f"{response.status_code}: "
+            f"{response.text}"
         )
 
     return dict(response.json() or {})
@@ -3701,6 +3784,39 @@ def possible_duplicate_create_new_web(
             url=(
                 "/reviews?"
                 "error=New+task+could+not+be+requested."
+            ),
+            status_code=303,
+        )
+
+
+@app.post(
+    "/reviews/{review_id}/clarification/delete-task"
+)
+def clarification_delete_task_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        _delete_clarification_task(
+            review_id
+        )
+
+        return RedirectResponse(
+            url="/reviews",
+            status_code=303,
+        )
+
+    except Exception as exc:
+        print(
+            "[Clarification] "
+            "Delete task failed:",
+            exc,
+        )
+
+        return RedirectResponse(
+            url=(
+                "/reviews?"
+                "error=Clarification+task+could+not+be+deleted."
             ),
             status_code=303,
         )

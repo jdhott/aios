@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from aios.ingestion.models import InboxItem
-from aios.ingestion.capture_metadata import CaptureMetadata
+from aios.ingestion.capture_metadata import (
+    CaptureMetadata,
+    has_meaningful_capture_text,
+)
 from aios.storage.supabase_store import SupabaseStore
 
 
@@ -291,6 +294,11 @@ class InboxRepository:
         parser,
         source_metadata: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
+        if not has_meaningful_capture_text(raw_text):
+            raise ValueError(
+                "Brain Dump item contains no meaningful task text."
+            )
+
         capture = parser(raw_text)
         if not isinstance(capture, CaptureMetadata):
             raise TypeError("Brain Dump parser must return CaptureMetadata")

@@ -1684,6 +1684,33 @@ def resolve_possible_duplicate_http(
     return response
 
 @app.post(
+    "/reviews/{review_id}/clarification/delete-task",
+    response_model=ReviewResponse,
+    tags=["reviews"],
+)
+def clarification_delete_task_http(
+    review_id: str,
+) -> ReviewResponse:
+    try:
+        resolved = (
+            _review_service()
+            .delete_review_task(
+                review_id
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        raise _review_error(exc) from exc
+
+    response = ReviewResponse(
+        **resolved.to_dict()
+    )
+    _mark_review_inbox_processed(
+        response
+    )
+    return response
+
+
+@app.post(
     "/reviews/{review_id}/clarification/request-question",
     response_model=ReviewResponse,
     tags=["reviews"],
