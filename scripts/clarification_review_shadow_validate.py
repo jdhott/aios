@@ -4,37 +4,43 @@ import ast
 
 root = Path(__file__).resolve().parents[1]
 run_text = (root / "run_aios.py").read_text()
-shadow_text = (root / "aios/review/clarification_shadow.py").read_text()
+review_text = (root / "aios/review/clarification_shadow.py").read_text()
 
 checks = [
-    ("shadow helper module exists", "def shadow_clarification_review(" in shadow_text),
-    ("uses inbox identity bridge", ".get_or_create_shadow_item(item)" in shadow_text),
+    ("authoritative clarification helper exists",
+     "def create_clarification_review(" in review_text),
+    ("uses source-neutral inbox review identity",
+     ".get_review_row_for_item(" in review_text),
     ("reuses open clarification review",
-        "get_open_reviews_for_item(" in shadow_text and 'review.review_type == "clarification"' in shadow_text),
+     "get_open_reviews_for_item(" in review_text
+     and 'review.review_type == "clarification"' in review_text),
     ("creates pending clarification review",
-        'review_type="clarification"' in shadow_text and 'state="pending"' in shadow_text),
-    ("payload includes proposal semantics",
-        all(x in shadow_text for x in [
-            '"original_text"', '"proposed_text"', '"clarification_mode"',
-            '"clarification_reason"', '"notion_task_page_id"',
-            '"task_title"', '"notion_shadow_only"'
-        ])),
-    ("maybe_add receives InboxItem",
-        "def maybe_add_clarification_blocks(first_page, task_title, original_title, item):" in run_text),
-    ("Notion render precedes shadow write",
-        run_text.find("render_result = append_clarification_blocks(") <
-        run_text.find("review, created = shadow_clarification_review(")),
-    ("shadow non-blocking", "[Clarification Shadow] Write failed:" in run_text),
-    ("process_task_item passes original item", "item=item," in run_text),
+     'review_type="clarification"' in review_text
+     and 'state="pending"' in review_text),
+    ("payload carries authoritative task identity",
+     all(x in review_text for x in [
+         '"original_text"', '"proposed_text"', '"task_id"',
+         '"task_title"', '"clarification_mode"',
+         '"clarification_reason"', '"authority"'
+     ])),
+    ("Supabase authority version exists",
+     "supabase-clarification-review-v1" in review_text),
+    ("runtime creates authoritative clarification review",
+     "review, created = create_clarification_review(" in run_text),
+    ("runtime passes Supabase task id",
+     "task_id=task_id" in run_text),
+    ("legacy Notion clarification UI is isolated",
+     'if AIOS_DATASTORE == "notion":' in run_text
+     and "Legacy Notion clarification UI configured" in run_text),
 ]
 
 ast.parse(run_text)
-ast.parse(shadow_text)
+ast.parse(review_text)
 
 for label, ok in checks:
     print(f"{'PASS' if ok else 'FAIL'}: {label}")
 
 if not all(ok for _, ok in checks):
-    raise SystemExit("RESULT: CLARIFICATION REVIEW SHADOW V1 VALIDATION FAILED")
+    raise SystemExit("RESULT: CLARIFICATION REVIEW AUTHORITY VALIDATION FAILED")
 
-print("RESULT: CLARIFICATION REVIEW SHADOW V1 STRUCTURE VALID")
+print("RESULT: CLARIFICATION REVIEW AUTHORITY STRUCTURE VALID")

@@ -5296,21 +5296,13 @@ def rebuild_clarification_blocks(page_id, original_task, suggestions):
 
 
 # -------------------------------------------------------------------------
-# Canonical clarification workflow module
+# Clarification review authority
 # -------------------------------------------------------------------------
-# These six workflow/UI functions now live in aios.clarification. The module's
-# conservative configure hook receives the already-initialized runtime globals
-# so this refactor changes ownership, not behavior.
-from aios import clarification as clarification_helpers
-from aios.storage.notion_task_mirror_writer import (
-    NotionTaskMirrorTitleWriter,
-)
-
-notion_task_mirror_title_writer = None
-if AIOS_DATASTORE == 'supabase':
-    notion_task_mirror_title_writer = NotionTaskMirrorTitleWriter(headers=headers)
-    print('[Task Mirror Title] Writer configured')
-
+# Supabase/web is the authoritative clarification review path in normal AIOS
+# operation.  The old Notion checkbox/block workflow is initialized only when
+# AIOS is explicitly run in legacy Notion datastore mode.  This keeps normal
+# processor runs from paying for Notion clarification reads/writes or mirror
+# title updates.
 from aios.review.clarification_shadow import create_clarification_review
 from aios.review.clarification_transitions import (
     mark_clarification_awaiting_answer,
@@ -5318,28 +5310,46 @@ from aios.review.clarification_transitions import (
     resolve_clarification_review,
 )
 
-clarification_helpers.configure_clarification_module(globals())
+clarification_helpers = None
+append_clarification_blocks = None
+get_checked_clarification_action = None
+update_task_from_selection = None
+clear_page_children = None
+update_clarification_title = None
+process_clarification_selection = None
 
-append_clarification_blocks = (
-    clarification_helpers.append_clarification_blocks
-)
-get_checked_clarification_action = (
-    clarification_helpers.get_checked_clarification_action
-)
-update_task_from_selection = (
-    clarification_helpers.update_task_from_selection
-)
-clear_page_children = (
-    clarification_helpers.clear_page_children
-)
-update_clarification_title = (
-    clarification_helpers.update_clarification_title
-)
-process_clarification_selection = (
-    clarification_helpers.process_clarification_selection
-)
+if AIOS_DATASTORE == "notion":
+    from aios import clarification as clarification_helpers
 
-print("[Clarification Module] Canonical workflow functions loaded from aios.clarification")
+    clarification_helpers.configure_clarification_module(globals())
+
+    append_clarification_blocks = (
+        clarification_helpers.append_clarification_blocks
+    )
+    get_checked_clarification_action = (
+        clarification_helpers.get_checked_clarification_action
+    )
+    update_task_from_selection = (
+        clarification_helpers.update_task_from_selection
+    )
+    clear_page_children = (
+        clarification_helpers.clear_page_children
+    )
+    update_clarification_title = (
+        clarification_helpers.update_clarification_title
+    )
+    process_clarification_selection = (
+        clarification_helpers.process_clarification_selection
+    )
+
+    print(
+        "[Clarification Review] Legacy Notion clarification UI configured"
+    )
+else:
+    print(
+        "[Clarification Review] Supabase/web authority configured; "
+        "legacy Notion clarification UI not initialized"
+    )
 
 clarification_shadow_inbox_repo = None
 clarification_shadow_review_repo = None
@@ -5360,9 +5370,8 @@ if AIOS_DATASTORE == "supabase":
         )
         print("[Clarification Shadow] Bootstrap imports localized")
         print("[Clarification Shadow] Supabase shadow review repositories configured")
-        print("[Clarification Shadow] State transition helpers configured")
-        clarification_helpers.configure_clarification_module(globals())
-        print("[Clarification Shadow] Runtime dependencies refreshed")
+        print("[Clarification Review] State transition helpers configured")
+        print("[Clarification Review] Supabase runtime dependencies ready")
     except Exception as exc:
         print(f"[Clarification Shadow] Bootstrap failed: {exc}")
 
