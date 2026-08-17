@@ -1136,15 +1136,23 @@ def _project_detail_page(
         if task.get("is_just_do_it"):
             meta.append("Just Do It")
 
+        project_return = f"/projects/{project_id}#project-tasks"
         task_rows += (
-            '<a class="task-row" href="/tasks/' + task_id
-            + '?return_to=/projects/' + project_id + '">'
-            '<div>'
-            f'<div class="task-title">{title}</div>'
+            '<article class="task-row project-task-row">'
+            f'<form class="complete-form" method="post" action="/tasks/{task_id}/complete">'
+            f'<input type="hidden" name="return_to" value="{project_return}">'
+            '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
+            '<span aria-hidden="true"></span></button></form>'
+            '<div class="project-task-main">'
+            f'<div class="task-title"><a class="project-task-link" href="/tasks/{task_id}?return_to={project_return}">{title}</a></div>'
             f'<div class="task-meta">{" · ".join(meta)}</div>'
             '</div>'
-            '<span class="chevron">›</span>'
-            '</a>'
+            f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
+            'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
+            f'<input type="hidden" name="return_to" value="{project_return}">'
+            '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
+            '<span aria-hidden="true">🗑️</span></button></form>'
+            '</article>'
         )
 
     if not task_rows:
@@ -1296,6 +1304,15 @@ h1 {{
   gap:16px; padding:16px 18px; color:inherit;
   text-decoration:none; border-bottom:1px solid var(--border);
 }}
+.project-task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; }}
+.project-task-main {{ min-width:0; }}
+.project-task-link {{ color:inherit; text-decoration:none; }}
+.project-task-link:hover {{ text-decoration:underline; }}
+.complete-form, .delete-form {{ display:flex; margin:0; align-items:center; justify-content:center; }}
+.complete-checkbox, .trash-button {{ width:44px; height:44px; min-height:44px; padding:0; border:0; border-radius:10px; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; }}
+.complete-checkbox span {{ width:20px; height:20px; border:2px solid #89959b; border-radius:6px; display:block; }}
+.complete-checkbox:hover, .complete-checkbox:focus-visible, .trash-button:hover, .trash-button:focus-visible {{ background:#eceeed; }}
+.trash-button {{ font-size:1.08rem; opacity:.72; }}
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:#fbfbf8; }}
 .task-title {{ font-weight:700; }}
@@ -1556,7 +1573,7 @@ h1 {{
 
   {pending_html}
 
-  <div class="task-list">{task_rows}</div>
+  <div class="task-list" id="project-tasks">{task_rows}</div>
 </main>
 {pending_refresh_script}
 </body>
@@ -4532,14 +4549,23 @@ def edit_task_web(
 
 
 @app.post("/tasks/{task_id}/complete")
-def complete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:
+def complete_task_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    return_to: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    target = _safe_return_to(return_to) if return_to else "/"
     try:
         _task_action(task_id, "complete")
+        if target != "/":
+            return RedirectResponse(url=target, status_code=303)
         return RedirectResponse(
             url="/?message=Task+completed.&refresh_focus=1",
             status_code=303,
         )
     except Exception:
+        if target != "/":
+            return RedirectResponse(url=target, status_code=303)
         return RedirectResponse(
             url="/?error=Task+could+not+be+completed.",
             status_code=303,
@@ -4585,9 +4611,23 @@ def snooze_task_web(
 
 
 @app.post("/tasks/{task_id}/delete")
-def delete_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:
-    try: _task_action(task_id, "delete"); return RedirectResponse(url="/?message=Task+deleted.",status_code=303)
-    except Exception: return RedirectResponse(url="/?error=Task+could+not+be+deleted.",status_code=303)
+def delete_task_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    return_to: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    target = _safe_return_to(return_to) if return_to else "/"
+    try:
+        _task_action(task_id, "delete")
+        return RedirectResponse(
+            url=target if target != "/" else "/?message=Task+deleted.",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url=target if target != "/" else "/?error=Task+could+not+be+deleted.",
+            status_code=303,
+        )
 
 
 @app.post("/submit")
