@@ -5456,6 +5456,7 @@ else:
     print("[Possible Duplicate Review] Supabase/web review authority configured")
 
 from aios.review.possible_duplicate_transitions import (
+    refresh_possible_duplicate_payload,
     resolve_possible_duplicate_review,
 )
 from aios.duplicate_detection import judge_duplicate
@@ -5634,8 +5635,8 @@ def upsert_possible_duplicate_review(match):
                 or matched_task.get("id")
             )
 
-            payload = dict(review.payload or {})
-            payload.update(
+            payload = refresh_possible_duplicate_payload(
+                review.payload,
                 {
                     "original_text": item["text"],
                     "candidate_task_id": (
@@ -5661,12 +5662,8 @@ def upsert_possible_duplicate_review(match):
                     ],
                     "authority":
                         "supabase_review_authority_v1",
-                }
+                },
             )
-
-            # A fresh processor judgment satisfies any pending
-            # re-evaluation request.
-            payload.pop("requested_action", None)
 
             updated = (
                 possible_duplicate_shadow_review_repo

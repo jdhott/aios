@@ -51,17 +51,17 @@ checks = [
     ),
     (
         "web offers existing wording",
-        "Use existing wording"
+        "Use existing task"
         in web,
     ),
     (
         "web offers new wording",
-        "Use new wording"
+        "Replace with new wording"
         in web,
     ),
     (
         "web offers keep separate",
-        "Keep separate"
+        "Keep as separate tasks"
         in web,
     ),
     (

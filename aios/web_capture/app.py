@@ -1541,6 +1541,81 @@ h1 {{
 </html>"""
 
 
+def _possible_duplicate_new_task_page(review: dict) -> str:
+    payload = review.get("payload") or {}
+    title = html.escape(
+        str(review.get("subject_text") or payload.get("original_text") or "")
+    )
+    original = html.escape(
+        str(payload.get("original_text") or review.get("subject_text") or "")
+    )
+    candidate_title = html.escape(
+        str(payload.get("candidate_task_title") or "")
+    )
+    reason = html.escape(str(payload.get("semantic_reason") or ""))
+
+    try:
+        score = float(payload.get("match_score"))
+        score_text = f"{round(score * 100)}% match"
+    except (TypeError, ValueError):
+        score_text = ""
+
+    comparison_html = ""
+    if candidate_title:
+        comparison_html = (
+            '<div class="label">Possible existing task</div>'
+            f'<div class="value">{candidate_title}'
+            + (f' <span class="muted">{html.escape(score_text)}</span>' if score_text else '')
+            + '</div>'
+        )
+
+    reason_html = ""
+    if reason:
+        reason_html = (
+            '<div class="label">Why AIOS flagged it</div>'
+            f'<div class="value">{reason}</div>'
+        )
+
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#264155">
+<title>AIOS New Task Review</title>
+<style>
+:root {{--navy:#264155;--paper:#f7f7f3;--ink:#17242d;--muted:#66747d;--border:#d9dedf;--card:#fff;}}
+* {{box-sizing:border-box;}}
+body {{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}}
+main {{width:min(760px,100%);margin:0 auto;padding:max(26px,env(safe-area-inset-top)) 18px 42px;}}
+.back {{color:var(--navy);text-decoration:none;font-weight:750;}}
+h1 {{margin:24px 0 6px;color:var(--navy);font-size:clamp(2rem,6vw,2.7rem);letter-spacing:-.03em;}}
+.intro {{margin:0 0 22px;color:var(--muted);line-height:1.45;}}
+.card {{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-top:16px;}}
+.label {{color:var(--muted);font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;margin-top:16px;}}
+.label:first-child {{margin-top:0;}}
+.value {{margin-top:5px;font-size:1rem;line-height:1.45;}}
+.title {{font-size:1.18rem;font-weight:750;color:var(--navy);}}
+.muted {{color:var(--muted);font-size:.88rem;}}
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/reviews">← Review</a>
+  <h1>New task</h1>
+  <p class="intro">This task has not been created yet. AIOS is holding it for your duplicate decision.</p>
+  <section class="card">
+    <div class="label">Proposed task</div>
+    <div class="value title">{title}</div>
+    <div class="label">Original Brain Dump</div>
+    <div class="value">{original}</div>
+    {comparison_html}
+    {reason_html}
+  </section>
+</main>
+</body>
+</html>'''
+
 
 def _reviews_page(
     reviews: list[dict],
@@ -1565,6 +1640,7 @@ def _reviews_page(
 
     cards = ""
     reevaluation_pending = False
+    duplicate_creation_pending = False
     clarification_processing_pending = False
 
     for review in possible_duplicates:
@@ -1632,7 +1708,7 @@ def _reviews_page(
                 <form method="post"
                       action="/reviews/{review_id}/possible-duplicate/create-new">
                   <button class="review-secondary" type="submit">
-                    Keep separate
+                    Keep as separate tasks
                   </button>
                 </form>
                 """
@@ -1651,57 +1727,70 @@ def _reviews_page(
                 else ""
             )
 
-            use_existing_html = f'''
-            <form method="post"
-                  action="/reviews/{review_id}/possible-duplicate/use-existing">
-              <input type="hidden"
-                     name="candidate_task_id"
-                     value="{candidate_id}">
-              <input type="hidden"
-                     name="candidate_task_title"
-                     value="{candidate_title}">
-              <input type="hidden"
-                     name="title_choice"
-                     value="existing">
-              <button class="review-primary" type="submit">
-                Use existing wording
-              </button>
-            </form>
+            requested_action = str(
+                payload.get("requested_action") or ""
+            ).strip()
 
-            <form method="post"
-                  action="/reviews/{review_id}/possible-duplicate/use-existing">
-              <input type="hidden"
-                     name="candidate_task_id"
-                     value="{candidate_id}">
-              <input type="hidden"
-                     name="candidate_task_title"
-                     value="{candidate_title}">
-              <input type="hidden"
-                     name="title_choice"
-                     value="new">
-              <button class="review-secondary" type="submit">
-                Use new wording
-              </button>
-            </form>
-            '''
+            if requested_action == "create_anyway":
+                duplicate_creation_pending = True
+                use_existing_html = (
+                    '<div class="review-pending">'
+                    '<span class="review-spinner" aria-hidden="true"></span>'
+                    '<div><strong>Creating separate task…</strong>'
+                    '<div class="review-stale-note">'
+                    'AIOS is keeping both tasks and finishing the new task creation.'
+                    '</div></div></div>'
+                )
+                create_new_html = ""
+            else:
+                use_existing_html = f'''
+                <form method="post"
+                      action="/reviews/{review_id}/possible-duplicate/use-existing">
+                  <input type="hidden"
+                         name="candidate_task_id"
+                         value="{candidate_id}">
+                  <input type="hidden"
+                         name="candidate_task_title"
+                         value="{candidate_title}">
+                  <input type="hidden"
+                         name="title_choice"
+                         value="existing">
+                  <button class="review-primary" type="submit">
+                    Use existing task
+                  </button>
+                </form>
 
-            create_new_html = f"""
-            <form method="post"
-                  action="/reviews/{review_id}/possible-duplicate/create-new">
-              <button class="review-secondary" type="submit">
-                Keep separate
-              </button>
-            </form>
-            """
+                <form method="post"
+                      action="/reviews/{review_id}/possible-duplicate/use-existing">
+                  <input type="hidden"
+                         name="candidate_task_id"
+                         value="{candidate_id}">
+                  <input type="hidden"
+                         name="candidate_task_title"
+                         value="{candidate_title}">
+                  <input type="hidden"
+                         name="title_choice"
+                         value="new">
+                  <button class="review-secondary" type="submit">
+                    Replace with new wording
+                  </button>
+                </form>
+                '''
+
+                create_new_html = f"""
+                <form method="post"
+                      action="/reviews/{review_id}/possible-duplicate/create-new">
+                  <button class="review-secondary" type="submit">
+                    Keep as separate tasks
+                  </button>
+                </form>
+                """
 
         cards += f'''
         <section class="review-card">
           <div class="review-label">Possible duplicate</div>
 
-          <div class="review-section-label">New task</div>
-          <div class="review-task">{subject}</div>
-
-          <div class="review-section-label">Possible existing task</div>
+          <div class="review-section-label">Existing task</div>
           <div class="review-existing">
             <strong>
               <a class="review-task-link"
@@ -1710,6 +1799,14 @@ def _reviews_page(
               </a>
             </strong>
             {score_html}
+          </div>
+
+          <div class="review-section-label">New task</div>
+          <div class="review-task">
+            <a class="review-task-link"
+               href="/reviews/{review_id}/possible-duplicate/new-task">
+              {subject}
+            </a>
           </div>
 
           <div class="review-actions">
@@ -2045,6 +2142,7 @@ def _reviews_page(
 
     if (
         reevaluation_pending
+        or duplicate_creation_pending
         or clarification_processing_pending
     ):
         pending_refresh_script = """
@@ -3728,6 +3826,44 @@ def reviews_web(
                 [],
                 error="Reviews could not be loaded.",
             )
+        )
+
+@app.get(
+    "/reviews/{review_id}/possible-duplicate/new-task"
+)
+def possible_duplicate_new_task_detail_web(
+    review_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+):
+    try:
+        review = next(
+            (
+                row
+                for row in _fetch_reviews()
+                if str(row.get("id") or "") == review_id
+                and row.get("review_type") == "possible_duplicate"
+            ),
+            None,
+        )
+
+        if review is None:
+            return RedirectResponse(
+                url="/reviews?error=Duplicate+review+could+not+be+found.",
+                status_code=303,
+            )
+
+        return HTMLResponse(
+            _possible_duplicate_new_task_page(review)
+        )
+
+    except Exception as exc:
+        print(
+            "[Possible Duplicate] New task detail failed:",
+            exc,
+        )
+        return RedirectResponse(
+            url="/reviews?error=New+task+details+could+not+be+loaded.",
+            status_code=303,
         )
 
 

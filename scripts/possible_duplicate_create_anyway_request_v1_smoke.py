@@ -25,6 +25,10 @@ class FakeReviewRepo:
         assert review_id == "r1"
         return self.review
 
+    def get_reviews_for_item(self, inbox_item_id):
+        assert inbox_item_id == "i1"
+        return [self.review]
+
     def update_state(self, review_id, state, *, payload=None):
         assert review_id == "r1"
         assert state == "pending"
