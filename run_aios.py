@@ -4174,21 +4174,47 @@ def parse_notion_date_start(date_start):
         except ValueError:
             return None
 
-def get_defer_until_date(task):
-    """Return the Defer Until date for a task, or None when blank/unparseable."""
+def get_defer_until_start(task):
     props = task.get("properties", {})
-    return parse_notion_date_start(get_date_start_value(props, DEFER_UNTIL_PROPERTY))
+    return get_date_start_value(props, DEFER_UNTIL_PROPERTY)
 
-def is_deferred_until_future(task, today=None):
-    """Return True when a task should be hidden until a future date.
+def get_defer_until_date(task):
+    """Backward-compatible date view of Defer Until."""
+    return parse_notion_date_start(get_defer_until_start(task))
 
-    Defer Until means: do not surface this task in automated execution views until
-    that date arrives. A task deferred to today is eligible again.
+def is_deferred_until_future(task, today=None, now=None):
+    """Return True while Defer Until is still in the future.
+
+    Date-only values retain the existing rule: eligibility returns on that
+    calendar date. Timestamp values allow short execution snoozes within a day.
     """
-    defer_until = get_defer_until_date(task)
-    if not defer_until:
+    raw = get_defer_until_start(task)
+    if not raw:
         return False
 
+    text = str(raw).strip()
+    if "T" in text:
+        try:
+            target = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if now is None:
+                current = (
+                    datetime.now(target.tzinfo)
+                    if target.tzinfo is not None
+                    else datetime.now()
+                )
+            else:
+                current = now
+                if target.tzinfo is not None and getattr(current, "tzinfo", None) is None:
+                    current = current.replace(tzinfo=target.tzinfo)
+                elif target.tzinfo is None and getattr(current, "tzinfo", None) is not None:
+                    current = current.replace(tzinfo=None)
+            return target > current
+        except (TypeError, ValueError):
+            pass
+
+    defer_until = parse_notion_date_start(text)
+    if not defer_until:
+        return False
     today = today or datetime.now().date()
     return defer_until > today
 

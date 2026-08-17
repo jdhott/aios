@@ -111,6 +111,28 @@ def _task_action(task_id: str, action: str) -> dict:
     return response.json()
 
 
+def _snooze_task(task_id: str, preset: str, custom_date: str = "") -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+    payload = {"preset": preset}
+    if custom_date:
+        payload["custom_date"] = custom_date
+    response = requests.post(
+        f"{api_url}/tasks/{task_id}/snooze",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+    return response.json()
+
+
 def _capture_to_aios(text: str) -> dict:
     api_url = _api_url()
     token = _identity_token(api_url)
@@ -3094,7 +3116,17 @@ def _page(
             '</form>'
             '<div class="focus-main">'
             f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
-            f'<div class="focus-meta">{" · ".join(meta)}</div></div>'
+            f'<div class="focus-meta">{" · ".join(meta)}</div>'
+            '<div class="focus-parent-actions">'
+            '<details class="focus-snooze">'
+            '<summary>Snooze</summary>'
+            '<div class="focus-snooze-menu">'
+            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="later_today"><button type="submit">Later today</button></form>'
+            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="tomorrow"><button type="submit">Tomorrow</button></form>'
+            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="three_days"><button type="submit">3 days</button></form>'
+            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="one_week"><button type="submit">1 week</button></form>'
+            f'<form class="focus-snooze-date" method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="pick_date"><input type="date" name="custom_date" required><button type="submit">Pick date</button></form>'
+            '</div></details></div></div>'
             f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
             '</div>'
@@ -3246,6 +3278,18 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.25rem; line-height:1.3; font-weight:850; }}
     .focus-title:hover {{ text-decoration:underline; }}
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
+    .focus-parent-actions {{ display:flex; gap:10px; margin-top:9px; }}
+    .focus-snooze {{ position:relative; }}
+    .focus-snooze > summary {{ list-style:none; cursor:pointer; color:var(--navy); font-size:.84rem; font-weight:800; }}
+    .focus-snooze > summary::-webkit-details-marker {{ display:none; }}
+    .focus-snooze > summary:hover {{ text-decoration:underline; }}
+    .focus-snooze-menu {{ position:absolute; z-index:20; top:28px; left:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+    .focus-snooze-menu form {{ display:block; margin:0; }}
+    .focus-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
+    .focus-snooze-menu button:hover {{ background:#f3f4f2; }}
+    .focus-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
+    .focus-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
+    .focus-snooze-date button {{ width:auto; white-space:nowrap; }}
     .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
     .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
     .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:center; margin-top:8px; }}
@@ -4495,6 +4539,26 @@ def not_now_task_web(
     except Exception:
         return RedirectResponse(
             url="/?error=Task+could+not+be+skipped.",
+            status_code=303,
+        )
+
+
+@app.post("/tasks/{task_id}/snooze")
+def snooze_task_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    preset: Annotated[str, Form()] = "",
+    custom_date: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    try:
+        _snooze_task(task_id, preset, custom_date)
+        return RedirectResponse(
+            url="/?message=Best+Next+Action+snoozed.&refresh_focus=1",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url="/?error=Task+could+not+be+snoozed.",
             status_code=303,
         )
 

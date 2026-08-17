@@ -9,7 +9,8 @@ from aios.focus_activation import (
     mark_focus_activation_not_now,
 )
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import os
 
 from aios.api.config import (
@@ -253,6 +254,32 @@ def get_review(
 
 
 
+def _is_future_defer_value(
+    value: str | None,
+    *,
+    now: datetime | None = None,
+    timezone_name: str = "America/Toronto",
+) -> bool:
+    if not value:
+        return False
+    local_tz = ZoneInfo(timezone_name)
+    current = now.astimezone(local_tz) if now else datetime.now(local_tz)
+    text = str(value).strip()
+    if "T" in text:
+        try:
+            target = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if target.tzinfo is None:
+                target = target.replace(tzinfo=local_tz)
+            return target.astimezone(local_tz) > current
+        except (TypeError, ValueError):
+            pass
+    try:
+        target_date = datetime.strptime(text[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    return target_date > current.date()
+
+
 AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.2-today-includes-overdue"
 AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.4-dashboard-semantics"
 
@@ -274,7 +301,7 @@ def list_open_tasks_http(
     query = (
         _store().client.table("tasks")
         .select(
-            "id,title,status,due_at,project_id,importance,"
+            "id,title,status,due_at,defer_until,project_id,importance,"
             "is_quick_win,is_just_do_it,created_at,updated_at"
         )
         .eq("is_open", True)
@@ -394,6 +421,7 @@ def list_open_tasks_http(
         [
             row for row in rows
             if bool(row.get("is_quick_win"))
+            and not _is_future_defer_value(row.get("defer_until"))
             and not bool(row.get("best_next_action"))
             and row.get("execution_rank") != 1
             and str(row.get("id")) not in stronger_ids
@@ -488,6 +516,90 @@ def not_now_task_http(task_id: str) -> dict:
         "not_now": True,
         "task": task,
     }
+
+
+class TaskSnoozeRequest(BaseModel):
+    preset: str
+    custom_date: str | None = None
+
+
+def _resolve_task_snooze_until(
+    request: TaskSnoozeRequest,
+    *,
+    now: datetime | None = None,
+) -> str:
+    timezone_name = os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto")
+    local_tz = ZoneInfo(timezone_name)
+    current = now.astimezone(local_tz) if now else datetime.now(local_tz)
+    preset = str(request.preset or "").strip().lower()
+
+    if preset == "later_today":
+        target = current.replace(hour=17, minute=0, second=0, microsecond=0)
+        if target <= current:
+            target = current + timedelta(hours=3)
+            end_of_day = current.replace(hour=23, minute=59, second=0, microsecond=0)
+            if target > end_of_day:
+                target = end_of_day
+        if target <= current:
+            raise HTTPException(status_code=409, detail="Later today is no longer available")
+        return target.isoformat()
+
+    if preset == "tomorrow":
+        return (current.date() + timedelta(days=1)).isoformat()
+    if preset == "three_days":
+        return (current.date() + timedelta(days=3)).isoformat()
+    if preset == "one_week":
+        return (current.date() + timedelta(days=7)).isoformat()
+    if preset == "pick_date":
+        custom = str(request.custom_date or "").strip()
+        try:
+            chosen = datetime.strptime(custom, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Choose a valid snooze date") from exc
+        if chosen <= current.date():
+            raise HTTPException(status_code=422, detail="Snooze date must be after today")
+        return chosen.isoformat()
+
+    raise HTTPException(status_code=422, detail="Unsupported snooze option")
+
+
+@app.post("/tasks/{task_id}/snooze", tags=["tasks"])
+def snooze_task_http(
+    task_id: str,
+    request: TaskSnoozeRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id,is_open,is_done,is_archived,generated_source")
+        .eq("id", task_id)
+        .limit(1)
+        .execute().data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task = dict(rows[0])
+    if task.get("is_done") or task.get("is_archived") or not task.get("is_open"):
+        raise HTTPException(status_code=409, detail="Closed tasks cannot be snoozed")
+    if task.get("generated_source") == "focus_activation":
+        raise HTTPException(status_code=409, detail="Use the starting-step controls for this task")
+
+    defer_until = _resolve_task_snooze_until(request)
+    updated_at = datetime.now(timezone.utc).isoformat()
+    result = (
+        store.client.table("tasks")
+        .update({"defer_until": defer_until, "updated_at": updated_at})
+        .eq("id", task_id)
+        .execute()
+    )
+    if not (result.data or []):
+        raise HTTPException(status_code=500, detail="Task snooze could not be saved")
+
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "snoozed": True, "defer_until": defer_until}
 
 
 @app.post("/tasks/{task_id}/delete", tags=["tasks"])
@@ -1421,22 +1533,37 @@ AIOS_DASHBOARD_FOCUS_API_VERSION = "dashboard-focus-v1"
 
 @app.get("/focus", tags=["tasks"])
 def get_dashboard_focus_http() -> dict:
-    states = (_store().client.table("task_execution_state")
+    store = _store()
+    states = (store.client.table("task_execution_state")
         .select("task_id,execution_score,execution_rank,best_next_action")
         .not_.is_("execution_rank", "null")
         .order("execution_rank")
-        .limit(1).execute().data or [])
+        .limit(25).execute().data or [])
     if not states:
         return {"focus": None}
-    state = dict(states[0])
-    task_id = state.get("task_id")
-    tasks = (_store().client.table("tasks")
-        .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
-        .eq("id", task_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
-        .limit(1).execute().data or [])
-    if not tasks:
+
+    state = None
+    task = None
+    for candidate_state in states:
+        candidate_id = candidate_state.get("task_id")
+        if not candidate_id:
+            continue
+        tasks = (store.client.table("tasks")
+            .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
+            .eq("id", candidate_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
+            .limit(1).execute().data or [])
+        if not tasks:
+            continue
+        candidate_task = dict(tasks[0])
+        if _is_future_defer_value(candidate_task.get("defer_until")):
+            continue
+        state = dict(candidate_state)
+        task = candidate_task
+        break
+
+    if not state or not task:
         return {"focus": None}
-    task = dict(tasks[0])
+    task_id = state.get("task_id")
     task["execution_score"] = state.get("execution_score")
     task["execution_rank"] = state.get("execution_rank")
     task["best_next_action"] = bool(state.get("best_next_action", False))
