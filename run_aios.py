@@ -7436,12 +7436,21 @@ def process_task_item(item):
     return task_pages_created
 
 def archive_created_item(item, created_pages, archive_section_id):
-    """Archive and remove the original inbox block after task creation."""
+    """Finalize a successfully created inbox item.
+
+    Supabase inbox rows are marked processed directly. The historical Notion
+    archive presentation is retained only when Notion is the configured inbox
+    source.
+    """
     if not created_pages:
         return
 
     if DRY_RUN:
-        print(f"[DRY RUN] Would archive/delete original item: {item['text']}")
+        print(f"[DRY RUN] Would finalize processed item: {item['text']}")
+        return
+
+    if AIOS_INBOX_SOURCE == "supabase":
+        inbox_source.remove_item(item)
         return
 
     if not ARCHIVE_PROCESSED_ITEMS:
@@ -7451,18 +7460,26 @@ def archive_created_item(item, created_pages, archive_section_id):
     if not archive_section_id:
         return
 
+
     first_task_url = created_pages[0].get("url")
     archive_item(item, archive_section_id, first_task_url)
     inbox_source.remove_item(item)
 
 def archive_reviewed_items(items, archive_section_id):
-    """Archive and remove processed inbox items that did not create new tasks."""
+    """Finalize processed inbox items that did not create new tasks."""
     if not items:
         return
 
+
     if DRY_RUN:
         for item in items:
-            print(f"[DRY RUN] Would archive/delete reviewed item: {item['text']}")
+            print(f"[DRY RUN] Would finalize reviewed item: {item['text']}")
+        return
+
+
+    if AIOS_INBOX_SOURCE == "supabase":
+        for item in items:
+            inbox_source.remove_item(item)
         return
 
     if not ARCHIVE_PROCESSED_ITEMS:
@@ -7472,6 +7489,7 @@ def archive_reviewed_items(items, archive_section_id):
 
     if not archive_section_id:
         return
+
 
     for item in items:
         archive_item(item, archive_section_id)
@@ -7565,8 +7583,16 @@ def run_task_creation_pipeline():
         + non_task_idea_items
     )
 
-    should_archive = (not DRY_RUN) and ARCHIVE_PROCESSED_ITEMS
-    archive_section_id = create_archive_section() if should_archive and items_to_archive else None
+    should_archive = (
+        (not DRY_RUN)
+        and ARCHIVE_PROCESSED_ITEMS
+        and AIOS_INBOX_SOURCE == "notion"
+    )
+    archive_section_id = (
+        create_archive_section()
+        if should_archive and items_to_archive
+        else None
+    )
 
     print("\n--- RUN MODE ---")
     print("DRY_RUN:", DRY_RUN)
@@ -7733,10 +7759,16 @@ def run_task_creation_pipeline():
     archive_reviewed_items(reviewed_possible_items, archive_section_id)
 
     for item in non_task_note_items:
-        archive_non_task_note_item(item, archive_section_id)
+        if AIOS_INBOX_SOURCE == "supabase":
+            inbox_source.remove_item(item)
+        else:
+            archive_non_task_note_item(item, archive_section_id)
 
     for item in non_task_idea_items:
-        archive_non_task_idea_item(item, archive_section_id)
+        if AIOS_INBOX_SOURCE == "supabase":
+            inbox_source.remove_item(item)
+        else:
+            archive_non_task_idea_item(item, archive_section_id)
 
     if DRY_RUN:
         print(f"[DRY RUN] Would create {len(created_tasks)} task(s)")
@@ -9290,8 +9322,10 @@ def update_aios_dashboard():
         print(f"AIOS dashboard generation failed: {e}")
         return False
 
-if not TEST_MODE:
+if not TEST_MODE and AIOS_DATASTORE == "notion":
     update_aios_dashboard()
+elif not TEST_MODE:
+    print("[Dashboard] Supabase/web authority active; legacy Notion dashboard update disabled.")
 
 # === AIOS METADATA RECONCILIATION PHASE 2.5 BOOTSTRAP ===
 # Reconciliation no longer runs via atexit.

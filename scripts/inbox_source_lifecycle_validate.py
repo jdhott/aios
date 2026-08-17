@@ -71,8 +71,8 @@ def main():
             'item["block_id"]' not in reviewed,
         ),
         (
-            "duplicate-review Notion UI remains untouched",
-            run_text.count('item["block_id"]') == 2,
+            "runtime no longer depends on raw Notion block_id",
+            'item["block_id"]' not in run_text,
         ),
         (
             "pipeline still reads through inbox source",
