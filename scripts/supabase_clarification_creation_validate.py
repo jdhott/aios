@@ -28,10 +28,12 @@ def main() -> None:
          'AIOS_DATASTORE == "supabase"' in dispatcher
          and "parent_task_id is None" in dispatcher
          and "step_order is None" in dispatcher),
-        ("temporary Notion mirror remains general creation compatibility",
-         "notion_create_fn=_create_notion_task_only" in dispatcher),
-        ("Notion rollback remains general creation compatibility",
-         "notion_rollback_fn=update_notion_page" in dispatcher),
+        ("native clarification creation bypasses Notion mirror",
+         "notion_create_fn=_create_notion_task_only" not in dispatcher[dispatcher.index("if can_use_supabase_primary:"):dispatcher.index("return _create_notion_task_only")]),
+        ("native creation supplies create-time metadata",
+         "effort=effort" in dispatcher
+         and "importance=effective_importance" in dispatcher
+         and "status=status" in dispatcher),
         ("clarification review is created after authoritative task creation",
          "maybe_create_clarification_review(" in runtime
          and "create_clarification_review(" in runtime),

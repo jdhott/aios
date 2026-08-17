@@ -69,34 +69,49 @@ def _rich_text(
 
 
 class SupabasePrimaryTaskCreator:
-    """
-    Create an ordinary top-level task in Supabase first, then create a temporary
-    Notion mirror and link the two through tasks.legacy_notion_id.
+    """Create an ordinary top-level task directly in authoritative Supabase.
 
-    This creator intentionally does NOT handle:
-      - subtasks / Parent Task
-      - Step Order
-      - clarification tasks
-      - project relations
-
-    Those paths remain on the existing Notion creation flow until their
-    relationship semantics are migrated.
+    New native tasks intentionally have no Notion mirror.  The returned value
+    keeps the legacy Notion-shaped task interface used by the current runtime,
+    but its identity is the native Supabase UUID.
     """
 
     def __init__(self):
         self.store = SupabaseStore()
 
-    def _delete_supabase_task(
-        self,
-        task_id: str,
-    ) -> None:
-        (
-            self.store.client
-            .table("tasks")
-            .delete()
-            .eq("id", task_id)
-            .execute()
-        )
+    @staticmethod
+    def _compat_page(row: dict[str, Any]) -> dict[str, Any]:
+        def select_prop(value):
+            return {"type": "select", "select": ({"name": value} if value else None)}
+
+        def checkbox_prop(value):
+            return {"type": "checkbox", "checkbox": bool(value)}
+
+        def date_prop(value):
+            return {"type": "date", "date": ({"start": value} if value else None)}
+
+        suggested = str(row.get("suggested_project") or "").strip()
+        rich_text = ([{"plain_text": suggested, "text": {"content": suggested}}] if suggested else [])
+        task_id = str(row["id"])
+        title = str(row.get("title") or "")
+        return {
+            "id": task_id,
+            "_supabase_id": task_id,
+            "_source": "supabase",
+            "archived": bool(row.get("is_archived", False)),
+            "properties": {
+                "Task Name": {"type": "title", "title": [{"plain_text": title, "text": {"content": title}}]},
+                "Open Loop": checkbox_prop(row.get("is_open", True)),
+                "Done": checkbox_prop(row.get("is_done", False)),
+                "Just Do It": checkbox_prop(row.get("is_just_do_it", False)),
+                "Status": select_prop(row.get("status")),
+                "Importance": select_prop(row.get("importance")),
+                "Urgency": select_prop(row.get("urgency")),
+                "Effort": select_prop(row.get("effort")),
+                "Due Date": date_prop(row.get("due_at")),
+                "Suggested Project": {"type": "rich_text", "rich_text": rich_text},
+            },
+        }
 
     def create(
         self,
@@ -107,19 +122,17 @@ class SupabasePrimaryTaskCreator:
         is_important: bool,
         due_date,
         manual_project: str,
-        notion_create_fn: NotionCreateFn,
+        effort: Optional[str] = None,
+        importance: Optional[str] = None,
+        status: Optional[str] = None,
+        notion_create_fn: Optional[NotionCreateFn] = None,
         notion_rollback_fn: Optional[NotionRollbackFn] = None,
     ) -> Optional[dict[str, Any]]:
-        """
-        Create Supabase row -> Notion mirror -> link legacy_notion_id.
+        # notion_* arguments remain temporarily accepted so callers/tests can
+        # migrate without changing the public creation boundary in one jump.
+        del notion_create_fn, notion_rollback_fn
 
-        If Notion creation fails, the Supabase row is deleted.
-        If linking the mirror back to Supabase fails, the Notion page is
-        archived when a rollback callback is supplied and the Supabase row is
-        deleted.
-        """
-
-        initial_payload: dict[str, Any] = {
+        payload: dict[str, Any] = {
             "legacy_notion_id": None,
             "title": task_title,
             "is_open": True,
@@ -127,193 +140,23 @@ class SupabasePrimaryTaskCreator:
             "is_archived": False,
             "is_just_do_it": bool(is_jdi),
             "is_quick_win": False,
-            "urgency": (
-                "High Urgency"
-                if is_urgent
-                else None
-            ),
-            "importance": (
-                "High Importance"
-                if is_important
-                else None
-            ),
-            "due_at": (
-                due_date.isoformat()
-                if due_date
-                else None
-            ),
-            "suggested_project": (
-                manual_project
-                if manual_project
-                else None
-            ),
+            "status": status,
+            "urgency": "High Urgency" if is_urgent else None,
+            "importance": importance or ("High Importance" if is_important else None),
+            "effort": effort,
+            "due_at": due_date.isoformat() if due_date else None,
+            "suggested_project": manual_project or None,
         }
 
-        response = (
-            self.store.client
-            .table("tasks")
-            .insert(initial_payload)
-            .execute()
-        )
-
+        response = self.store.client.table("tasks").insert(payload).execute()
         rows = response.data or []
-
         if not rows:
-            raise RuntimeError(
-                "Supabase task creation returned no row."
-            )
+            raise RuntimeError("Supabase task creation returned no row.")
 
-        supabase_task_id = rows[0]["id"]
-
-        print(
-            "[Task Creation] "
-            f"Created Supabase task first: {supabase_task_id}"
-        )
-
-        try:
-            page = notion_create_fn(
-                task_title,
-                is_jdi=is_jdi,
-                is_urgent=is_urgent,
-                is_important=is_important,
-                due_date=due_date,
-                parent_task_id=None,
-                step_order=None,
-                manual_project=manual_project,
-            )
-
-            if not page or not page.get("id"):
-                self._delete_supabase_task(
-                    supabase_task_id
-                )
-                print(
-                    "[Task Creation] "
-                    "Notion mirror failed; rolled back Supabase task."
-                )
-                return None
-
-            notion_id = page["id"]
-            props = page.get(
-                "properties",
-                {},
-            )
-
-            # Capture the actual metadata written by the existing Notion
-            # creation path (notably Effort and inferred Importance) so the
-            # newly-created Supabase task begins in parity with its mirror.
-            mirror_payload = {
-                "legacy_notion_id": notion_id,
-                "title": task_title,
-                "is_open": _checkbox(
-                    props,
-                    "Open Loop",
-                    True,
-                ),
-                "is_done": _checkbox(
-                    props,
-                    "Done",
-                    False,
-                ),
-                "is_archived": bool(
-                    page.get("archived", False)
-                ),
-                "status": _select_or_status_name(
-                    props,
-                    "Status",
-                ),
-                "importance": _select_or_status_name(
-                    props,
-                    "Importance",
-                ),
-                "urgency": _select_or_status_name(
-                    props,
-                    "Urgency",
-                ),
-                "effort": _select_or_status_name(
-                    props,
-                    "Effort",
-                ),
-                "due_at": _date_start(
-                    props,
-                    "Due Date",
-                ),
-                "is_just_do_it": _checkbox(
-                    props,
-                    "Just Do It",
-                    is_jdi,
-                ),
-                "suggested_project": (
-                    _rich_text(
-                        props,
-                        "Suggested Project",
-                    )
-                    or (
-                        manual_project
-                        if manual_project
-                        else None
-                    )
-                ),
-            }
-
-            link_response = (
-                self.store.client
-                .table("tasks")
-                .update(mirror_payload)
-                .eq("id", supabase_task_id)
-                .execute()
-            )
-
-            if not (link_response.data or []):
-                raise RuntimeError(
-                    "Failed to link Notion mirror "
-                    "to newly-created Supabase task."
-                )
-
-            page["_supabase_id"] = (
-                supabase_task_id
-            )
-            page["_source"] = "supabase"
-
-            print(
-                "[Task Creation] "
-                "Linked Notion mirror "
-                f"{notion_id} -> Supabase {supabase_task_id}"
-            )
-
-            return page
-
-        except Exception:
-            # Compensating rollback: do not leave a new authoritative
-            # Supabase task without a valid mirror during this stage.
-            try:
-                self._delete_supabase_task(
-                    supabase_task_id
-                )
-            except Exception:
-                pass
-
-            page_id = (
-                locals().get("page", {})
-                or {}
-            ).get("id")
-
-            if (
-                page_id
-                and notion_rollback_fn
-            ):
-                try:
-                    notion_rollback_fn(
-                        page_id,
-                        {
-                            "Archived": {
-                                "checkbox": True,
-                            }
-                        },
-                    )
-                except Exception:
-                    pass
-
-            raise
+        row = dict(payload)
+        row.update(rows[0])
+        print("[Task Creation] Created native Supabase task: " + str(row["id"]))
+        return self._compat_page(row)
 
 
 _CREATOR: SupabasePrimaryTaskCreator | None = None
@@ -327,8 +170,11 @@ def create_supabase_primary_task(
     is_important: bool,
     due_date,
     manual_project: str,
-    notion_create_fn: NotionCreateFn,
+    notion_create_fn: Optional[NotionCreateFn] = None,
     notion_rollback_fn: Optional[NotionRollbackFn] = None,
+    effort: Optional[str] = None,
+    importance: Optional[str] = None,
+    status: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     global _CREATOR
 
@@ -344,6 +190,9 @@ def create_supabase_primary_task(
         manual_project=manual_project,
         notion_create_fn=notion_create_fn,
         notion_rollback_fn=notion_rollback_fn,
+        effort=effort,
+        importance=importance,
+        status=status,
     )
 
 

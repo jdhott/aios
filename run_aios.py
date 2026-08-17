@@ -6998,8 +6998,8 @@ def create_notion_task(
     Transitional creation dispatcher.
 
     Explicitly-approved top-level tasks are Supabase-primary, including
-    clarification tasks. Their Notion pages remain temporary UI mirrors so
-    clarification checkbox/block interaction can continue unchanged.
+    clarification tasks. In Supabase mode they are created natively without a
+    Notion task mirror.
 
     Breakdown hierarchy creation uses its dedicated Supabase-first hierarchy
     creator. Relation-bearing ad hoc creations remain on the legacy path unless
@@ -7015,18 +7015,43 @@ def create_notion_task(
     )
 
     if can_use_supabase_primary:
-        return create_supabase_primary_task(
-            task_title=restore_preferred_proper_nouns(
-                task_title
-            ),
+        task_title = restore_preferred_proper_nouns(task_title)
+        effort = classify_effort(task_title)
+        importance_result = infer_importance(
+            task_title,
+            explicit_important=is_important,
+        )
+        effective_importance = importance_result.get("importance")
+        status = (
+            CLARIFY_STATUS
+            if task_title.lower().startswith("clarify next action:")
+            else None
+        )
+
+        page = create_supabase_primary_task(
+            task_title=task_title,
             is_jdi=is_jdi,
             is_urgent=is_urgent,
             is_important=is_important,
             due_date=due_date,
             manual_project=manual_project,
-            notion_create_fn=_create_notion_task_only,
-            notion_rollback_fn=update_notion_page,
+            effort=effort,
+            importance=effective_importance,
+            status=status,
         )
+
+        if page:
+            if manual_project:
+                page["_manual_project_hint"] = manual_project
+            created_tasks.append(page)
+            increment_summary("tasks_created")
+            if status == CLARIFY_STATUS:
+                increment_summary("clarification_tasks_created")
+            if effective_importance == "High Importance":
+                increment_summary("importance_updates")
+            print("Created native Supabase task:", task_title)
+
+        return page
 
     return _create_notion_task_only(
         task_title,
