@@ -58,6 +58,13 @@ class FakeReviewRepository:
     def get_review(self, review_id):
         return self.reviews.get(review_id)
 
+    def get_reviews_for_item(self, inbox_id):
+        return [
+            review
+            for review in self.reviews.values()
+            if review.inbox_item_id == inbox_id
+        ]
+
     def get_open_reviews(self):
         return [r for r in self.reviews.values() if r.state != "resolved"]
 

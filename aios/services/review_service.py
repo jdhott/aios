@@ -314,6 +314,70 @@ class ReviewService:
         )
         return self._to_app_review(resolved)
 
+    def _source_task_identity_for_duplicate(
+        self,
+        review: InboxReview,
+    ) -> tuple[str, str]:
+        """Resolve the materialized source task for a duplicate review.
+
+        New reviews may carry source_task_id directly. Older reviews can
+        recover it from a sibling clarification review on the same inbox item.
+        """
+        payload = dict(review.payload or {})
+
+        source_task_id = str(
+            payload.get("source_task_id")
+            or ""
+        ).strip()
+
+        source_task_title = str(
+            payload.get("source_task_title")
+            or ""
+        ).strip()
+
+        if source_task_id:
+            return (
+                source_task_id,
+                source_task_title,
+            )
+
+        reviews = (
+            self.review_repository
+            .get_reviews_for_item(
+                review.inbox_item_id
+            )
+        )
+
+        # Prefer the newest clarification that carries an authoritative task.
+        for sibling in reversed(reviews):
+            if sibling.review_type != "clarification":
+                continue
+
+            sibling_payload = dict(
+                sibling.payload or {}
+            )
+
+            task_id = str(
+                sibling_payload.get("task_id")
+                or ""
+            ).strip()
+
+            if not task_id:
+                continue
+
+            baseline_title = str(
+                sibling_payload.get("task_title")
+                or ""
+            ).strip()
+
+            return (
+                task_id,
+                baseline_title,
+            )
+
+        return ("", "")
+
+
     def _task_id_for_review(
         self,
         review: InboxReview,
@@ -522,6 +586,24 @@ class ReviewService:
             )
             if task_id:
                 payload["task_id"] = task_id
+
+        elif review.review_type == "possible_duplicate":
+            (
+                source_task_id,
+                source_task_title,
+            ) = self._source_task_identity_for_duplicate(
+                review
+            )
+
+            if source_task_id:
+                payload["source_task_id"] = (
+                    source_task_id
+                )
+
+            if source_task_title:
+                payload["source_task_title"] = (
+                    source_task_title
+                )
 
         return AppReview(
             id=review.id,

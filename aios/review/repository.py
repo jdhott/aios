@@ -145,6 +145,31 @@ class InboxReviewRepository:
         ]
 
 
+    def get_reviews_for_item(
+        self,
+        inbox_item_id: str,
+    ) -> list[InboxReview]:
+        """Return all reviews for one inbox item, including resolved."""
+        response = (
+            self.store.client
+            .table("inbox_reviews")
+            .select("*")
+            .eq(
+                "inbox_item_id",
+                inbox_item_id,
+            )
+            .order("created_at")
+            .execute()
+        )
+
+        return [
+            self.row_to_review(row)
+            for row in (
+                response.data or []
+            )
+        ]
+
+
     def get_open_reviews_for_item(
         self,
         inbox_item_id: str,
