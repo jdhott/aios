@@ -16,7 +16,6 @@ env = {
     "BRAIN_DUMP_PAGE_ID": "test",
     "NOTION_PROJECTS_DATABASE_ID": "test",
     "NOTION_AI_LOG_DATABASE_ID": "test",
-    "NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID": "test",
     "AIOS_DASHBOARD_BLOCK_ID": "test",
     "ARCHIVE_TOGGLE_BLOCK_ID": "test",
 }

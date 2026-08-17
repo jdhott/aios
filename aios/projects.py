@@ -1453,204 +1453,17 @@ def calculate_reinforcement_purity_adjustment(
 
 
 # ============================================================
-# B2 TOPOLOGY TELEMETRY
+# B2 TOPOLOGY TELEMETRY — RETIRED
 # ============================================================
 
-NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID = os.getenv(
-    "NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID"
-)
+def log_topology_telemetry_event(*args, **kwargs):
+    """Legacy compatibility no-op. Topology telemetry was a development helper.
 
-TOPOLOGY_TELEMETRY_VERSION = "B2_self_segmentation_v1"
-
-MUTED_TELEMETRY_EVENTS = {
-    "high_specificity_detected",
-    "reinforcement_compatible",
-}
-
-def get_telemetry_headers():
-    """Build telemetry headers lazily after NOTION_TOKEN is injected."""
-    return {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
-
-
-
-def topology_telemetry_enabled():
-
-    enabled = bool(NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID)
-
-    print(
-        f"[Telemetry] enabled={enabled} "
-        f"db_present={bool(NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID)}"
-    )
-
-    return enabled
-
-
-def log_topology_telemetry_event(
-    event_type,
-    seed_task,
-    top_candidate=None,
-    runner_up=None,
-    margin=None,
-    ambiguous=False,
-    cluster_size=None,
-    expansion_size=None,
-    specificity=None,
-    subdomain=None,
-    suppressed=False,
-    notes=None,
-):
-
-    if event_type in MUTED_TELEMETRY_EVENTS:
-        return
-
-    print(
-        f"[Telemetry Emit Attempt] "
-        f"event_type={event_type} "
-        f"seed={seed_task[:60]}"
-    )
-
-    if not topology_telemetry_enabled():
-
-        print("[Telemetry] disabled — skipping emit")
-
-        return
-
-    try:
-
-        properties = {
-            "Timestamp": {
-                "date": {
-                    "start": datetime.now(timezone.utc).isoformat()
-                }
-            },
-            "Seed Task": {
-                "title": [
-                    {
-                        "text": {
-                            "content": seed_task[:200]
-                        }
-                    }
-                ]
-            },
-            "Telemetry Version": {
-                "select": {
-                    "name": TOPOLOGY_TELEMETRY_VERSION
-                }
-            },
-            "Event Type": {
-                "select": {
-                    "name": event_type
-                }
-            },
-            "Ambiguous": {
-                "checkbox": bool(ambiguous)
-            },
-            "Suppressed": {
-                "checkbox": bool(suppressed)
-            },
-        }
-
-        if top_candidate:
-            properties["Top Candidate"] = {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": str(top_candidate)[:200]
-                        }
-                    }
-                ]
-            }
-
-        if runner_up:
-            properties["Runner Up"] = {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": str(runner_up)[:200]
-                        }
-                    }
-                ]
-            }
-
-        if margin is not None:
-            properties["Margin"] = {
-                "number": round(float(margin), 4)
-            }
-
-        if cluster_size is not None:
-            properties["Cluster Size"] = {
-                "number": int(cluster_size)
-            }
-
-        if expansion_size is not None:
-            properties["Expansion Size"] = {
-                "number": int(expansion_size)
-            }
-
-        if specificity is not None:
-            properties["Specificity"] = {
-                "number": int(specificity)
-            }
-
-        if subdomain:
-            properties["Subdomain"] = {
-                "select": {
-                    "name": str(subdomain)
-                }
-            }
-
-        if notes:
-            properties["Notes"] = {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": str(notes)[:1000]
-                        }
-                    }
-                ]
-            }
-
-        print(
-            "[Telemetry] writing event to Notion",
-            event_type,
-        )
-
-        response = requests.post(
-            "https://api.notion.com/v1/pages",
-            headers=get_telemetry_headers(),
-            json={
-                "parent": {
-                    "database_id": (
-                        NOTION_TOPOLOGY_TELEMETRY_DATABASE_ID
-                    )
-                },
-                "properties": properties,
-            },
-            timeout=15,
-        )
-
-        print(
-            "[Telemetry] notion_status=",
-            response.status_code,
-        )
-
-        if response.status_code >= 300:
-
-            print(
-                "[Telemetry] notion_response=",
-                response.text[:1000],
-            )
-
-    except Exception as e:
-
-        print(
-            "[Topology Telemetry Error]",
-            str(e),
-        )
+    Production project cognition no longer performs synchronous Notion telemetry
+    writes. Keep the call boundary temporarily so the cognition code does not need
+    a broad, unrelated rewrite.
+    """
+    return None
 
 
 # ============================================================
@@ -5047,11 +4860,6 @@ def run_project_candidate_detector():
 
     print("\n--- Project candidate detector ---")
 
-    log_topology_telemetry_event(
-        event_type="telemetry_runtime_test",
-        seed_task="Telemetry Runtime Validation",
-        notes="B2 telemetry pipeline test event",
-    )
     print(f"Reviewing {len(source_tasks)} newly created top-level task(s).")
     print(
         "Project relation write-back:",
