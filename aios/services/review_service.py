@@ -500,6 +500,20 @@ class ReviewService:
                 if review.review_type in allowed
             ]
 
+        # A create_anyway request is already a durable human decision.
+        # Keep the review row open for the processor until native task
+        # creation succeeds, but do not keep showing it as pending UI.
+        reviews = [
+            review
+            for review in reviews
+            if not (
+                review.review_type == "possible_duplicate"
+                and str(
+                    (review.payload or {}).get("requested_action") or ""
+                ).strip() == "create_anyway"
+            )
+        ]
+
         return [self._to_app_review(review) for review in reviews]
 
     def list_recent_auto_merge_notices(

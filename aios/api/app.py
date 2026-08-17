@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from aios.focus_activation import (
     complete_open_focus_activation_children,
@@ -1576,6 +1576,7 @@ def request_possible_duplicate_reevaluation_http(
 )
 def request_possible_duplicate_create_new_http(
     review_id: str,
+    background_tasks: BackgroundTasks,
 ) -> ReviewResponse:
     try:
         updated = (
@@ -1587,14 +1588,10 @@ def request_possible_duplicate_create_new_http(
     except (KeyError, ValueError) as exc:
         raise _review_error(exc) from exc
 
-    try:
-        _request_processor_run()
-    except Exception as exc:
-        print(
-            "[Possible Duplicate] "
-            "Create-new requested; processor trigger failed:",
-            exc,
-        )
+    # The human decision is durable once the review payload is updated.
+    # Trigger downstream creation after the response so Review does not
+    # wait on Cloud Run job startup/trigger latency.
+    background_tasks.add_task(_request_processor_run)
 
     return ReviewResponse(**updated.to_dict())
 
