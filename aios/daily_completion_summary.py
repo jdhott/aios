@@ -5,6 +5,7 @@ from hashlib import sha256
 from zoneinfo import ZoneInfo
 
 SUMMARY_MODEL = "gpt-4.1-mini"
+SUMMARY_VERSION = "v1.3"
 MIN_TASKS_FOR_AI_SUMMARY = 2
 
 
@@ -29,7 +30,8 @@ def completion_fingerprint(tasks: list[dict]) -> str:
                 ]
             )
         )
-    return sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    material = SUMMARY_VERSION + "\n" + "\n".join(parts)
+    return sha256(material.encode("utf-8")).hexdigest()
 
 
 def load_completed_today(store, *, timezone_name: str = "America/Toronto", now: datetime | None = None) -> tuple[str, list[dict]]:
@@ -58,10 +60,10 @@ def load_completed_today(store, *, timezone_name: str = "America/Toronto", now: 
     project_ids = sorted({str(row.get("project_id")) for row in tasks if row.get("project_id")})
     if project_ids:
         project_rows = (
-            store.client.table("projects").select("id,title").in_("id", project_ids).execute().data or []
+            store.client.table("projects").select("id,name").in_("id", project_ids).execute().data or []
         )
         project_titles = {
-            str(row.get("id")): str(row.get("title") or "").strip()
+            str(row.get("id")): str(row.get("name") or "").strip()
             for row in project_rows
             if row.get("id")
         }
@@ -126,12 +128,19 @@ def generate_daily_summary(ai_client, tasks: list[dict]) -> str:
     response = ai_client.responses.create(
         model=SUMMARY_MODEL,
         input=(
-            "Summarize the flavour and main focus of today's completed work in 1-2 short sentences. "
-            "Use only the completed tasks below. Group related work or projects when useful. "
-            "Be concrete and reflective, not congratulatory or judgmental. Do not say the day was productive, successful, busy, or good. "
-            "Do not invent motives, emotions, priorities, or accomplishments beyond the task titles and their project/parent context. "
-            "Prefer a natural sentence such as 'Today was mostly about...' or 'The day's completed work focused on...'.\n\n"
-            f"Completed tasks:\n{_summary_prompt(tasks)}"
+            "Write a very short retrospective that captures what made today distinctive. "
+            "Aim for 25-45 words, usually two sentences; shorter is fine when sufficient. "
+            "Lead with the single dominant thread or outcome of the day. "
+            "Mention at most one secondary thread, and only if it adds useful context. "
+            "Do not try to account for all completed work. It is expected that most individual tasks will go unmentioned. "
+            "Synthesize rather than enumerate: avoid lists of actions, ingredients, chores, or task categories. "
+            "Prefer concrete, natural language over analytical or report-style language. "
+            "Use a specific project, product, or outcome name when it helps convey what the day was about. "
+            "Write like a brief journal reflection someone could scan months later. "
+            "Be grounded only in the completed work below; do not invent motives, emotions, priorities, or events. "
+            "Do not praise or judge productivity. "
+            "Do not say 'completed tasks', 'the task list', 'secondary themes', 'focused on', 'tasks included', or 'system enhancements'.\n\n"
+            f"Completed work:\n{_summary_prompt(tasks)}"
         ),
     )
     return str(response.output_text or "").strip()

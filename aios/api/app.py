@@ -358,7 +358,7 @@ def list_open_tasks_http(
         _store().client.table("tasks")
         .select(
             "id,title,status,due_at,defer_until,project_id,importance,parent_task_id,step_order,"
-            "is_quick_win,is_just_do_it,created_at,updated_at"
+            "is_quick_win,is_just_do_it,created_at,updated_at,generated_source,task_role"
         )
         .eq("is_open", True)
         .eq("is_done", False)
@@ -371,6 +371,15 @@ def list_open_tasks_http(
     # Build dashboard sections from the complete open-task population.
     # Do not truncate candidates before section selection.
     rows = query.execute().data or []
+
+    # START HERE/focus-activation rows are implementation helpers for the
+    # focus card, not independent work items. They must not leak into Today,
+    # JDI, Quick Wins, Top 5, or general search results.
+    rows = [
+        row for row in rows
+        if row.get("generated_source") != "focus_activation"
+        and row.get("task_role") != "focus_activation"
+    ]
 
     task_ids = [row.get("id") for row in rows if row.get("id")]
 
