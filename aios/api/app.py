@@ -45,6 +45,7 @@ from aios.project_work_proposals import (
 )
 from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 from aios.text_utils import normalize
+from aios.daily_completion_summary import completion_fingerprint
 from aios.processing.trigger_coordinator import (
     ProcessingTriggerCoordinator,
 )
@@ -590,9 +591,31 @@ def list_open_tasks_http(
     )
     quick_wins = _respect_breakdown_step_order(quick_win_candidates[:5])
 
+    completed_today_summary = ""
+    completed_today_summary_state = "empty"
+    if len(completed_today) >= 2:
+        completed_today_summary_state = "pending"
+        try:
+            fingerprint = completion_fingerprint(completed_today)
+            summary_rows = (
+                _store().client.table("daily_completion_summaries")
+                .select("fingerprint,summary,completed_count")
+                .eq("summary_date", today.isoformat())
+                .limit(1)
+                .execute().data
+                or []
+            )
+            if summary_rows and str(summary_rows[0].get("fingerprint") or "") == fingerprint:
+                completed_today_summary = str(summary_rows[0].get("summary") or "").strip()
+                completed_today_summary_state = "ready" if completed_today_summary else "empty"
+        except Exception as summary_exc:
+            print(f"[Dashboard] Completed Today summary could not be loaded: {summary_exc}")
+
     return {
         "count": len(rows),
         "today": today.isoformat(),
+        "completed_today_summary": completed_today_summary,
+        "completed_today_summary_state": completed_today_summary_state,
         "precedence": [
             "top5",
             "quick_wins",

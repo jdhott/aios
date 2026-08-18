@@ -95,13 +95,16 @@ def _fetch_focus() -> dict | None:
     return dict(value) if value else None
 
 
-def _fetch_open_tasks(*, search: str = "", limit: int = 50) -> list[dict]:
+def _fetch_open_tasks(*, search: str = "", limit: int = 50) -> dict:
     api_url=_api_url(); token=_identity_token(api_url)
     response=requests.get(f"{api_url}/tasks", headers={"Authorization": f"Bearer {token}"}, params={"limit": limit, "search": search}, timeout=30)
     if not response.ok:
         raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
     payload = response.json() or {}
-    return dict(payload.get("sections") or {})
+    sections = dict(payload.get("sections") or {})
+    sections["_completed_today_summary"] = str(payload.get("completed_today_summary") or "").strip()
+    sections["_completed_today_summary_state"] = str(payload.get("completed_today_summary_state") or "empty")
+    return sections
 
 
 def _task_action(task_id: str, action: str) -> dict:
@@ -3451,6 +3454,25 @@ def _page(
         )
 
         search_open = ' open' if key == "search_results" else ''
+        completed_summary_html = ""
+        if key == "completed_today":
+            completed_summary = str(tasks.get("_completed_today_summary") or "").strip()
+            completed_summary_state = str(tasks.get("_completed_today_summary_state") or "empty")
+            if completed_summary:
+                completed_summary_html = (
+                    '<div class="completed-today-summary">'
+                    '<div class="completed-today-summary-label">Today\'s focus</div>'
+                    f'<div class="completed-today-summary-text">{html.escape(completed_summary)}</div>'
+                    '</div>'
+                )
+            elif completed_summary_state == "pending":
+                completed_summary_html = (
+                    '<div class="completed-today-summary pending">'
+                    '<div class="completed-today-summary-label">Today\'s focus</div>'
+                    '<div class="completed-today-summary-text">Updating the day\'s summary…</div>'
+                    '</div>'
+                )
+
         task_sections += (
             f'<details class="task-group" data-section="{html.escape(key)}"'
             + (f' id="search-results"' if key == "search_results" else f' id="section-{html.escape(key, quote=True)}"')
@@ -3459,6 +3481,7 @@ def _page(
             f'<span>{html.escape(heading)}</span>'
             f'<span class="section-count">{len(section_tasks)}</span>'
             f'</summary>'
+            + completed_summary_html
             + rows_html
             + "</details>"
         )
@@ -3982,6 +4005,11 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       .section-toggle-controls {{ flex-direction:column; }}
     }}
     .empty-state {{ padding:18px 0; color:var(--muted); }}
+
+    .completed-today-summary {{ margin:0 16px 10px; padding:11px 13px; border:1px solid rgba(38,65,85,.10); border-radius:10px; background:rgba(255,255,255,.68); }}
+    .completed-today-summary-label {{ font-size:.76rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:var(--muted); margin-bottom:3px; }}
+    .completed-today-summary-text {{ font-size:.9rem; line-height:1.42; color:var(--ink); }}
+    .completed-today-summary.pending .completed-today-summary-text {{ color:var(--muted); font-style:italic; }}
   </style>
 </head>
 <body>
