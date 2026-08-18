@@ -289,6 +289,57 @@ AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.4-dashboard-semantics"
 
 AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
 
+
+def _respect_breakdown_step_order(items: list[dict], *, skip_if_project_ordered: bool = False) -> list[dict]:
+    """Keep each sibling breakdown together and ordered by step_order.
+
+    The caller supplies items in the section's primary order (rank, due date,
+    search title, etc.).  A sibling group is emitted at the position of its
+    first member, preserving the section's broader semantics while respecting
+    the local breakdown sequence.  Explicit project_order remains stronger
+    than step_order when requested by the project-detail caller.
+    """
+    if len(items) < 2:
+        return list(items)
+
+    groups: dict[str, list[dict]] = {}
+    for item in items:
+        parent_id = str(item.get("parent_task_id") or "").strip()
+        if parent_id:
+            groups.setdefault(parent_id, []).append(item)
+
+    ordered_groups: dict[str, list[dict]] = {}
+    for parent_id, siblings in groups.items():
+        if len(siblings) < 2:
+            continue
+        if skip_if_project_ordered and any(s.get("project_order") is not None for s in siblings):
+            continue
+        ordered_groups[parent_id] = sorted(
+            siblings,
+            key=lambda row: (
+                row.get("step_order") is None,
+                int(row.get("step_order")) if row.get("step_order") is not None else 999999,
+                str(row.get("title") or "").lower(),
+            ),
+        )
+
+    if not ordered_groups:
+        return list(items)
+
+    result: list[dict] = []
+    emitted: set[str] = set()
+    for item in items:
+        parent_id = str(item.get("parent_task_id") or "").strip()
+        sibling_group = ordered_groups.get(parent_id)
+        if sibling_group is None:
+            result.append(item)
+            continue
+        if parent_id in emitted:
+            continue
+        result.extend(sibling_group)
+        emitted.add(parent_id)
+    return result
+
 @app.get("/tasks", tags=["tasks"])
 def list_open_tasks_http(
     limit: int = 100,
@@ -305,7 +356,7 @@ def list_open_tasks_http(
     query = (
         _store().client.table("tasks")
         .select(
-            "id,title,status,due_at,defer_until,project_id,importance,parent_task_id,"
+            "id,title,status,due_at,defer_until,project_id,importance,parent_task_id,step_order,"
             "is_quick_win,is_just_do_it,created_at,updated_at"
         )
         .eq("is_open", True)
@@ -425,13 +476,13 @@ def list_open_tasks_http(
     # matching open task as one dedicated result set so ranking/section rules
     # cannot hide a valid title match.
     if clean_search:
-        search_results = sorted(
+        search_results = _respect_breakdown_step_order(sorted(
             rows,
             key=lambda row: (
                 (row.get("title") or "").lower(),
                 str(row.get("id") or ""),
             ),
-        )
+        ))
         return {
             "count": len(search_results),
             "search": clean_search,
@@ -452,22 +503,22 @@ def list_open_tasks_http(
 
     # Today is a calendar view, not another ranking slice. Show every open
     # task due today or overdue, even when it also appears in another section.
-    today_items = sorted(
+    today_items = _respect_breakdown_step_order(sorted(
         [row for row in rows if due_today(row)],
         key=lambda row: (str(row.get("due_at") or "")[:10], *score_key(row)),
-    )
+    ))
 
     # JDI is also an independent view: show every open JDI task even when it
     # appears in BNA, Top 5, or Today.
-    jdi_items = sorted(
+    jdi_items = _respect_breakdown_step_order(sorted(
         [row for row in rows if bool(row.get("is_just_do_it"))],
         key=score_key,
-    )
+    ))
 
     # Quick Wins are the residual lightweight actions. They should never
     # duplicate a stronger dashboard signal: BNA, Top 5, Today, or JDI.
     stronger_ids = {str(row.get("id")) for row in top5 + today_items + jdi_items}
-    quick_wins = sorted(
+    quick_win_candidates = sorted(
         [
             row for row in rows
             if bool(row.get("is_quick_win"))
@@ -477,7 +528,8 @@ def list_open_tasks_http(
             and str(row.get("id")) not in stronger_ids
         ],
         key=quick_win_key,
-    )[:5]
+    )
+    quick_wins = _respect_breakdown_step_order(quick_win_candidates[:5])
 
     return {
         "count": len(rows),
@@ -1751,7 +1803,7 @@ def get_project_detail_http(project_id: str) -> dict:
         _store().client.table("tasks")
         .select(
             "id,title,due_at,importance,is_quick_win,is_just_do_it,"
-            "is_open,is_done,is_archived,project_order"
+            "is_open,is_done,is_archived,project_order,parent_task_id,step_order"
         )
         .eq("project_id", project_id)
         .eq("is_open", True)
@@ -1805,6 +1857,7 @@ def get_project_detail_http(project_id: str) -> dict:
         )
 
     tasks.sort(key=sort_key)
+    tasks = _respect_breakdown_step_order(tasks, skip_if_project_ordered=True)
 
     proposals = (
         _store().client
