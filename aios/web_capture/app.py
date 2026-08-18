@@ -1582,6 +1582,8 @@ h1 {{
 .task-meta {{
   margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35;
 }}
+.completed-task-icon {{ width:44px; min-width:44px; text-align:center; color:var(--muted); font-size:1.05rem; font-weight:700; }}
+.completed-task-spacer {{ width:44px; min-width:44px; }}
 .chevron {{ color:var(--muted); font-size:1.6rem; }}
 .empty-state {{ padding:24px; color:var(--muted); }}
 .context-card {{
@@ -3285,6 +3287,46 @@ def _page(
             + '</article>'
         )
 
+    def render_completed_task(task: dict) -> str:
+        task_id = html.escape(str(task.get("id") or ""), quote=True)
+        title = html.escape(str(task.get("title") or "Untitled"))
+        parent_id = str(task.get("parent_task_id") or "").strip()
+        parent_title = str(task.get("parent_title") or "").strip()
+        parent_html = ""
+        if parent_id and parent_title:
+            parent_html = (
+                '<div class="task-parent-meta">Part of: '
+                f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
+                '</div>'
+            )
+
+        completed_meta = ""
+        raw_completed = str(task.get("completed_at") or "").strip()
+        if raw_completed:
+            try:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                completed_dt = datetime.fromisoformat(raw_completed.replace("Z", "+00:00"))
+                if completed_dt.tzinfo is not None:
+                    completed_dt = completed_dt.astimezone(ZoneInfo("America/Toronto"))
+                completed_meta = completed_dt.strftime("Completed %-I:%M %p")
+            except (TypeError, ValueError):
+                completed_meta = "Completed today"
+        if not completed_meta:
+            completed_meta = "Completed today"
+
+        return (
+            '<article class="task-row completed-task-row">'
+            '<div class="completed-task-icon" aria-hidden="true">✓</div>'
+            '<div class="task-main">'
+            f'<div class="task-title"><a class="task-link" href="/tasks/{task_id}">{title}</a></div>'
+            + parent_html
+            + f'<div class="task-meta">{html.escape(completed_meta)}</div>'
+            + '</div>'
+            '<div class="completed-task-spacer" aria-hidden="true"></div>'
+            '</article>'
+        )
+
     section_specs = (
         [(f'Search Results for “{search}”', "search_results")]
         if search
@@ -3293,6 +3335,7 @@ def _page(
             ("Quick Wins", "quick_wins"),
             ("Today", "today"),
             ("Just Do It", "just_do_it"),
+            ("Completed Today", "completed_today"),
         ]
     )
 
@@ -3303,13 +3346,14 @@ def _page(
         # Rank 1 is presented separately as the Best Next Action. Today is
         # intentionally allowed to overlap because it is the complete calendar
         # view of tasks due today or overdue.
-        if focus_id and key not in {"today", "search_results"}:
+        if focus_id and key not in {"today", "search_results", "completed_today"}:
             section_tasks = [task for task in section_tasks if str(task.get("id") or "") != focus_id]
         if not section_tasks:
             continue
 
+        renderer = render_completed_task if key == "completed_today" else render_task
         rows_html = "".join(
-            render_task(task)
+            renderer(task)
             for task in section_tasks
         )
 

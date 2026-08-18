@@ -472,6 +472,59 @@ def list_open_tasks_http(
         except (TypeError, ValueError):
             return str(raw)[:10] <= today.isoformat()
 
+    completed_today = []
+    if not clean_search:
+        # Completed Today is a progress view, not part of the actionable open-task
+        # population. Use the user's local Toronto day boundaries and exclude
+        # generated focus-activation helper children so the list reflects
+        # meaningful user-facing accomplishments.
+        local_start = datetime.combine(today, datetime.min.time(), tzinfo=toronto)
+        local_end = local_start + timedelta(days=1)
+        completed_rows = (
+            _store().client.table("tasks")
+            .select(
+                "id,title,status,due_at,project_id,importance,parent_task_id,step_order,"
+                "generated_source,task_role,completed_at"
+            )
+            .eq("is_done", True)
+            .eq("is_archived", False)
+            .gte("completed_at", local_start.astimezone(timezone.utc).isoformat())
+            .lt("completed_at", local_end.astimezone(timezone.utc).isoformat())
+            .order("completed_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+        completed_today = [
+            row for row in completed_rows
+            if row.get("generated_source") != "focus_activation"
+            and row.get("task_role") != "focus_activation"
+        ]
+
+        completed_parent_ids = sorted({
+            str(row.get("parent_task_id"))
+            for row in completed_today
+            if row.get("parent_task_id")
+        })
+        if completed_parent_ids:
+            completed_parent_rows = (
+                _store().client.table("tasks")
+                .select("id,title")
+                .in_("id", completed_parent_ids)
+                .execute()
+                .data
+                or []
+            )
+            completed_parent_titles = {
+                str(parent.get("id")): str(parent.get("title") or "").strip()
+                for parent in completed_parent_rows
+                if parent.get("id")
+            }
+            for row in completed_today:
+                parent_id = str(row.get("parent_task_id") or "").strip()
+                if parent_id:
+                    row["parent_title"] = completed_parent_titles.get(parent_id) or None
+
     # Search is a task lookup, not a dashboard-section filter. Return every
     # matching open task as one dedicated result set so ranking/section rules
     # cannot hide a valid title match.
@@ -545,6 +598,7 @@ def list_open_tasks_http(
             "quick_wins": quick_wins,
             "today": today_items,
             "just_do_it": jdi_items,
+            "completed_today": completed_today,
         },
     }
 
