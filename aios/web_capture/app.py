@@ -1340,6 +1340,17 @@ sessionStorage.removeItem("aios-project-proposal-refresh-count");
 </script>
 """
 
+    if refresh_proposal:
+        pending_refresh_script += """
+<script>
+(() => {
+  const results = document.getElementById("project-work-results");
+  if (!results) return;
+  requestAnimationFrame(() => results.scrollIntoView({ block: "start" }));
+})();
+</script>
+"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1596,6 +1607,7 @@ h1 {{
 @keyframes proposal-spin {{
   to {{ transform:rotate(360deg); }}
 }}
+.project-work-results {{ scroll-margin-top:24px; }}
 </style>
 </head>
 <body>
@@ -1648,6 +1660,7 @@ h1 {{
     </form>
   </section>
 
+  <div id="project-work-results" class="project-work-results">
   {
       (
           '<section class="proposal-card">'
@@ -1665,6 +1678,7 @@ h1 {{
 
   {pending_html}
   {generation_result_html}
+  </div>
 
   <div class="task-list" id="project-tasks">{task_rows}</div>
 </main>
@@ -4392,7 +4406,7 @@ def generate_project_work_web(
     try:
         _request_project_work_generation(project_id)
         return RedirectResponse(
-            url=f"/projects/{project_id}?refresh_proposal=1",
+            url=f"/projects/{project_id}?refresh_proposal=1#project-work-results",
             status_code=303,
         )
     except Exception as exc:
@@ -4411,7 +4425,7 @@ def generate_project_work_web(
 def answer_project_work_question_web(project_id: str, _user: Annotated[str, Depends(_check_basic_auth)], answer: Annotated[str, Form()] = ""):
     try:
         _project_work_dialogue_action(project_id, "answer", {"answer": answer.strip()})
-        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1", status_code=303)
+        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1#project-work-results", status_code=303)
     except Exception as exc:
         print("[Project Work] Answer failed:", exc)
         return RedirectResponse(url=f"/projects/{project_id}?error=Project+work+answer+could+not+be+saved.", status_code=303)
@@ -4420,7 +4434,7 @@ def answer_project_work_question_web(project_id: str, _user: Annotated[str, Depe
 def accept_project_work_context_web(project_id: str, _user: Annotated[str, Depends(_check_basic_auth)], context_update: Annotated[str, Form()] = ""):
     try:
         _project_work_dialogue_action(project_id, "context", {"context_update": context_update.strip()})
-        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1", status_code=303)
+        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1#project-work-results", status_code=303)
     except Exception as exc:
         print("[Project Work] Context continuation failed:", exc)
         return RedirectResponse(url=f"/projects/{project_id}?error=Project+context+could+not+be+added.", status_code=303)
