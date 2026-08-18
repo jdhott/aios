@@ -804,6 +804,7 @@ class ManualBreakdownAcceptRequest(BaseModel):
 
 class TaskDetailUpdate(BaseModel):
     title: str | None = None
+    context: str | None = None
     due_at: str | None = None
     defer_until: str | None = None
     importance: str | None = None
@@ -941,7 +942,7 @@ def get_task_detail_http(task_id: str) -> dict:
     rows = (
         _store().client.table("tasks")
         .select(
-            "id,title,status,due_at,defer_until,importance,urgency,"
+            "id,title,context,status,due_at,defer_until,importance,urgency,parent_task_id,"
             "effort,duration,project_id,is_quick_win,is_just_do_it,"
             "is_open,is_done,is_archived,created_at,updated_at,"
             "breakdown_state,breakdown_request_context,breakdown_proposal,"
@@ -980,7 +981,7 @@ def get_task_detail_http(task_id: str) -> dict:
     task["parent_title"] = None
     if parent_id:
         try:
-            parent_rows = (store.client.table("tasks")
+            parent_rows = (_store().client.table("tasks")
                 .select("id,title")
                 .eq("id", parent_id).limit(1).execute().data or [])
             if parent_rows:
@@ -1026,7 +1027,7 @@ def update_task_detail_http(task_id: str, update: TaskDetailUpdate) -> dict:
 
     values = {}
     for field in (
-        "title", "due_at", "defer_until", "importance",
+        "title", "context", "due_at", "defer_until", "importance",
         "urgency", "effort", "duration", "is_just_do_it",
     ):
         value = getattr(update, field)
@@ -1039,7 +1040,7 @@ def update_task_detail_http(task_id: str, update: TaskDetailUpdate) -> dict:
             raise HTTPException(status_code=422, detail="Task title cannot be blank")
 
     for field in (
-        "due_at", "defer_until", "importance",
+        "context", "due_at", "defer_until", "importance",
         "urgency", "effort", "duration",
     ):
         if field in values and values[field] == "":
@@ -2051,7 +2052,7 @@ def get_dashboard_focus_http() -> dict:
         if not candidate_id:
             continue
         tasks = (store.client.table("tasks")
-            .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,parent_task_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
+            .select("id,title,context,status,due_at,defer_until,importance,urgency,effort,duration,project_id,parent_task_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
             .eq("id", candidate_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
             .limit(1).execute().data or [])
         if not tasks:
@@ -2069,6 +2070,15 @@ def get_dashboard_focus_http() -> dict:
     task["execution_score"] = state.get("execution_score")
     task["execution_rank"] = state.get("execution_rank")
     task["best_next_action"] = bool(state.get("best_next_action", False))
+    task["parent_title"] = None
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    if parent_id:
+        try:
+            parent_rows = (store.client.table("tasks").select("id,title").eq("id", parent_id).limit(1).execute().data or [])
+            if parent_rows:
+                task["parent_title"] = str(parent_rows[0].get("title") or "").strip() or None
+        except Exception:
+            task["parent_title"] = None
     try:
         guidance_rows = (_store().client.table("task_focus_guidance")
             .select("starter_step,starter_minutes,source,updated_at")

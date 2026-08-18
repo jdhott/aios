@@ -4,6 +4,8 @@ import json
 import os
 from typing import Any
 
+from aios.task_writing import AI_TASK_TITLE_GUIDANCE
+
 from aios.storage.supabase_store import SupabaseStore
 
 
@@ -200,6 +202,7 @@ def create_focus_activation_child(
     parent_task_id: str,
     title: str,
     minutes: int = 10,
+    context: str | None = None,
 ) -> dict[str, Any]:
     existing = get_active_focus_activation(
         store,
@@ -222,6 +225,7 @@ def create_focus_activation_child(
         .insert({
             "legacy_notion_id": None,
             "title": title,
+            "context": str(context or "").strip() or None,
             "is_open": True,
             "is_done": False,
             "is_archived": False,
@@ -415,7 +419,7 @@ Unavailable / rejected activation steps:
 Generate exactly ONE next small action.
 
 Return JSON only with exactly:
-{{"title":"...","minutes":10}}
+{{"title":"...","context":"...","minutes":10}}
 
 Rules:
 - The action must advance the parent task.
@@ -428,7 +432,10 @@ Rules:
 - Do not merely say "continue", "work on it", "get started", or "break it down".
 - Do not invent people, deadlines, places, preferences, tools, or facts not provided.
 - Choose minutes from 5, 10, or 15.
-- Keep the title under 180 characters when possible.
+- Context is optional supporting detail. Keep it to one short sentence and leave it empty when it adds nothing beyond the title.
+- Do not repeat the parent task in context merely to make the child understandable; the UI already shows the relationship.
+
+{AI_TASK_TITLE_GUIDANCE}
 """
 
     try:
@@ -466,6 +473,7 @@ Rules:
 
         return {
             "title": title[:300],
+            "context": str(data.get("context") or "").strip() or None,
             "minutes": _normalize_minutes(data.get("minutes")),
         }
 
@@ -568,6 +576,7 @@ def ensure_next_focus_activation(
         parent_task_id=parent_task_id,
         title=generated["title"],
         minutes=generated["minutes"],
+        context=generated.get("context"),
     )
 
     print(

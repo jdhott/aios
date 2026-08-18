@@ -307,6 +307,7 @@ def _task_detail_page(
 ) -> str:
     task_id = html.escape(str(task.get("id") or ""))
     title = html.escape(str(task.get("title") or ""))
+    task_context = html.escape(str(task.get("context") or ""))
     due_at = html.escape(str(task.get("due_at") or "")[:10])
     defer_until = html.escape(str(task.get("defer_until") or "")[:10])
     importance = html.escape(str(task.get("importance") or ""))
@@ -650,6 +651,11 @@ input:focus {{
           <label class="full">
             Task
             <input type="text" name="title" value="{title}" required>
+          </label>
+
+          <label class="full">
+            Task context <span class="optional">Optional</span>
+            <textarea name="context" rows="4" placeholder="Supporting detail, constraints, or useful context that does not belong in the task title.">{task_context}</textarea>
           </label>
 
           <label>
@@ -3395,8 +3401,8 @@ def _page(
         )
     )
 
-    if refresh_pending:
-        focus_parent_meta = ""
+    focus_parent_meta = ""
+    if focus:
         focus_parent_id = str(focus.get("parent_task_id") or "").strip()
         focus_parent_title = str(focus.get("parent_title") or "").strip()
         if focus_parent_id and focus_parent_title:
@@ -3406,6 +3412,7 @@ def _page(
                 '</div>'
             )
 
+    if refresh_pending:
         focus_card = (
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
@@ -3662,7 +3669,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
     .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
     .focus-main {{ min-width:0; }}
-    .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.08rem; line-height:1.28; font-weight:850; }}
+    .focus-title {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.24; font-weight:850; }}
     .focus-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; line-height:1.35; }}
     .focus-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
     .focus-title:hover {{ text-decoration:underline; }}
@@ -4130,6 +4137,7 @@ def new_task_web(
 def create_task_web(
     _user: Annotated[str, Depends(_check_basic_auth)],
     title: Annotated[str, Form()],
+    context: Annotated[str, Form()] = "",
     due_at: Annotated[str, Form()] = "",
     defer_until: Annotated[str, Form()] = "",
     importance: Annotated[str, Form()] = "",
@@ -4141,6 +4149,7 @@ def create_task_web(
 ):
     payload = {
         "title": title.strip(),
+        "context": context.strip(),
         "due_at": due_at,
         "defer_until": defer_until,
         "importance": importance,

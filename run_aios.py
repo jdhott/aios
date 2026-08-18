@@ -72,6 +72,7 @@ from aios.project_work_processor import (
 )
 from aios.focus_guidance import ensure_focus_guidance
 from aios.focus_activation import ensure_next_focus_activation
+from aios.task_writing import AI_TASK_TITLE_GUIDANCE
 AIOS_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 from aios.storage.task_source import (
     get_supabase_quick_win_candidate_tasks,
@@ -2737,7 +2738,7 @@ Rules:
 - Do NOT ask clarifying questions.
 - If a detail is missing, write a step to check or confirm it.
 - Each step must start with a verb.
-- Keep each step short, but not context-free.
+- Keep each step concise; parent metadata will preserve hierarchy context.
 - Each step must be understandable on its own without seeing the parent task.
 - Include the key object/context from the parent when needed.
 - Do NOT repeat the full parent title in every step.
@@ -2749,6 +2750,8 @@ Rules:
 - For creative/design tasks, treat the task as actionable and suggest concrete first-draft steps.
 - If the task names a tool such as Canva, include that tool in the relevant step.
 - Do not add a tool that was not mentioned in the task.
+
+{AI_TASK_TITLE_GUIDANCE}
 
 Good example:
 Parent: Design new label for 50% Whole Wheat Sourdough Tin Loaf in Canva
@@ -3675,6 +3678,7 @@ Hard rules:
 - Do not guess who, what, why, or where.
 - Preserve the original meaning only.
 - Keep it short.
+{AI_TASK_TITLE_GUIDANCE}
 - If it is already clear, return it unchanged.
 - Return only the task title.
 - Do not add possessives unless the original clearly refers to a person or named owner.
@@ -3753,6 +3757,7 @@ Hard rules:
 - Preserve the original meaning only.
 - Start with a verb when possible.
 - Keep it short.
+{AI_TASK_TITLE_GUIDANCE}
 - If the task is unclear, do NOT guess. Return the original task unchanged.
 - Do NOT turn a vague task into an unrelated specific task.
 - Do NOT return a clarification for clear atomic tasks such as open, restart, call, email, check, print, buy, book, or submit when the object is clear.
