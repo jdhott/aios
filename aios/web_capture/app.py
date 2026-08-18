@@ -133,6 +133,25 @@ def _snooze_task(task_id: str, preset: str, custom_date: str = "") -> dict:
     return response.json()
 
 
+def _breakdown_action(task_id: str, action: str, payload: dict | None = None) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+    response = requests.post(
+        f"{api_url}/tasks/{task_id}/breakdown/{action}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=(payload or {}),
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"AIOS API returned {response.status_code}: {response.text}"
+        )
+    return response.json()
+
+
 def _capture_to_aios(text: str) -> dict:
     api_url = _api_url()
     token = _identity_token(api_url)
@@ -286,6 +305,55 @@ def _task_detail_page(
     quick_win = "Yes" if task.get("is_quick_win") else "No"
     surfaced_qw = "Yes" if task.get("surfaced_quick_win") else "No"
     project_id = html.escape(str(task.get("project_id") or "—"))
+
+    breakdown_state = str(task.get("breakdown_state") or "").strip()
+    breakdown_context = html.escape(str(task.get("breakdown_request_context") or ""))
+    raw_proposal = task.get("breakdown_proposal") or []
+    proposal_titles = [
+        str(item).strip() for item in raw_proposal
+        if str(item).strip()
+    ] if isinstance(raw_proposal, list) else []
+    proposal_text = html.escape("\n".join(proposal_titles))
+
+    if breakdown_state == "pending":
+        breakdown_body = f"""
+        <p class="readonly-note">AIOS is proposing the smallest useful breakdown using your guidance. Nothing will be created until you accept it.</p>
+        <div class="breakdown-pending"><span class="mini-spinner"></span> Building proposed breakdown…</div>
+        <script>setTimeout(function(){{ window.location.href='/tasks/{task_id}?return_to={return_to}#breakdown'; }}, 2500);</script>
+        """
+    elif breakdown_state == "proposed" and proposal_titles:
+        breakdown_body = f"""
+        <p class="readonly-note">Edit the set below before accepting. Use one task per line; remove, add, or reorder lines as needed.</p>
+        <form method="post" action="/tasks/{task_id}/breakdown/accept">
+          <input type="hidden" name="return_to" value="{return_to}">
+          <label>Proposed subtasks
+            <textarea class="breakdown-editor" name="titles" rows="{max(4, len(proposal_titles) + 1)}" required>{proposal_text}</textarea>
+          </label>
+          <div class="actions">
+            <button class="primary-button" type="submit">Accept Breakdown</button>
+            <button class="secondary-button" type="submit" formaction="/tasks/{task_id}/breakdown/cancel" formnovalidate>Cancel</button>
+          </div>
+        </form>
+        """
+    elif breakdown_state == "accepted":
+        breakdown_body = '<p class="readonly-note">This task has been broken into ordered subtasks. The parent now acts as the container for that work.</p>'
+    else:
+        state_note = ''
+        if breakdown_state == "no_proposal":
+            state_note = '<div class="notice">AIOS did not find a useful breakdown. Add guidance and try again if you want.</div>'
+        elif breakdown_state == "failed":
+            state_note = '<div class="notice error">AIOS could not generate a breakdown. You can try again with more guidance.</div>'
+        breakdown_body = f"""
+        {state_note}
+        <p class="readonly-note">Use this when the task would be easier to execute as a small set of meaningful steps. AIOS will propose first; nothing is created automatically.</p>
+        <form method="post" action="/tasks/{task_id}/breakdown/request">
+          <input type="hidden" name="return_to" value="{return_to}">
+          <label>Anything AIOS should know? <span class="optional">Optional</span>
+            <textarea class="breakdown-editor" name="context" rows="3" placeholder="e.g. I already bought the materials; focus on installation.">{breakdown_context}</textarea>
+          </label>
+          <div class="actions"><button class="secondary-button" type="submit">Break Down Task</button></div>
+        </form>
+        """
 
     return f"""<!doctype html>
 <html lang="en">
@@ -442,6 +510,15 @@ input:focus {{
   cursor:pointer;
 }}
 .primary-button:hover {{ filter:brightness(.98); }}
+.secondary-button {{
+  min-height:46px; border:1px solid var(--border-strong); border-radius:12px;
+  padding:0 16px; background:#fff; color:var(--navy); font:inherit; font-weight:750; cursor:pointer;
+}}
+.breakdown-editor {{ width:100%; margin-top:7px; min-height:86px; resize:vertical; }}
+.optional {{ color:var(--muted); font-weight:500; }}
+.breakdown-pending {{ display:flex; align-items:center; gap:10px; font-weight:750; color:var(--navy); }}
+.mini-spinner {{ width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--navy); border-radius:50%; animation:spin .8s linear infinite; }}
+@keyframes spin {{ to {{ transform:rotate(360deg); }} }}
 .secondary-link {{
   min-height:46px;
   display:inline-flex;
@@ -601,6 +678,11 @@ input:focus {{
       </div>
     </aside>
   </div>
+
+  <section class="card" id="breakdown" style="margin-top:20px;">
+    <h2 class="card-title">Breakdown</h2>
+    {breakdown_body}
+  </section>
 </main>
 </body>
 </html>"""
@@ -4694,6 +4776,63 @@ def edit_task_web(
             ),
             status_code=303,
         )
+
+
+@app.post("/tasks/{task_id}/breakdown/request")
+def request_breakdown_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    context: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/",
+) -> RedirectResponse:
+    try:
+        _breakdown_action(task_id, "request", {"context": context.strip() or None})
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?return_to={_safe_return_to(return_to)}#breakdown",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?error=Breakdown+could+not+be+requested.&return_to={_safe_return_to(return_to)}#breakdown",
+            status_code=303,
+        )
+
+
+@app.post("/tasks/{task_id}/breakdown/accept")
+def accept_breakdown_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    titles: Annotated[str, Form()],
+    return_to: Annotated[str, Form()] = "/",
+) -> RedirectResponse:
+    items = [line.strip() for line in titles.splitlines() if line.strip()]
+    try:
+        _breakdown_action(task_id, "accept", {"titles": items})
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?message=Breakdown+created.&return_to={_safe_return_to(return_to)}#breakdown",
+            status_code=303,
+        )
+    except Exception:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?error=Breakdown+could+not+be+created.&return_to={_safe_return_to(return_to)}#breakdown",
+            status_code=303,
+        )
+
+
+@app.post("/tasks/{task_id}/breakdown/cancel")
+def cancel_breakdown_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    return_to: Annotated[str, Form()] = "/",
+) -> RedirectResponse:
+    try:
+        _breakdown_action(task_id, "cancel")
+    except Exception:
+        pass
+    return RedirectResponse(
+        url=f"/tasks/{task_id}?return_to={_safe_return_to(return_to)}#breakdown",
+        status_code=303,
+    )
 
 
 @app.post("/tasks/{task_id}/complete")

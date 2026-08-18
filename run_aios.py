@@ -2561,13 +2561,15 @@ def rule_based_breakdown_decision(task_text):
     if is_single_session_task(task_text) or is_likely_low_effort_task(task_text):
         return "no"
 
-    # Hard yes: high-level process/project tasks that are already clear.
+    # Broad/process wording is not enough for an automatic breakdown.
+    # These tasks may still benefit from decomposition, but only when AIOS is
+    # reasonably confident that the task is too broad to execute as written
+    # and that it understands a small set of meaningful domain-grounded steps.
     if is_process_task(task_text) and word_count >= 2:
-        return "yes"
+        return "uncertain"
 
-    # Legacy signal yes, but only after the hard-no checks above.
     if has_breakdown_value_signal(task_text) and word_count >= 3:
-        return "yes"
+        return "uncertain"
 
     # Long clear tasks often contain a concrete outcome plus enough context to
     # require setup/execution/review, but this is exactly where keywords used to
@@ -2716,16 +2718,21 @@ def decide_task_action(original_title, prepared_title=None, allow_ai=True):
 
 # In[32]:
 
-def generate_subtasks(task_text, client):
+def generate_subtasks(task_text, client, manual_context=""):
     """Use AI to break a clear parent task into linked subtasks.
 
     Subtasks should stay clean enough for Notion, but also carry enough context
     to make sense when seen outside the parent page or in search results.
     """
     prompt = f"""
-Break this task into 3–5 clear, actionable subtasks.
+Break this task into the smallest useful set of 2–5 clear, actionable subtasks.
+
+Optional user guidance:
+{manual_context or "(None provided.)"}
 
 Rules:
+- Prefer fewer meaningful steps over a long procedural checklist.
+- Do not create filler merely to reach a minimum count.
 - Do NOT invent details not present in the task.
 - Do NOT ask clarifying questions.
 - If a detail is missing, write a step to check or confirm it.
@@ -3178,11 +3185,11 @@ BREAKDOWN_CLASSIFICATION_TEST_CASES = [
     {"input": "Shower", "expected_breakdown": False},
     {"input": "Email school about bread order", "expected_breakdown": False},
     {"input": "Create first draft label in Canva", "expected_breakdown": False},
-    {"input": "Design new label for 50% Whole Wheat Sourdough Tin Loaf", "expected_breakdown": True},
-    {"input": "Prepare school bread order", "expected_breakdown": True},
-    {"input": "Plan summer trip", "expected_breakdown": True},
-    {"input": "Organize pantry", "expected_breakdown": True},
-    {"input": "Research new packaging options", "expected_breakdown": True},
+    {"input": "Design new label for 50% Whole Wheat Sourdough Tin Loaf", "expected_breakdown": False},
+    {"input": "Prepare school bread order", "expected_breakdown": False},
+    {"input": "Plan summer trip", "expected_breakdown": False},
+    {"input": "Organize pantry", "expected_breakdown": False},
+    {"input": "Research new packaging options", "expected_breakdown": False},
     {"input": "Conduct photo shoot for Khorasan focaccia recipe", "expected_breakdown": False},  # AI handles this as uncertain in production
     {"input": "Brainstorm list of enhancements for AIOS", "expected_breakdown": False},
 ]
@@ -3192,7 +3199,7 @@ TASK_DECISION_TEST_CASES = [
     {"input": "Ask Janet for Vitamin C", "prepared": "Ask Janet for Vitamin C", "expected_decision": "keep"},
     {"input": "Invite Jennifer Birrell to the Bread Community see email from Carol", "prepared": "Invite Jennifer Birrell to the Bread Community see email from Carol", "expected_decision": "keep"},
     {"input": "Packaging labels", "prepared": "Clarify next action: Packaging labels", "expected_decision": "clarify"},
-    {"input": "Plan summer trip", "prepared": "Plan summer trip", "expected_decision": "breakdown"},
+    {"input": "Plan summer trip", "prepared": "Plan summer trip", "expected_decision": "keep"},
     {"input": "Create first draft label in Canva", "prepared": "Create first draft label in Canva", "expected_decision": "keep"},
     {"input": "Conduct photo shoot for Khorasan focaccia recipe", "prepared": "Conduct photo shoot for Khorasan focaccia recipe", "expected_decision": "keep"},
     {"input": "Brainstorm list of enhancements for AIOS", "prepared": "Brainstorm list of enhancements for AIOS", "expected_decision": "keep"},
@@ -3976,19 +3983,23 @@ def ask_ai_breakdown_decision(title):
 
 Return exactly one word: yes or no.
 
-Use yes when:
-- The task likely has several meaningful phases, such as planning, setup, execution, review, or follow-up.
-- Breaking it into subtasks would reduce thinking load or make the next step obvious.
+Use yes only when ALL are true:
+- The task is too broad to execute effectively as one task.
+- Breaking it down would materially reduce thinking load or make execution clearer.
+- You have reasonable confidence in the task domain and the likely meaningful steps.
+- You can identify at least two distinct useful steps without inventing details.
 
-Use no when:
-- It is a clear atomic task.
+Use no when ANY are true:
+- The task is already actionable enough to start and meaningfully advance as written.
 - It is likely one sitting / one work session.
-- A breakdown would add clutter.
+- The likely steps would be generic, obvious, or mostly procedural filler.
+- The domain or required approach is uncertain enough that the user should guide a manual breakdown instead.
 
 Rules:
+- Be conservative. When uncertain, return no.
 - Do not ask clarifying questions.
 - Do not invent missing details.
-- Open-ended does not automatically mean breakdown.
+- Multi-step or open-ended does not automatically mean breakdown.
 
 Examples:
 Task: Call dentist office
@@ -7821,8 +7832,70 @@ def run_task_creation_pipeline():
 
     return archive_section_id
 
+def process_manual_breakdown_requests():
+    """Generate editable breakdown proposals requested from Task Detail.
+
+    Manual requests are proposal-only: no child tasks are created here. The
+    user edits/accepts the proposed set through the API before any hierarchy
+    mutation occurs.
+    """
+    if AIOS_DATASTORE != "supabase" or client is None:
+        return 0
+
+    store = SupabaseStore()
+    rows = (
+        store.client.table("tasks")
+        .select("id,title,breakdown_request_context")
+        .eq("breakdown_state", "pending")
+        .eq("is_open", True)
+        .eq("is_done", False)
+        .eq("is_archived", False)
+        .execute().data
+        or []
+    )
+    processed = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for row in rows:
+        task_id = str(row.get("id") or "").strip()
+        title = str(row.get("title") or "").strip()
+        guidance = str(row.get("breakdown_request_context") or "").strip()
+        if not task_id or not title:
+            continue
+        try:
+            subtasks = clean_subtasks(generate_subtasks(title, client, manual_context=guidance))
+            subtasks = [restore_preferred_proper_nouns(item) for item in subtasks][:MAX_SUBTASKS]
+            state = "proposed" if len(subtasks) >= 2 else "no_proposal"
+            (
+                store.client.table("tasks")
+                .update({
+                    "breakdown_state": state,
+                    "breakdown_proposal": subtasks if state == "proposed" else [],
+                    "breakdown_completed_at": now,
+                    "updated_at": now,
+                })
+                .eq("id", task_id)
+                .execute()
+            )
+            print(f"[Manual Breakdown] {title}: {len(subtasks)} proposed step(s)")
+            processed += 1
+        except Exception as exc:
+            print(f"[Manual Breakdown] Proposal failed for {title}: {exc}")
+            (
+                store.client.table("tasks")
+                .update({
+                    "breakdown_state": "failed",
+                    "breakdown_completed_at": now,
+                    "updated_at": now,
+                })
+                .eq("id", task_id)
+                .execute()
+            )
+    return processed
+
+
 if RUN_TASK_CREATION_PIPELINE:
     archive_section_id = run_task_creation_pipeline()
+    process_manual_breakdown_requests()
 else:
     archive_section_id = None
     print("Task creation pipeline disabled → no Brain Dump items processed.")

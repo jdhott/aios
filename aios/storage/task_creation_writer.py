@@ -226,6 +226,7 @@ class SupabasePrimaryTaskHierarchyCreator:
         manual_project: str,
         parent_task_id: Optional[str],
         step_order: Optional[int],
+        project_id: Optional[str] = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "legacy_notion_id": None,
@@ -239,6 +240,7 @@ class SupabasePrimaryTaskHierarchyCreator:
             "importance": "High Importance" if is_important else None,
             "due_at": due_date.isoformat() if due_date else None,
             "suggested_project": manual_project or None,
+            "project_id": project_id,
             "parent_task_id": parent_task_id,
             "step_order": step_order,
         }
@@ -308,6 +310,78 @@ class SupabasePrimaryTaskHierarchyCreator:
             raise
 
 
+    def create_children_for_existing_parent(
+        self,
+        *,
+        parent_task_id: str,
+        subtasks: list[str],
+    ) -> list[dict[str, Any]]:
+        """Create ordered native children for an existing authoritative task."""
+        parent_rows = (
+            self.store.client.table("tasks")
+            .select(
+                "id,title,is_open,is_done,is_archived,is_just_do_it,urgency,"
+                "due_at,suggested_project,project_id"
+            )
+            .eq("id", parent_task_id)
+            .limit(1)
+            .execute().data
+            or []
+        )
+        if not parent_rows:
+            raise RuntimeError("Breakdown parent task was not found.")
+        parent = dict(parent_rows[0])
+        if parent.get("is_done") or parent.get("is_archived") or not parent.get("is_open"):
+            raise RuntimeError("Closed tasks cannot be broken down.")
+
+        existing_children = (
+            self.store.client.table("tasks")
+            .select("id")
+            .eq("parent_task_id", parent_task_id)
+            .eq("is_archived", False)
+            .limit(1)
+            .execute().data
+            or []
+        )
+        if existing_children:
+            raise RuntimeError("Task already has breakdown children.")
+
+        created_ids: list[str] = []
+        pages: list[dict[str, Any]] = []
+        try:
+            for step_order, title in enumerate(subtasks, start=1):
+                row = self._insert_task(
+                    title=title,
+                    is_jdi=bool(parent.get("is_just_do_it")),
+                    is_urgent=parent.get("urgency") == "High Urgency",
+                    is_important=False,
+                    due_date=None,
+                    manual_project=str(parent.get("suggested_project") or ""),
+                    parent_task_id=parent_task_id,
+                    step_order=step_order,
+                    project_id=(str(parent.get("project_id")) if parent.get("project_id") else None),
+                )
+                # Preserve the parent's due timestamp exactly when present.
+                if parent.get("due_at"):
+                    (
+                        self.store.client.table("tasks")
+                        .update({"due_at": parent.get("due_at")})
+                        .eq("id", row["id"])
+                        .execute()
+                    )
+                    row["due_at"] = parent.get("due_at")
+                created_ids.append(str(row["id"]))
+                pages.append(SupabasePrimaryTaskCreator._compat_page(row))
+            return pages
+        except Exception:
+            for task_id in reversed(created_ids):
+                try:
+                    self._delete_task(task_id)
+                except Exception:
+                    pass
+            raise
+
+
 _HIERARCHY_CREATOR: SupabasePrimaryTaskHierarchyCreator | None = None
 
 
@@ -345,4 +419,21 @@ def create_supabase_primary_hierarchy(
         notion_create_fn=notion_create_fn,
         post_create_fn=post_create_fn,
         notion_rollback_fn=notion_rollback_fn,
+    )
+
+
+def create_supabase_children_for_existing_parent(
+    *,
+    parent_task_id: str,
+    subtasks: list[str],
+) -> list[dict[str, Any]]:
+    global _HIERARCHY_CREATOR
+    if _HIERARCHY_CREATOR is None:
+        _HIERARCHY_CREATOR = SupabasePrimaryTaskHierarchyCreator()
+    cleaned = [str(item or "").strip() for item in subtasks if str(item or "").strip()]
+    if len(cleaned) < 2:
+        raise ValueError("A breakdown requires at least two subtasks.")
+    return _HIERARCHY_CREATOR.create_children_for_existing_parent(
+        parent_task_id=parent_task_id,
+        subtasks=cleaned[:5],
     )

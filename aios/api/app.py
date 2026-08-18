@@ -34,6 +34,7 @@ from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
 from aios.project_work import create_supabase_project_task
+from aios.storage.task_creation_writer import create_supabase_children_for_existing_parent
 from aios.project_work_proposals import (
     accept_project_work_proposal,
     dismiss_project_work_proposal,
@@ -646,6 +647,14 @@ class ProjectWorkRetryRequest(BaseModel):
     feedback: str
 
 
+class ManualBreakdownRequest(BaseModel):
+    context: str | None = None
+
+
+class ManualBreakdownAcceptRequest(BaseModel):
+    titles: list[str]
+
+
 class TaskDetailUpdate(BaseModel):
     title: str | None = None
     due_at: str | None = None
@@ -657,6 +666,115 @@ class TaskDetailUpdate(BaseModel):
     is_just_do_it: bool | None = None
 
 
+@app.post("/tasks/{task_id}/breakdown/request", tags=["tasks"])
+def request_manual_breakdown_http(
+    task_id: str,
+    request: ManualBreakdownRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id,is_open,is_done,is_archived")
+        .eq("id", task_id)
+        .limit(1)
+        .execute().data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = rows[0]
+    if task.get("is_done") or task.get("is_archived") or not task.get("is_open"):
+        raise HTTPException(status_code=409, detail="Closed tasks cannot be broken down")
+
+    child_rows = (
+        store.client.table("tasks")
+        .select("id")
+        .eq("parent_task_id", task_id)
+        .eq("is_archived", False)
+        .limit(1)
+        .execute().data
+        or []
+    )
+    if child_rows:
+        raise HTTPException(status_code=409, detail="Task already has breakdown children")
+
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        store.client.table("tasks")
+        .update({
+            "breakdown_state": "pending",
+            "breakdown_request_context": str(request.context or "").strip() or None,
+            "breakdown_proposal": None,
+            "breakdown_requested_at": now,
+            "breakdown_completed_at": None,
+            "updated_at": now,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "breakdown_state": "pending"}
+
+
+@app.post("/tasks/{task_id}/breakdown/accept", tags=["tasks"])
+def accept_manual_breakdown_http(
+    task_id: str,
+    request: ManualBreakdownAcceptRequest,
+) -> dict:
+    titles = [str(item or "").strip() for item in request.titles if str(item or "").strip()]
+    if len(titles) < 2:
+        raise HTTPException(status_code=422, detail="Keep at least two breakdown tasks")
+    if len(titles) > 5:
+        raise HTTPException(status_code=422, detail="Breakdown supports at most five tasks")
+    try:
+        pages = create_supabase_children_for_existing_parent(
+            parent_task_id=task_id,
+            subtasks=titles,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        _store().client.table("tasks")
+        .update({
+            "breakdown_state": "accepted",
+            "breakdown_proposal": None,
+            "breakdown_completed_at": now,
+            "updated_at": now,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+    return {"id": task_id, "accepted": True, "children_created": len(pages)}
+
+
+@app.post("/tasks/{task_id}/breakdown/cancel", tags=["tasks"])
+def cancel_manual_breakdown_http(task_id: str) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        _store().client.table("tasks")
+        .update({
+            "breakdown_state": None,
+            "breakdown_request_context": None,
+            "breakdown_proposal": None,
+            "breakdown_requested_at": None,
+            "breakdown_completed_at": None,
+            "updated_at": now,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+    if not (result.data or []):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"id": task_id, "cancelled": True}
+
+
 @app.get("/tasks/{task_id}", tags=["tasks"])
 def get_task_detail_http(task_id: str) -> dict:
     rows = (
@@ -664,7 +782,9 @@ def get_task_detail_http(task_id: str) -> dict:
         .select(
             "id,title,status,due_at,defer_until,importance,urgency,"
             "effort,duration,project_id,is_quick_win,is_just_do_it,"
-            "is_open,is_done,is_archived,created_at,updated_at"
+            "is_open,is_done,is_archived,created_at,updated_at,"
+            "breakdown_state,breakdown_request_context,breakdown_proposal,"
+            "breakdown_requested_at,breakdown_completed_at"
         )
         .eq("id", task_id)
         .limit(1)
