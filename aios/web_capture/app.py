@@ -1577,9 +1577,8 @@ h1 {{
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:#fbfbf8; }}
 .task-title {{ font-weight:700; }}
-.task-parent-meta { margin-top:3px; font-size:13px; color:var(--muted); }
-.task-parent-meta a { color:var(--navy); text-decoration:none; font-weight:650; }
-.task-parent-meta a:hover { text-decoration:underline; }
+.task-parent-meta { margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35; }
+.task-parent-meta a { color:inherit; text-decoration:underline; font-weight:inherit; }
 .task-meta {{
   margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35;
 }}
@@ -3714,6 +3713,8 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .task-link {{ color:inherit; text-decoration:none; }}
     .task-link:hover {{ text-decoration:underline; }}
     .task-meta {{ margin-top:5px; color:var(--muted); font-size:.82rem; }}
+    .task-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.82rem; }}
+    .task-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
     .task-main {{ min-width:0; }}
     .complete-form, .delete-form {{ display:flex; margin:0; align-items:center; justify-content:center; }}
     .complete-checkbox, .trash-button {{ width:44px; height:44px; min-height:44px; padding:0; border:0; border-radius:10px; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; }}
