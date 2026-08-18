@@ -305,7 +305,7 @@ def list_open_tasks_http(
     query = (
         _store().client.table("tasks")
         .select(
-            "id,title,status,due_at,defer_until,project_id,importance,"
+            "id,title,status,due_at,defer_until,project_id,importance,parent_task_id,"
             "is_quick_win,is_just_do_it,created_at,updated_at"
         )
         .eq("is_open", True)
@@ -321,6 +321,35 @@ def list_open_tasks_http(
     rows = query.execute().data or []
 
     task_ids = [row.get("id") for row in rows if row.get("id")]
+
+    # Child tasks lose important meaning when shown outside their hierarchy.
+    # Enrich list payloads with the parent title for presentation only; the
+    # child title itself remains unchanged.
+    parent_ids = sorted({
+        str(row.get("parent_task_id"))
+        for row in rows
+        if row.get("parent_task_id")
+    })
+    parent_title_by_id = {}
+    if parent_ids:
+        parent_rows = (
+            _store().client.table("tasks")
+            .select("id,title")
+            .in_("id", parent_ids)
+            .execute()
+            .data
+            or []
+        )
+        parent_title_by_id = {
+            str(parent.get("id")): str(parent.get("title") or "").strip()
+            for parent in parent_rows
+            if parent.get("id")
+        }
+    for row in rows:
+        parent_id = str(row.get("parent_task_id") or "").strip()
+        if parent_id:
+            row["parent_title"] = parent_title_by_id.get(parent_id) or None
+
     state_by_task = {}
 
     if task_ids:

@@ -358,7 +358,7 @@ def _task_detail_page(
         breakdown_body = f"""
         <p class="readonly-note">AIOS is proposing the smallest useful breakdown using your guidance. Nothing will be created until you accept it.</p>
         <div class="breakdown-pending"><span class="mini-spinner"></span> Building proposed breakdown…</div>
-        <script>setTimeout(function(){{ window.location.href='/tasks/{task_id}?return_to={return_to}#breakdown'; }}, 2500);</script>
+        <script>setTimeout(function(){{ window.location.reload(); }}, 2500);</script>
         """
     elif breakdown_state == "proposed" and proposal_titles:
         breakdown_body = f"""
@@ -1577,6 +1577,9 @@ h1 {{
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:#fbfbf8; }}
 .task-title {{ font-weight:700; }}
+.task-parent-meta { margin-top:3px; font-size:13px; color:var(--muted); }
+.task-parent-meta a { color:var(--navy); text-decoration:none; font-weight:650; }
+.task-parent-meta a:hover { text-decoration:underline; }
 .task-meta {{
   margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35;
 }}
@@ -3249,6 +3252,16 @@ def _page(
         if task.get("is_just_do_it"):
             meta_parts.append("Just Do It")
 
+        parent_id = str(task.get("parent_task_id") or "").strip()
+        parent_title = str(task.get("parent_title") or "").strip()
+        parent_html = ""
+        if parent_id and parent_title:
+            parent_html = (
+                '<div class="task-parent-meta">Part of: '
+                f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
+                '</div>'
+            )
+
         meta = " · ".join(meta_parts)
         meta_html = (
             f'<div class="task-meta">{meta}</div>'
@@ -3263,6 +3276,7 @@ def _page(
             + '<span aria-hidden="true"></span></button></form>'
             + '<div class="task-main">'
             + f'<div class="task-title"><a class="task-link" href="/tasks/{task_id}">{title}</a></div>'
+            + parent_html
             + meta_html
             + '</div>'
             + f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
