@@ -745,7 +745,12 @@ function breakdownRow(title) {{
 function wireBreakdownRow(row) {{ const trash=row.querySelector('.breakdown-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
 function addBreakdownRow(button) {{ const form=button.closest('form'), list=form.querySelector('[data-breakdown-list]'), row=breakdownRow(''); list.appendChild(row); row.querySelector('.breakdown-title').focus(); }}
 function syncBreakdownTitles(form) {{ const titles=Array.from(form.querySelectorAll('.breakdown-title')).map(i=>i.value.trim()).filter(Boolean); form.querySelector('input[name="titles"]').value=titles.join('\\n'); return true; }}
-document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.breakdown-row').forEach(wireBreakdownRow); document.querySelectorAll('[data-breakdown-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{ e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.breakdown-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging); }}); }}); }});
+function wireProjectTaskRow(row) {{ const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
+function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input class="project-editor-title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
+function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
+function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{return {{id:row.dataset.taskId||null,title:row.querySelector('.project-editor-title').value.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
+
+document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.breakdown-row').forEach(wireBreakdownRow); document.querySelectorAll('[data-breakdown-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{ e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.breakdown-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging); }}); }});  document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
 </body>
 </html>"""
@@ -778,6 +783,20 @@ def _fetch_project_detail(project_id: str) -> dict:
         raise RuntimeError(
             f"AIOS API returned {response.status_code}: {response.text}"
         )
+    return dict(response.json() or {})
+
+
+def _update_project_tasks(project_id: str, tasks: list[dict]) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+    response = requests.put(
+        f"{api_url}/projects/{project_id}/tasks",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"tasks": tasks},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
     return dict(response.json() or {})
 
 
@@ -1296,51 +1315,44 @@ def _project_detail_page(
     work_generation_context_update = str(project.get("work_generation_context_update") or "").strip()
 
     task_rows = ""
+    completion_forms = ""
     for task in tasks:
-        task_id = html.escape(str(task.get("id") or ""))
-        title = html.escape(str(task.get("title") or "Untitled task"))
+        raw_task_id = str(task.get("id") or "")
+        task_id = html.escape(raw_task_id)
+        title = html.escape(str(task.get("title") or "Untitled task"), quote=True)
         score = task.get("execution_score")
         rank = task.get("execution_rank")
         due = str(task.get("due_at") or "").strip()
         importance = str(task.get("importance") or "").strip()
-
         meta = []
-        if rank is not None:
-            meta.append(f"Rank {html.escape(str(rank))}")
-        if score is not None:
-            meta.append(f"Score {html.escape(str(score))}")
-        if importance:
-            meta.append(html.escape(importance))
-        if due:
-            meta.append("Due " + html.escape(due[:10]))
-        if task.get("best_next_action"):
-            meta.append("Best Next Action")
-        if task.get("is_quick_win"):
-            meta.append("Quick Win")
-        if task.get("is_just_do_it"):
-            meta.append("Just Do It")
-
+        if rank is not None: meta.append(f"Rank {html.escape(str(rank))}")
+        if score is not None: meta.append(f"Score {html.escape(str(score))}")
+        if importance: meta.append(html.escape(importance))
+        if due: meta.append("Due " + html.escape(due[:10]))
+        if task.get("best_next_action"): meta.append("Best Next Action")
+        if task.get("is_quick_win"): meta.append("Quick Win")
+        if task.get("is_just_do_it"): meta.append("Just Do It")
         project_return = f"/projects/{project_id}#project-tasks"
+        form_id = f"project-complete-{task_id}"
+        completion_forms += (
+            f'<form id="{form_id}" method="post" action="/tasks/{task_id}/complete">'
+            f'<input type="hidden" name="return_to" value="{project_return}"></form>'
+        )
         task_rows += (
-            '<article class="task-row project-task-row">'
-            f'<form class="complete-form" method="post" action="/tasks/{task_id}/complete">'
-            f'<input type="hidden" name="return_to" value="{project_return}">'
-            '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
-            '<span aria-hidden="true"></span></button></form>'
-            '<div class="project-task-main">'
-            f'<div class="task-title"><a class="project-task-link" href="/tasks/{task_id}?return_to={project_return}">{title}</a></div>'
+            f'<div class="project-editor-row" draggable="true" data-task-id="{task_id}">'
+            '<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button>'
+            f'<button class="complete-checkbox" type="submit" form="{form_id}" aria-label="Mark task done" title="Mark done"><span aria-hidden="true"></span></button>'
+            '<div class="project-editor-main">'
+            f'<input class="project-editor-title" type="text" value="{title}" aria-label="Task title">'
             f'<div class="task-meta">{" · ".join(meta)}</div>'
             '</div>'
-            f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
-            'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
-            f'<input type="hidden" name="return_to" value="{project_return}">'
-            '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
-            '<span aria-hidden="true">🗑️</span></button></form>'
-            '</article>'
+            f'<a class="project-task-open" href="/tasks/{task_id}?return_to={project_return}" title="Open task">Details</a>'
+            '<button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'
+            '</div>'
         )
 
     if not task_rows:
-        task_rows = '<div class="empty-state">No open tasks in this project.</div>'
+        task_rows = '<div class="empty-state project-empty">No open tasks in this project.</div>'
 
     proposal_rows = ""
 
@@ -1541,6 +1553,18 @@ h1 {{
   text-decoration:none; border-bottom:1px solid var(--border);
 }}
 .project-task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; }}
+.project-task-editor {{ margin-top:24px; }}
+.project-editor-list {{ display:flex; flex-direction:column; gap:10px; }}
+.project-editor-row {{ display:grid; grid-template-columns:38px 44px minmax(0,1fr) auto 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid #d8dee2; }}
+.project-editor-row.dragging {{ opacity:.45; }}
+.project-drag {{ border:0; background:transparent; cursor:grab; font-size:24px; color:#6a7780; }}
+.project-editor-title {{ width:100%; box-sizing:border-box; font:inherit; font-weight:700; color:#17252e; border:1px solid transparent; border-radius:8px; padding:8px; background:transparent; }}
+.project-editor-title:focus {{ border-color:#9aabb5; background:#fff; outline:none; }}
+.project-editor-trash {{ border:0; background:transparent; cursor:pointer; font-size:20px; }}
+.project-task-open {{ font-weight:700; white-space:nowrap; }}
+.project-editor-actions {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:16px; flex-wrap:wrap; }}
+.project-add-task {{ background:#fff; border:1px solid #cbd4d9; border-radius:12px; padding:11px 16px; font-weight:700; cursor:pointer; }}
+
 .project-task-main {{ min-width:0; }}
 .project-task-link {{ color:inherit; text-decoration:none; }}
 .project-task-link:hover {{ text-decoration:underline; }}
@@ -1825,7 +1849,19 @@ h1 {{
   {generation_result_html}
   </div>
 
-  <div class="task-list" id="project-tasks">{task_rows}</div>
+  <section class="project-task-editor" id="project-tasks">
+    <h2>Project tasks</h2>
+    <p class="proposal-note">Drag to set the project sequence, edit titles inline, remove tasks, or add work. Completion remains immediate; structural changes are saved together.</p>
+    {completion_forms}
+    <form method="post" action="/projects/{project_id}/tasks" onsubmit="return syncProjectTasks(this)">
+      <input type="hidden" name="tasks_json" value="[]">
+      <div class="project-editor-list" data-project-task-list>{task_rows}</div>
+      <div class="project-editor-actions">
+        <button class="project-add-task" type="button" onclick="addProjectTaskRow(this)">+ Add task</button>
+        <button class="context-save" type="submit">Save Project Tasks</button>
+      </div>
+    </form>
+  </section>
 </main>
 {pending_refresh_script}
 </body>
@@ -4495,6 +4531,24 @@ def clarification_use_web(
             status_code=303,
         )
 
+
+
+@app.post("/projects/{project_id}/tasks")
+def update_project_tasks_web(
+    project_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    tasks_json: Annotated[str, Form()] = "[]",
+):
+    try:
+        parsed = json.loads(tasks_json or "[]")
+        if not isinstance(parsed, list):
+            raise ValueError("Invalid project task list")
+        tasks = [{"id": item.get("id"), "title": str(item.get("title") or "").strip()} for item in parsed if isinstance(item, dict) and str(item.get("title") or "").strip()]
+        _update_project_tasks(project_id, tasks)
+        return RedirectResponse(url=f"/projects/{project_id}?message=Project+tasks+saved.#project-tasks", status_code=303)
+    except Exception as exc:
+        print("[Project Tasks] Update failed:", exc)
+        return RedirectResponse(url=f"/projects/{project_id}?error=Project+tasks+could+not+be+saved.#project-tasks", status_code=303)
 
 @app.post("/projects/{project_id}/outcome")
 def update_project_outcome_web(

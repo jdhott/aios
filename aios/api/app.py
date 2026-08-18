@@ -642,6 +642,15 @@ class ProjectContextUpdate(BaseModel):
     context: str | None = None
 
 
+class ProjectTaskListItem(BaseModel):
+    id: str | None = None
+    title: str
+
+
+class ProjectTaskListUpdate(BaseModel):
+    tasks: list[ProjectTaskListItem]
+
+
 class ProjectWorkAcceptRequest(BaseModel):
     title: str | None = None
 
@@ -1632,6 +1641,65 @@ def retry_project_work_http(
     }
 
 
+@app.put("/projects/{project_id}/tasks", tags=["projects"])
+def update_project_task_list_http(project_id: str, request: ProjectTaskListUpdate) -> dict:
+    store = _store()
+    project_rows = (
+        store.client.table("projects").select("id").eq("id", project_id).limit(1).execute().data or []
+    )
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    current = (
+        store.client.table("tasks")
+        .select("id,title,is_open,is_done,is_archived")
+        .eq("project_id", project_id)
+        .eq("is_open", True)
+        .eq("is_done", False)
+        .eq("is_archived", False)
+        .execute().data or []
+    )
+    current_ids = {str(row.get("id")) for row in current if row.get("id")}
+    requested_existing: set[str] = set()
+    normalized: list[tuple[str | None, str]] = []
+    for item in request.tasks:
+        title = str(item.title or "").strip()
+        if not title:
+            continue
+        task_id = str(item.id or "").strip() or None
+        if task_id:
+            if task_id not in current_ids:
+                raise HTTPException(status_code=409, detail="Project task list changed; reload and try again")
+            if task_id in requested_existing:
+                raise HTTPException(status_code=422, detail="Duplicate project task")
+            requested_existing.add(task_id)
+        normalized.append((task_id, title))
+
+    removed_ids = current_ids - requested_existing
+    now = datetime.now(timezone.utc).isoformat()
+    for task_id in removed_ids:
+        store.client.table("tasks").update({"is_archived": True, "is_open": False, "updated_at": now}).eq("id", task_id).execute()
+
+    saved = []
+    for order, (task_id, title) in enumerate(normalized, start=1):
+        if task_id:
+            result = store.client.table("tasks").update({"title": title, "project_order": order, "updated_at": now}).eq("id", task_id).execute()
+            rows = result.data or []
+            if rows:
+                saved.append(dict(rows[0]))
+        else:
+            task = create_supabase_project_task(store, title=title, project_id=project_id)
+            result = store.client.table("tasks").update({"project_order": order, "updated_at": now}).eq("id", task["id"]).execute()
+            rows = result.data or []
+            saved.append(dict(rows[0]) if rows else task)
+
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+    return {"project_id": project_id, "tasks": saved, "removed": len(removed_ids)}
+
+
 @app.get("/projects/{project_id}", tags=["projects"])
 def get_project_detail_http(project_id: str) -> dict:
     project_rows = (
@@ -1653,7 +1721,7 @@ def get_project_detail_http(project_id: str) -> dict:
         _store().client.table("tasks")
         .select(
             "id,title,due_at,importance,is_quick_win,is_just_do_it,"
-            "is_open,is_done,is_archived"
+            "is_open,is_done,is_archived,project_order"
         )
         .eq("project_id", project_id)
         .eq("is_open", True)
@@ -1693,9 +1761,12 @@ def get_project_detail_http(project_id: str) -> dict:
         task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
 
     def sort_key(task: dict):
+        project_order = task.get("project_order")
         rank = task.get("execution_rank")
         score = task.get("execution_score")
         return (
+            project_order is None,
+            int(project_order) if project_order is not None else 999999,
             rank is None,
             int(rank) if rank is not None else 999999,
             score is None,
