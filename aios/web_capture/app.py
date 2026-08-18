@@ -4,6 +4,7 @@ import hmac
 import html
 import os
 from typing import Annotated
+from urllib.parse import quote_plus
 
 import google.auth
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -131,6 +132,59 @@ def _snooze_task(task_id: str, preset: str, custom_date: str = "") -> dict:
             f"AIOS API returned {response.status_code}: {response.text}"
         )
     return response.json()
+
+
+def _task_snooze_control_html(
+    task_id: str,
+    *,
+    return_to: str = "",
+    external_form_id: str = "",
+    css_class: str = "task-snooze",
+) -> str:
+    """Render the shared icon-based snooze menu for an actionable task."""
+    safe_id = html.escape(str(task_id), quote=True)
+    safe_return = html.escape(str(return_to or ""), quote=True)
+    safe_class = html.escape(css_class, quote=True)
+
+    if external_form_id:
+        form_id = html.escape(external_form_id, quote=True)
+        preset_button = lambda value, label: (
+            f'<button type="submit" form="{form_id}" name="preset" value="{value}">{label}</button>'
+        )
+        custom_controls = (
+            f'<div class="task-snooze-date">'
+            f'<input type="date" name="custom_date" form="{form_id}" required>'
+            f'<button type="submit" form="{form_id}" name="preset" value="pick_date">Pick date</button>'
+            f'</div>'
+        )
+    else:
+        def preset_button(value: str, label: str) -> str:
+            return (
+                f'<form method="post" action="/tasks/{safe_id}/snooze">'
+                f'<input type="hidden" name="preset" value="{value}">'
+                + (f'<input type="hidden" name="return_to" value="{safe_return}">' if safe_return else '')
+                + f'<button type="submit">{label}</button></form>'
+            )
+        custom_controls = (
+            f'<form class="task-snooze-date" method="post" action="/tasks/{safe_id}/snooze">'
+            f'<input type="hidden" name="preset" value="pick_date">'
+            + (f'<input type="hidden" name="return_to" value="{safe_return}">' if safe_return else '')
+            + '<input type="date" name="custom_date" required>'
+            + '<button type="submit">Pick date</button></form>'
+        )
+
+    return (
+        f'<details class="{safe_class}">'
+        '<summary class="snooze-icon-button" aria-label="Snooze task" title="Snooze task">'
+        '<span aria-hidden="true">⏰</span></summary>'
+        '<div class="task-snooze-menu">'
+        + preset_button('later_today', 'Later today')
+        + preset_button('tomorrow', 'Tomorrow')
+        + preset_button('three_days', '3 days')
+        + preset_button('one_week', '1 week')
+        + custom_controls
+        + '</div></details>'
+    )
 
 
 class BreakdownActionError(RuntimeError):
@@ -1340,8 +1394,11 @@ def _project_detail_page(
         if task.get("is_just_do_it"): meta.append("Just Do It")
         project_return = f"/projects/{project_id}#project-tasks"
         form_id = f"project-complete-{task_id}"
+        snooze_form_id = f"project-snooze-{task_id}"
         completion_forms += (
             f'<form id="{form_id}" method="post" action="/tasks/{task_id}/complete">'
+            f'<input type="hidden" name="return_to" value="{project_return}"></form>'
+            f'<form id="{snooze_form_id}" method="post" action="/tasks/{task_id}/snooze">'
             f'<input type="hidden" name="return_to" value="{project_return}"></form>'
         )
         task_rows += (
@@ -1354,7 +1411,13 @@ def _project_detail_page(
             f'<div class="task-meta">{" · ".join(meta)}</div>'
             '</div>'
             f'<a class="project-task-open" href="/tasks/{task_id}?return_to={project_return}" title="Open task">Details</a>'
-            '<button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'
+            + _task_snooze_control_html(
+                raw_task_id,
+                return_to=project_return,
+                external_form_id=snooze_form_id,
+                css_class="project-task-snooze",
+            )
+            + '<button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'
             '</div>'
         )
 
@@ -1562,7 +1625,7 @@ h1 {{
 .project-task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; }}
 .project-task-editor {{ margin-top:24px; }}
 .project-editor-list {{ display:flex; flex-direction:column; gap:10px; }}
-.project-editor-row {{ display:grid; grid-template-columns:38px 44px minmax(0,1fr) auto 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid #d8dee2; }}
+.project-editor-row {{ display:grid; grid-template-columns:38px 44px minmax(0,1fr) auto 44px 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid #d8dee2; }}
 .project-editor-row.dragging {{ opacity:.45; }}
 .project-drag {{ border:0; background:transparent; cursor:grab; font-size:24px; color:#6a7780; }}
 .project-editor-title {{ width:100%; box-sizing:border-box; font:inherit; font-weight:700; color:#17252e; border:1px solid transparent; border-radius:8px; padding:8px; background:transparent; }}
@@ -1580,6 +1643,17 @@ h1 {{
 .complete-checkbox span {{ width:20px; height:20px; border:2px solid #89959b; border-radius:6px; display:block; }}
 .complete-checkbox:hover, .complete-checkbox:focus-visible, .trash-button:hover, .trash-button:focus-visible {{ background:#eceeed; }}
 .trash-button {{ font-size:1.08rem; opacity:.72; }}
+.task-snooze, .project-task-snooze {{ position:relative; }}
+.snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
+.snooze-icon-button::-webkit-details-marker {{ display:none; }}
+.snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
+.task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+.task-snooze-menu form {{ display:block; margin:0; }}
+.task-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
+.task-snooze-menu button:hover {{ background:#f3f4f2; }}
+.task-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
+.task-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
+.task-snooze-date button {{ width:auto; white-space:nowrap; }}
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:#fbfbf8; }}
 .task-title {{ font-weight:700; }}
@@ -3276,6 +3350,12 @@ def _page(
             else ""
         )
 
+        row_return_to = f"/?search={quote_plus(search)}" if search else ""
+        snooze_html = _task_snooze_control_html(
+            str(task.get("id") or ""),
+            return_to=row_return_to,
+        )
+
         return (
             '<article class="task-row">'
             + f'<form class="complete-form" method="post" action="/tasks/{task_id}/complete">'
@@ -3286,6 +3366,7 @@ def _page(
             + parent_html
             + meta_html
             + '</div>'
+            + snooze_html
             + f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
             + 'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             + '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
@@ -3512,15 +3593,8 @@ def _page(
             + focus_parent_meta
             + f'<div class="focus-meta">{" · ".join(meta)}</div>'
             '<div class="focus-parent-actions">'
-            '<details class="focus-snooze">'
-            '<summary>Snooze</summary>'
-            '<div class="focus-snooze-menu">'
-            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="later_today"><button type="submit">Later today</button></form>'
-            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="tomorrow"><button type="submit">Tomorrow</button></form>'
-            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="three_days"><button type="submit">3 days</button></form>'
-            f'<form method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="one_week"><button type="submit">1 week</button></form>'
-            f'<form class="focus-snooze-date" method="post" action="/tasks/{safe_id}/snooze"><input type="hidden" name="preset" value="pick_date"><input type="date" name="custom_date" required><button type="submit">Pick date</button></form>'
-            '</div></details></div></div>'
+            + _task_snooze_control_html(focus_id, css_class="focus-snooze")
+            + '</div></div>'
             f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
             '</div>'
@@ -3675,17 +3749,17 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-title:hover {{ text-decoration:underline; }}
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
     .focus-parent-actions {{ display:flex; gap:10px; margin-top:9px; }}
-    .focus-snooze {{ position:relative; }}
-    .focus-snooze > summary {{ list-style:none; cursor:pointer; color:var(--navy); font-size:.84rem; font-weight:800; }}
-    .focus-snooze > summary::-webkit-details-marker {{ display:none; }}
-    .focus-snooze > summary:hover {{ text-decoration:underline; }}
-    .focus-snooze-menu {{ position:absolute; z-index:20; top:28px; left:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
-    .focus-snooze-menu form {{ display:block; margin:0; }}
-    .focus-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
-    .focus-snooze-menu button:hover {{ background:#f3f4f2; }}
-    .focus-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
-    .focus-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
-    .focus-snooze-date button {{ width:auto; white-space:nowrap; }}
+    .focus-snooze, .task-snooze, .project-task-snooze {{ position:relative; }}
+    .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
+    .snooze-icon-button::-webkit-details-marker {{ display:none; }}
+    .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
+    .task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+    .task-snooze-menu form {{ display:block; margin:0; }}
+    .task-snooze-menu button {{ width:100%; min-height:0; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
+    .task-snooze-menu button:hover {{ background:#f3f4f2; }}
+    .task-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
+    .task-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
+    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
     .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
     .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
     .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:center; margin-top:8px; }}
@@ -3772,7 +3846,8 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .task-search {{ display:flex; gap:10px; margin-bottom:14px; }}
     .task-search input {{ flex:1; min-width:0; min-height:44px; border:1px solid var(--border); border-radius:12px; padding:0 13px; background:white; color:var(--ink); font:inherit; }}
     .task-search button {{ min-height:44px; padding:0 16px; border-radius:12px; font-size:.95rem; }}
-    .task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }}
+    .task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }}
+    .completed-task-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
     .task-title {{ font-size:1rem; line-height:1.35; }}
     .task-link {{ color:inherit; text-decoration:none; }}
     .task-link:hover {{ text-decoration:underline; }}
@@ -5116,14 +5191,20 @@ def snooze_task_web(
     _user: Annotated[str, Depends(_check_basic_auth)],
     preset: Annotated[str, Form()] = "",
     custom_date: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "",
 ) -> RedirectResponse:
+    target = _safe_return_to(return_to) if return_to else "/"
     try:
         _snooze_task(task_id, preset, custom_date)
+        if target != "/":
+            return RedirectResponse(url=target, status_code=303)
         return RedirectResponse(
-            url="/?message=Best+Next+Action+snoozed.&refresh_focus=1",
+            url="/?message=Task+snoozed.&refresh_focus=1",
             status_code=303,
         )
     except Exception:
+        if target != "/":
+            return RedirectResponse(url=target, status_code=303)
         return RedirectResponse(
             url="/?error=Task+could+not+be+snoozed.",
             status_code=303,
