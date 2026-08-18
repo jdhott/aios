@@ -386,21 +386,38 @@ def list_open_tasks_http(
     if parent_ids:
         parent_rows = (
             _store().client.table("tasks")
-            .select("id,title")
+            .select("id,title,due_at")
             .in_("id", parent_ids)
             .execute()
             .data
             or []
         )
-        parent_title_by_id = {
-            str(parent.get("id")): str(parent.get("title") or "").strip()
+        parent_meta_by_id = {
+            str(parent.get("id")): {
+                "title": str(parent.get("title") or "").strip(),
+                "due_at": parent.get("due_at"),
+            }
             for parent in parent_rows
             if parent.get("id")
         }
+    else:
+        parent_meta_by_id = {}
+
     for row in rows:
         parent_id = str(row.get("parent_task_id") or "").strip()
         if parent_id:
-            row["parent_title"] = parent_title_by_id.get(parent_id) or None
+            parent_meta = parent_meta_by_id.get(parent_id) or {}
+            row["parent_title"] = parent_meta.get("title") or None
+            parent_due_at = parent_meta.get("due_at")
+            if not row.get("due_at") and parent_due_at:
+                row["effective_due_at"] = parent_due_at
+                row["due_inherited_from_parent"] = True
+            else:
+                row["effective_due_at"] = row.get("due_at")
+                row["due_inherited_from_parent"] = False
+        else:
+            row["effective_due_at"] = row.get("due_at")
+            row["due_inherited_from_parent"] = False
 
     state_by_task = {}
 
@@ -460,7 +477,7 @@ def list_open_tasks_http(
     today = datetime.now(toronto).date()
 
     def due_today(row: dict) -> bool:
-        raw = row.get("due_at")
+        raw = row.get("effective_due_at") or row.get("due_at")
         if not raw:
             return False
         try:
@@ -566,7 +583,7 @@ def list_open_tasks_http(
     # task due today or overdue, even when it also appears in another section.
     today_items = _respect_breakdown_step_order(sorted(
         [row for row in actionable_rows if due_today(row)],
-        key=lambda row: (str(row.get("due_at") or "")[:10], *score_key(row)),
+        key=lambda row: (str(row.get("effective_due_at") or row.get("due_at") or "")[:10], *score_key(row)),
     ))
 
     # JDI is also an independent view: show every open JDI task even when it

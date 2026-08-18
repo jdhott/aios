@@ -3302,7 +3302,7 @@ def _page(
             str(task.get("title") or "Untitled task")
         )
         task_id = html.escape(str(task.get("id") or ""))
-        due_at = str(task.get("due_at") or "").strip()
+        due_at = str(task.get("effective_due_at") or task.get("due_at") or "").strip()
         importance = str(task.get("importance") or "").strip()
         score = task.get("execution_score")
         rank = task.get("execution_rank")
