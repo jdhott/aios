@@ -1693,10 +1693,10 @@ def update_project_task_list_http(project_id: str, request: ProjectTaskListUpdat
             rows = result.data or []
             saved.append(dict(rows[0]) if rows else task)
 
-    try:
-        _request_processor_run()
-    except Exception:
-        pass
+    # Do not immediately run the processor after editing the project task list.
+    # Legacy tasks may still have stale source titles outside Supabase; an
+    # immediate processor run can race the authoritative edit and restore the
+    # old title. The project-list mutation itself is authoritative in Supabase.
     return {"project_id": project_id, "tasks": saved, "removed": len(removed_ids)}
 
 
