@@ -271,6 +271,34 @@ def _safe_return_to(value: str | None) -> str:
     return target
 
 
+def _breakdown_list_editor_html(*, titles: list[str], form_action: str, return_to: str, submit_label: str, cancel_action: str | None = None) -> str:
+    rows = []
+    for title in titles:
+        rows.append(
+            '<div class="breakdown-row" draggable="true">'
+            '<button class="breakdown-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button>'
+            f'<input class="breakdown-title" type="text" value="{html.escape(str(title), quote=True)}" aria-label="Subtask title">'
+            '<button class="breakdown-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'
+            '</div>'
+        )
+    rows_html = ''.join(rows)
+    cancel_html = ''
+    if cancel_action:
+        cancel_html = f'<button class="secondary-button" type="submit" formaction="{cancel_action}" formnovalidate>Cancel</button>'
+    return f'''
+    <form method="post" action="{form_action}" class="breakdown-list-form" onsubmit="return syncBreakdownTitles(this)">
+      <input type="hidden" name="return_to" value="{html.escape(return_to, quote=True)}">
+      <input type="hidden" name="titles" value="">
+      <div class="breakdown-list" data-breakdown-list>{rows_html}</div>
+      <button class="breakdown-add" type="button" onclick="addBreakdownRow(this)">+ Add task</button>
+      <div class="actions">
+        <button class="primary-button" type="submit">{html.escape(submit_label)}</button>
+        {cancel_html}
+      </div>
+    </form>
+    '''
+
+
 def _task_detail_page(
     task: dict,
     message: str = "",
@@ -334,37 +362,21 @@ def _task_detail_page(
         """
     elif breakdown_state == "proposed" and proposal_titles:
         breakdown_body = f"""
-        <p class="readonly-note">Edit the set below before accepting. Use one task per line; remove, add, or reorder lines as needed.</p>
-        <form method="post" action="/tasks/{task_id}/breakdown/accept">
-          <input type="hidden" name="return_to" value="{return_to}">
-          <label>Proposed subtasks
-            <textarea class="breakdown-editor" name="titles" rows="{max(4, len(proposal_titles) + 1)}" required>{proposal_text}</textarea>
-          </label>
-          <div class="actions">
-            <button class="primary-button" type="submit">Accept Breakdown</button>
-            <button class="secondary-button" type="submit" formaction="/tasks/{task_id}/breakdown/cancel" formnovalidate>Cancel</button>
-          </div>
-        </form>
+        <p class="readonly-note">Review the proposed breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task before accepting.</p>
+        {_breakdown_list_editor_html(titles=proposal_titles, form_action=f"/tasks/{task_id}/breakdown/accept", return_to=return_to, submit_label="Accept Breakdown", cancel_action=f"/tasks/{task_id}/breakdown/cancel")}
         """
     elif breakdown_state == "accepted" or has_breakdown_children:
         children = list(task.get("breakdown_children") or [])
         completed_children = [c for c in children if c.get("is_done")]
         open_children = [c for c in children if not c.get("is_done") and c.get("is_open", True)]
-        open_text = html.escape("\n".join(str(c.get("title") or "").strip() for c in open_children))
         completed_html = ""
         if completed_children:
             items = "".join(f"<li>{html.escape(str(c.get('title') or ''))} <span class='optional'>(completed)</span></li>" for c in completed_children)
             completed_html = f"<p class='readonly-note'>Completed subtasks are preserved as history and are not removed by this editor.</p><ul>{items}</ul>"
         breakdown_body = f"""
-        <p class="readonly-note">Edit the open breakdown below. Use one task per line; rewrite, remove, add, or reorder lines, then save.</p>
+        <p class="readonly-note">Edit the open breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task.</p>
         {completed_html}
-        <form method="post" action="/tasks/{task_id}/breakdown/edit">
-          <input type="hidden" name="return_to" value="{return_to}">
-          <label>Open subtasks
-            <textarea class="breakdown-editor" name="titles" rows="{max(4, len(open_children)+1)}">{open_text}</textarea>
-          </label>
-          <div class="actions"><button class="primary-button" type="submit">Save Breakdown</button></div>
-        </form>
+        {_breakdown_list_editor_html(titles=[str(c.get("title") or "").strip() for c in open_children], form_action=f"/tasks/{task_id}/breakdown/edit", return_to=return_to, submit_label="Save Breakdown")}
         """
     else:
         state_note = ''
@@ -544,6 +556,17 @@ input:focus {{
   padding:0 16px; background:#fff; color:var(--navy); font:inherit; font-weight:750; cursor:pointer;
 }}
 .breakdown-editor {{ width:100%; margin-top:7px; min-height:86px; resize:vertical; }}
+.breakdown-list {{ display:grid; gap:10px; margin-top:12px; }}
+.breakdown-row {{ display:grid; grid-template-columns:42px minmax(0,1fr) 46px; gap:8px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:12px; background:#fff; }}
+.breakdown-row.dragging {{ opacity:.45; }}
+.breakdown-drag, .breakdown-trash, .breakdown-add {{ border:1px solid var(--border); background:#fff; color:var(--navy); font:inherit; font-weight:750; cursor:pointer; border-radius:10px; }}
+.breakdown-drag {{ height:42px; cursor:grab; font-size:22px; line-height:1; }}
+.breakdown-drag:active {{ cursor:grabbing; }}
+.breakdown-trash {{ height:42px; font-size:18px; }}
+.breakdown-add {{ min-height:42px; padding:0 14px; margin-top:12px; }}
+.breakdown-title {{ width:100%; min-height:42px; }}
+@media (max-width:640px) {{ .breakdown-row {{ grid-template-columns:38px minmax(0,1fr) 42px; padding:6px; }} }}
+
 .optional {{ color:var(--muted); font-weight:500; }}
 .breakdown-pending {{ display:flex; align-items:center; gap:10px; font-weight:750; color:var(--navy); }}
 .mini-spinner {{ width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--navy); border-radius:50%; animation:spin .8s linear infinite; }}
@@ -713,6 +736,17 @@ input:focus {{
     {breakdown_body}
   </section>
 </main>
+<script>
+function breakdownRow(title) {{
+  const row = document.createElement('div'); row.className='breakdown-row'; row.draggable=true;
+  row.innerHTML='<button class="breakdown-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><input class="breakdown-title" type="text" aria-label="Subtask title"><button class="breakdown-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>';
+  row.querySelector('.breakdown-title').value=title||''; wireBreakdownRow(row); return row;
+}}
+function wireBreakdownRow(row) {{ const trash=row.querySelector('.breakdown-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
+function addBreakdownRow(button) {{ const form=button.closest('form'), list=form.querySelector('[data-breakdown-list]'), row=breakdownRow(''); list.appendChild(row); row.querySelector('.breakdown-title').focus(); }}
+function syncBreakdownTitles(form) {{ const titles=Array.from(form.querySelectorAll('.breakdown-title')).map(i=>i.value.trim()).filter(Boolean); form.querySelector('input[name="titles"]').value=titles.join('\n'); return true; }}
+document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.breakdown-row').forEach(wireBreakdownRow); document.querySelectorAll('[data-breakdown-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{ e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.breakdown-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging); }}); }}); }});
+</script>
 </body>
 </html>"""
 
