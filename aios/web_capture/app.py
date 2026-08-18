@@ -133,6 +133,10 @@ def _snooze_task(task_id: str, preset: str, custom_date: str = "") -> dict:
     return response.json()
 
 
+class BreakdownActionError(RuntimeError):
+    pass
+
+
 def _breakdown_action(task_id: str, action: str, payload: dict | None = None) -> dict:
     api_url = _api_url()
     token = _identity_token(api_url)
@@ -146,9 +150,15 @@ def _breakdown_action(task_id: str, action: str, payload: dict | None = None) ->
         timeout=30,
     )
     if not response.ok:
-        raise RuntimeError(
-            f"AIOS API returned {response.status_code}: {response.text}"
-        )
+        detail = "Breakdown request could not be saved."
+        try:
+            body = response.json()
+            candidate = str(body.get("detail") or "").strip() if isinstance(body, dict) else ""
+            if candidate:
+                detail = candidate
+        except Exception:
+            pass
+        raise BreakdownActionError(detail)
     return response.json()
 
 
@@ -307,6 +317,7 @@ def _task_detail_page(
     project_id = html.escape(str(task.get("project_id") or "—"))
 
     breakdown_state = str(task.get("breakdown_state") or "").strip()
+    has_breakdown_children = bool(task.get("has_breakdown_children"))
     breakdown_context = html.escape(str(task.get("breakdown_request_context") or ""))
     raw_proposal = task.get("breakdown_proposal") or []
     proposal_titles = [
@@ -335,8 +346,8 @@ def _task_detail_page(
           </div>
         </form>
         """
-    elif breakdown_state == "accepted":
-        breakdown_body = '<p class="readonly-note">This task has been broken into ordered subtasks. The parent now acts as the container for that work.</p>'
+    elif breakdown_state == "accepted" or has_breakdown_children:
+        breakdown_body = '<p class="readonly-note">This task already has breakdown subtasks. Edit or act on those subtasks rather than generating another breakdown.</p>'
     else:
         state_note = ''
         if breakdown_state == "no_proposal":
@@ -4791,9 +4802,15 @@ def request_breakdown_web(
             url=f"/tasks/{task_id}?return_to={_safe_return_to(return_to)}#breakdown",
             status_code=303,
         )
+    except BreakdownActionError as exc:
+        error_text = quote(str(exc), safe="")
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?error={error_text}&return_to={_safe_return_to(return_to)}#breakdown",
+            status_code=303,
+        )
     except Exception:
         return RedirectResponse(
-            url=f"/tasks/{task_id}?error=Breakdown+could+not+be+requested.&return_to={_safe_return_to(return_to)}#breakdown",
+            url=f"/tasks/{task_id}?error=Breakdown+request+could+not+reach+AIOS.&return_to={_safe_return_to(return_to)}#breakdown",
             status_code=303,
         )
 

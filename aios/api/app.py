@@ -814,6 +814,18 @@ def get_task_detail_http(task_id: str) -> dict:
     task["execution_rank"] = state.get("execution_rank")
     task["best_next_action"] = bool(state.get("best_next_action", False))
     task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
+
+    child_rows = (
+        _store().client.table("tasks")
+        .select("id")
+        .eq("parent_task_id", task_id)
+        .eq("is_archived", False)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    task["has_breakdown_children"] = bool(child_rows)
     return {"task": task}
 
 
