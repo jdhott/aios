@@ -746,7 +746,7 @@ function wireBreakdownRow(row) {{ const trash=row.querySelector('.breakdown-tras
 function addBreakdownRow(button) {{ const form=button.closest('form'), list=form.querySelector('[data-breakdown-list]'), row=breakdownRow(''); list.appendChild(row); row.querySelector('.breakdown-title').focus(); }}
 function syncBreakdownTitles(form) {{ const titles=Array.from(form.querySelectorAll('.breakdown-title')).map(i=>i.value.trim()).filter(Boolean); form.querySelector('input[name="titles"]').value=titles.join('\\n'); return true; }}
 function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
-function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input class="project-editor-title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
+function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
 function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 
@@ -1343,7 +1343,8 @@ def _project_detail_page(
             '<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button>'
             f'<button class="complete-checkbox" type="submit" form="{form_id}" aria-label="Mark task done" title="Mark done"><span aria-hidden="true"></span></button>'
             '<div class="project-editor-main">'
-            f'<input class="project-editor-title" type="text" value="{title}" aria-label="Task title">'
+            f'<input type="hidden" name="task_id" value="{task_id}">'
+            f'<input class="project-editor-title" name="task_title" type="text" value="{title}" aria-label="Task title">'
             f'<div class="task-meta">{" · ".join(meta)}</div>'
             '</div>'
             f'<a class="project-task-open" href="/tasks/{task_id}?return_to={project_return}" title="Open task">Details</a>'
@@ -1853,8 +1854,7 @@ h1 {{
     <h2>Project tasks</h2>
     <p class="proposal-note">Drag to set the project sequence, edit titles inline, remove tasks, or add work. Completion remains immediate; structural changes are saved together.</p>
     {completion_forms}
-    <form method="post" action="/projects/{project_id}/tasks" onsubmit="return syncProjectTasks(this)">
-      <input type="hidden" name="tasks_json" value="[]">
+    <form method="post" action="/projects/{project_id}/tasks">
       <div class="project-editor-list" data-project-task-list>{task_rows}</div>
       <div class="project-editor-actions">
         <button class="project-add-task" type="button" onclick="addProjectTaskRow(this)">+ Add task</button>
@@ -1865,7 +1865,7 @@ h1 {{
 </main>
 <script>
 function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
-function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input class="project-editor-title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
+function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
 function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
@@ -4544,13 +4544,19 @@ def clarification_use_web(
 def update_project_tasks_web(
     project_id: str,
     _user: Annotated[str, Depends(_check_basic_auth)],
-    tasks_json: Annotated[str, Form()] = "[]",
+    task_id: Annotated[list[str] | None, Form()] = None,
+    task_title: Annotated[list[str] | None, Form()] = None,
 ):
     try:
-        parsed = json.loads(tasks_json or "[]")
-        if not isinstance(parsed, list):
+        ids = list(task_id or [])
+        titles = list(task_title or [])
+        if len(ids) != len(titles):
             raise ValueError("Invalid project task list")
-        tasks = [{"id": item.get("id"), "title": str(item.get("title") or "").strip()} for item in parsed if isinstance(item, dict) and str(item.get("title") or "").strip()]
+        tasks = [
+            {"id": (raw_id.strip() or None), "title": raw_title.strip()}
+            for raw_id, raw_title in zip(ids, titles)
+            if raw_title.strip()
+        ]
         _update_project_tasks(project_id, tasks)
         return RedirectResponse(url=f"/projects/{project_id}?message=Project+tasks+saved.#project-tasks", status_code=303)
     except Exception as exc:

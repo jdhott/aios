@@ -1685,6 +1685,7 @@ def update_project_task_list_http(project_id: str, request: ProjectTaskListUpdat
         if task_id:
             result = store.client.table("tasks").update({"title": title, "project_order": order, "updated_at": now}).eq("id", task_id).execute()
             rows = result.data or []
+            verify = store.client.table("tasks").select("id,title,project_order,updated_at").eq("id", task_id).limit(1).execute().data or []
             if rows:
                 saved.append(dict(rows[0]))
         else:
