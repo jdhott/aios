@@ -36,7 +36,7 @@ def validate_job_environment() -> JobSettings:
             )
 
     return JobSettings(
-        datastore=datastore or "notion",
-        inbox_source=inbox_source or "notion",
+        datastore=datastore or "supabase",
+        inbox_source=inbox_source or "supabase",
         environment=environment,
     )

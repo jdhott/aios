@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aios.ingestion.models import InboxItem
+import requests
 from aios.ingestion.source import InboxSource
 
 def configure_notion_source(namespace):
@@ -14,8 +15,17 @@ class NotionInboxSource:
         return extract_brain_dump_items(self.page_id)
 
     def remove_item(self, item: InboxItem) -> None:
-        """Remove the processed source block from the Notion Brain Dump."""
-        delete_original_block(item.source_item_id)
+        """Remove a processed source block from the optional Notion capture surface."""
+        response = requests.patch(
+            f"https://api.notion.com/v1/blocks/{item.source_item_id}",
+            headers=headers,
+            json={"archived": True},
+            timeout=30,
+        )
+        if not response.ok:
+            raise RuntimeError(
+                f"Notion inbox source cleanup failed: {response.status_code} {response.text}"
+            )
 
 def find_first_synced_block(parent_block_id):
     """Return the synced block that actually contains Brain Dump task items.
