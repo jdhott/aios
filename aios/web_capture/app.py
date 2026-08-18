@@ -3396,6 +3396,16 @@ def _page(
     )
 
     if refresh_pending:
+        focus_parent_meta = ""
+        focus_parent_id = str(focus.get("parent_task_id") or "").strip()
+        focus_parent_title = str(focus.get("parent_title") or "").strip()
+        if focus_parent_id and focus_parent_title:
+            focus_parent_meta = (
+                '<div class="focus-parent-meta">Part of: '
+                f'<a href="/tasks/{html.escape(focus_parent_id, quote=True)}">{html.escape(focus_parent_title)}</a>'
+                '</div>'
+            )
+
         focus_card = (
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
@@ -3492,7 +3502,8 @@ def _page(
             '</form>'
             '<div class="focus-main">'
             f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
-            f'<div class="focus-meta">{" · ".join(meta)}</div>'
+            + focus_parent_meta
+            + f'<div class="focus-meta">{" · ".join(meta)}</div>'
             '<div class="focus-parent-actions">'
             '<details class="focus-snooze">'
             '<summary>Snooze</summary>'
@@ -3651,7 +3662,9 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
     .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
     .focus-main {{ min-width:0; }}
-    .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.25rem; line-height:1.3; font-weight:850; }}
+    .focus-title {{ color:var(--ink); text-decoration:none; font-size:1.08rem; line-height:1.28; font-weight:850; }}
+    .focus-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; line-height:1.35; }}
+    .focus-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
     .focus-title:hover {{ text-decoration:underline; }}
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
     .focus-parent-actions {{ display:flex; gap:10px; margin-top:9px; }}

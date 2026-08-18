@@ -974,6 +974,19 @@ def get_task_detail_http(task_id: str) -> dict:
     task["execution_score"] = state.get("execution_score")
     task["execution_rank"] = state.get("execution_rank")
     task["best_next_action"] = bool(state.get("best_next_action", False))
+
+    # Preserve breakdown context when a child task becomes the BNA.
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    task["parent_title"] = None
+    if parent_id:
+        try:
+            parent_rows = (store.client.table("tasks")
+                .select("id,title")
+                .eq("id", parent_id).limit(1).execute().data or [])
+            if parent_rows:
+                task["parent_title"] = str(parent_rows[0].get("title") or "").strip() or None
+        except Exception:
+            task["parent_title"] = None
     task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
 
     child_rows = (
@@ -2038,7 +2051,7 @@ def get_dashboard_focus_http() -> dict:
         if not candidate_id:
             continue
         tasks = (store.client.table("tasks")
-            .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
+            .select("id,title,status,due_at,defer_until,importance,urgency,effort,duration,project_id,parent_task_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
             .eq("id", candidate_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
             .limit(1).execute().data or [])
         if not tasks:
