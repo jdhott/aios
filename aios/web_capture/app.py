@@ -3479,13 +3479,17 @@ def _page(
         else {}
     )
     activation_id = str(activation.get("id") or "")
+    activation_history_exists = bool(
+        focus.get("activation_history_exists")
+        if focus
+        else False
+    )
+    # refresh_focus is transient UI state. Historical activation rows are not
+    # proof that generation is still running. If no replacement appears, the
+    # bounded refresh loop below resolves back to the BNA without START HERE.
     refresh_pending = bool(
         refresh_focus
-        and (
-            not focus
-            or bool(focus.get("activation_pending"))
-            or not activation_id
-        )
+        and (not focus or not activation_id)
     )
 
     focus_parent_meta = ""
@@ -3523,7 +3527,7 @@ def _page(
         # guidance while the processor is generating the next activation.
         if activation_title:
             starter = activation_title
-        elif activation_pending:
+        elif activation_pending or activation_history_exists:
             starter = ""
         else:
             starter = str(
@@ -3550,7 +3554,7 @@ def _page(
                 '<div class="focus-start">'
                 '<div class="focus-start-label">Start here</div>'
                 '<div class="focus-pending">'
-                'Finding your next step…'
+                '<span class="mini-spinner"></span> Finding your next step…'
                 '</div>'
                 '</div>'
             )
@@ -3647,10 +3651,19 @@ function showFocusUpdating() {
 (() => {
   const key = "aios-focus-activation-refresh-count";
   const count = Number(sessionStorage.getItem(key) || "0");
-  if (count < 10) {
+  if (count < 15) {
     sessionStorage.setItem(key, String(count + 1));
     setTimeout(() => window.location.reload(), 2000);
+    return;
   }
+
+  sessionStorage.removeItem(key);
+  const url = new URL(window.location.href);
+  url.searchParams.delete("refresh_focus");
+  url.searchParams.delete("message");
+  window.location.replace(
+    url.pathname + (url.search ? url.search : "") + "#focus-card"
+  );
 })();
 </script>
 """
@@ -4053,7 +4066,11 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
           event.preventDefault();
           if (button.dataset.submitting === "1") return;
           button.dataset.submitting = "1";
-          saveScroll();
+          if (form.closest(".focus-card")) {{
+            sessionStorage.removeItem(scrollKey);
+          }} else {{
+            saveScroll();
+          }}
           button.classList.add("is-completing");
           button.setAttribute("aria-label", "Task completed");
           window.setTimeout(() => form.submit(), 180);
@@ -4061,7 +4078,23 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       }});
 
       document.querySelectorAll(".delete-form").forEach((form) => {{
-        form.addEventListener("submit", () => saveScroll());
+        form.addEventListener("submit", () => {{
+          if (form.closest(".focus-card")) {{
+            sessionStorage.removeItem(scrollKey);
+          }} else {{
+            saveScroll();
+          }}
+        }});
+      }});
+
+      document.querySelectorAll(".task-snooze-menu form").forEach((form) => {{
+        form.addEventListener("submit", () => {{
+          if (form.closest(".focus-card")) {{
+            sessionStorage.removeItem(scrollKey);
+          }} else {{
+            saveScroll();
+          }}
+        }});
       }});
 
       const brainDump = document.getElementById("brainDumpText");

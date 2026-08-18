@@ -2105,17 +2105,23 @@ def get_dashboard_focus_http() -> dict:
 
         if activation:
             task["activation_pending"] = False
+            task["activation_history_exists"] = True
         else:
             activation_history = list_focus_activation_children(
                 _store(),
                 task_id,
             )
-            task["activation_pending"] = bool(
-                activation_history
-            )
+            # Historical activation rows are not evidence that generation is
+            # still in progress.  A completed/rejected child can otherwise
+            # leave the dashboard pending forever when no replacement child
+            # is generated.  The web refresh loop owns the transient pending
+            # presentation; this flag only describes durable state.
+            task["activation_pending"] = False
+            task["activation_history_exists"] = bool(activation_history)
     except Exception:
         task["activation"] = None
         task["activation_pending"] = False
+        task["activation_history_exists"] = False
 
     return {"focus": task}
 
