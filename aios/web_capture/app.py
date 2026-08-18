@@ -1863,6 +1863,13 @@ h1 {{
     </form>
   </section>
 </main>
+<script>
+function wireProjectTaskRow(row) {{ const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
+function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input class="project-editor-title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
+function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
+function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{return {{id:row.dataset.taskId||null,title:row.querySelector('.project-editor-title').value.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
+document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
+</script>
 {pending_refresh_script}
 </body>
 </html>"""
