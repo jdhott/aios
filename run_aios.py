@@ -3983,11 +3983,13 @@ def ask_ai_breakdown_decision(title):
 
 Return exactly one word: yes or no.
 
-Use yes only when ALL are true:
-- The task is too broad to execute effectively as one task.
+Use yes only in the exceptional case where ALL are true:
+- The title itself establishes that the task is too broad to execute effectively as one task.
+- The title itself contains enough scope or structure to infer meaningful steps without guessing the user's situation.
 - Breaking it down would materially reduce thinking load or make execution clearer.
-- You have reasonable confidence in the task domain and the likely meaningful steps.
-- You can identify at least two distinct useful steps without inventing details.
+- You have high confidence in the domain and in at least two distinct, non-generic steps.
+
+A broad verb such as plan, organize, prepare, research, develop, design, or build is NOT evidence by itself. If useful steps depend on facts not present in the title, return no and leave manual breakdown to the user.
 
 Use no when ANY are true:
 - The task is already actionable enough to start and meaningfully advance as written.
@@ -4009,9 +4011,15 @@ Task: Create first draft label in Canva
 Decision: no
 
 Task: Plan summer trip
-Decision: yes
+Decision: no
 
-Task: Conduct photo shoot for Khorasan focaccia recipe
+Task: Prepare the backyard for winter
+Decision: no
+
+Task: Organize paperwork for the insurance claim
+Decision: no
+
+Task: Migrate customer database from Airtable to Supabase and verify all records
 Decision: yes
 
 Task: {title}

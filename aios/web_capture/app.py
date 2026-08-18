@@ -347,7 +347,25 @@ def _task_detail_page(
         </form>
         """
     elif breakdown_state == "accepted" or has_breakdown_children:
-        breakdown_body = '<p class="readonly-note">This task already has breakdown subtasks. Edit or act on those subtasks rather than generating another breakdown.</p>'
+        children = list(task.get("breakdown_children") or [])
+        completed_children = [c for c in children if c.get("is_done")]
+        open_children = [c for c in children if not c.get("is_done") and c.get("is_open", True)]
+        open_text = html.escape("\n".join(str(c.get("title") or "").strip() for c in open_children))
+        completed_html = ""
+        if completed_children:
+            items = "".join(f"<li>{html.escape(str(c.get('title') or ''))} <span class='optional'>(completed)</span></li>" for c in completed_children)
+            completed_html = f"<p class='readonly-note'>Completed subtasks are preserved as history and are not removed by this editor.</p><ul>{items}</ul>"
+        breakdown_body = f"""
+        <p class="readonly-note">Edit the open breakdown below. Use one task per line; rewrite, remove, add, or reorder lines, then save.</p>
+        {completed_html}
+        <form method="post" action="/tasks/{task_id}/breakdown/edit">
+          <input type="hidden" name="return_to" value="{return_to}">
+          <label>Open subtasks
+            <textarea class="breakdown-editor" name="titles" rows="{max(4, len(open_children)+1)}">{open_text}</textarea>
+          </label>
+          <div class="actions"><button class="primary-button" type="submit">Save Breakdown</button></div>
+        </form>
+        """
     else:
         state_note = ''
         if breakdown_state == "no_proposal":
@@ -3247,7 +3265,7 @@ def _page(
         focus_card = (
             '<section class="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
-            '<div class="focus-pending">Updating your focus…</div>'
+            '<div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>'
             '</section>'
         )
 
@@ -4834,6 +4852,22 @@ def accept_breakdown_web(
             url=f"/tasks/{task_id}?error=Breakdown+could+not+be+created.&return_to={_safe_return_to(return_to)}#breakdown",
             status_code=303,
         )
+
+
+@app.post("/tasks/{task_id}/breakdown/edit")
+def edit_breakdown_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    titles: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/",
+):
+    items = [line.strip() for line in titles.splitlines() if line.strip()]
+    try:
+        _breakdown_action(task_id, "edit", {"titles": items})
+        return RedirectResponse(url=f"/tasks/{task_id}?message=Breakdown+updated.&return_to={_safe_return_to(return_to)}#breakdown", status_code=303)
+    except BreakdownActionError as exc:
+        from urllib.parse import quote_plus
+        return RedirectResponse(url=f"/tasks/{task_id}?error={quote_plus(str(exc))}&return_to={_safe_return_to(return_to)}#breakdown", status_code=303)
 
 
 @app.post("/tasks/{task_id}/breakdown/cancel")

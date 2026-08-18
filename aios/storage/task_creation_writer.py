@@ -382,6 +382,50 @@ class SupabasePrimaryTaskHierarchyCreator:
             raise
 
 
+    def edit_children_for_existing_parent(
+        self, *, parent_task_id: str, subtasks: list[str],
+    ) -> list[dict[str, Any]]:
+        """Replace the editable/open portion of an existing breakdown.
+
+        Completed children are durable history and are never removed here.
+        Open children are reused where possible, extras are archived, and new
+        rows are created only when the edited set is longer.
+        """
+        parent_rows = (self.store.client.table("tasks")
+            .select("id,is_open,is_done,is_archived,is_just_do_it,urgency,due_at,suggested_project,project_id")
+            .eq("id", parent_task_id).limit(1).execute().data or [])
+        if not parent_rows:
+            raise RuntimeError("Breakdown parent task was not found.")
+        parent = dict(parent_rows[0])
+        if parent.get("is_done") or parent.get("is_archived") or not parent.get("is_open"):
+            raise RuntimeError("Closed tasks cannot have their breakdown edited.")
+        children = (self.store.client.table("tasks")
+            .select("id,title,is_done,is_open,is_archived,step_order")
+            .eq("parent_task_id", parent_task_id).eq("is_archived", False)
+            .order("step_order").execute().data or [])
+        completed = [dict(x) for x in children if x.get("is_done")]
+        editable = [dict(x) for x in children if not x.get("is_done") and x.get("is_open", True)]
+        titles = [str(x or "").strip() for x in subtasks if str(x or "").strip()]
+        if not titles and not completed:
+            raise ValueError("Keep at least one breakdown task.")
+        occupied = {int(x.get("step_order")) for x in completed if x.get("step_order") is not None}
+        available_orders=[]; n=1
+        while len(available_orders) < len(titles):
+            if n not in occupied: available_orders.append(n)
+            n += 1
+        for idx, title in enumerate(titles):
+            order=available_orders[idx]
+            if idx < len(editable):
+                self.store.client.table("tasks").update({"title":title,"step_order":order}).eq("id", editable[idx]["id"]).execute()
+            else:
+                row=self._insert_task(title=title,is_jdi=bool(parent.get("is_just_do_it")),is_urgent=parent.get("urgency")=="High Urgency",is_important=False,due_date=None,manual_project=str(parent.get("suggested_project") or ""),parent_task_id=parent_task_id,step_order=order,project_id=(str(parent.get("project_id")) if parent.get("project_id") else None))
+                if parent.get("due_at"):
+                    self.store.client.table("tasks").update({"due_at":parent.get("due_at")}).eq("id",row["id"]).execute()
+        for child in editable[len(titles):]:
+            self.store.client.table("tasks").update({"is_archived":True,"is_open":False}).eq("id",child["id"]).execute()
+        return children
+
+
 _HIERARCHY_CREATOR: SupabasePrimaryTaskHierarchyCreator | None = None
 
 
@@ -437,3 +481,13 @@ def create_supabase_children_for_existing_parent(
         parent_task_id=parent_task_id,
         subtasks=cleaned[:5],
     )
+
+
+def edit_supabase_children_for_existing_parent(*, parent_task_id: str, subtasks: list[str]) -> list[dict[str, Any]]:
+    global _HIERARCHY_CREATOR
+    if _HIERARCHY_CREATOR is None:
+        _HIERARCHY_CREATOR = SupabasePrimaryTaskHierarchyCreator()
+    cleaned = [str(item or "").strip() for item in subtasks if str(item or "").strip()]
+    if len(cleaned) > 8:
+        raise ValueError("Breakdown supports at most eight open tasks while editing.")
+    return _HIERARCHY_CREATOR.edit_children_for_existing_parent(parent_task_id=parent_task_id, subtasks=cleaned)

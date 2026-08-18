@@ -34,7 +34,10 @@ from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
 from aios.project_work import create_supabase_project_task
-from aios.storage.task_creation_writer import create_supabase_children_for_existing_parent
+from aios.storage.task_creation_writer import (
+    create_supabase_children_for_existing_parent,
+    edit_supabase_children_for_existing_parent,
+)
 from aios.project_work_proposals import (
     accept_project_work_proposal,
     dismiss_project_work_proposal,
@@ -689,10 +692,10 @@ def request_manual_breakdown_http(
 
     child_rows = (
         store.client.table("tasks")
-        .select("id")
+        .select("id,title,is_open,is_done,is_archived,step_order")
         .eq("parent_task_id", task_id)
         .eq("is_archived", False)
-        .limit(1)
+        .order("step_order")
         .execute().data
         or []
     )
@@ -752,6 +755,20 @@ def accept_manual_breakdown_http(
     except Exception:
         pass
     return {"id": task_id, "accepted": True, "children_created": len(pages)}
+
+
+@app.post("/tasks/{task_id}/breakdown/edit", tags=["tasks"])
+def edit_existing_breakdown_http(task_id: str, request: ManualBreakdownAcceptRequest) -> dict:
+    titles = [str(item or "").strip() for item in request.titles if str(item or "").strip()]
+    try:
+        edit_supabase_children_for_existing_parent(parent_task_id=task_id, subtasks=titles)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        _request_processor_run()
+    except Exception:
+        pass
+    return {"id": task_id, "edited": True, "open_children": len(titles)}
 
 
 @app.post("/tasks/{task_id}/breakdown/cancel", tags=["tasks"])
@@ -817,15 +834,16 @@ def get_task_detail_http(task_id: str) -> dict:
 
     child_rows = (
         _store().client.table("tasks")
-        .select("id")
+        .select("id,title,is_open,is_done,is_archived,step_order")
         .eq("parent_task_id", task_id)
         .eq("is_archived", False)
-        .limit(1)
+        .order("step_order")
         .execute()
         .data
         or []
     )
     task["has_breakdown_children"] = bool(child_rows)
+    task["breakdown_children"] = [dict(row) for row in child_rows]
     return {"task": task}
 
 
