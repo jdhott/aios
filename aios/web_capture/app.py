@@ -737,6 +737,20 @@ def _request_project_work_generation(
     return dict(response.json() or {})
 
 
+def _project_work_dialogue_action(project_id: str, action: str, payload: dict) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+    response = requests.post(
+        f"{api_url}/projects/{project_id}/work-proposals/{action}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return dict(response.json() or {})
+
+
 def _project_lifecycle_action(
     project_id: str,
     action: str,
@@ -1133,6 +1147,8 @@ def _project_detail_page(
     work_generation_state = str(
         project.get("work_generation_state") or ""
     ).strip().lower()
+    work_generation_question = str(project.get("work_generation_question") or "").strip()
+    work_generation_context_update = str(project.get("work_generation_context_update") or "").strip()
 
     task_rows = ""
     for task in tasks:
@@ -1242,7 +1258,7 @@ def _project_detail_page(
 
     proposal_pending = bool(
         refresh_proposal
-        and work_generation_state == "pending"
+        and work_generation_state in {"pending", "answer_pending"}
     )
 
     pending_html = (
@@ -1264,7 +1280,25 @@ def _project_detail_page(
 
     generation_result_html = ""
     if refresh_proposal and not work_proposals:
-        if work_generation_state == "waiting":
+        if work_generation_state == "clarification" and work_generation_question:
+            generation_result_html = (
+                '<section class="proposal-card"><h2>AIOS needs one thing from you</h2>'
+                f'<p class="proposal-note"><strong>{html.escape(work_generation_question)}</strong></p>'
+                f'<form method="post" action="/projects/{project_id}/work-proposals/answer">'
+                '<textarea name="answer" required placeholder="Your answer"></textarea>'
+                '<div class="context-actions"><button class="context-save" type="submit">Continue</button></div></form></section>'
+            )
+        elif work_generation_state == "answer_pending":
+            generation_result_html = '<section class="proposal-card"><h2>Suggested project work</h2><p class="proposal-note">AIOS is turning your answer into reusable project context…</p></section>'
+        elif work_generation_state == "context_review" and work_generation_context_update:
+            generation_result_html = (
+                '<section class="proposal-card"><h2>Add to Project Context</h2>'
+                '<p class="proposal-note">AIOS summarized your answer into durable project knowledge. Edit it if needed before saving.</p>'
+                f'<form method="post" action="/projects/{project_id}/work-proposals/context">'
+                f'<textarea name="context_update" required>{html.escape(work_generation_context_update)}</textarea>'
+                '<div class="context-actions"><button class="context-save" type="submit">Add &amp; Continue</button></div></form></section>'
+            )
+        elif work_generation_state == "waiting":
             generation_result_html = (
                 '<section class="proposal-card">'
                 '<h2>Suggested project work</h2>'
@@ -4371,6 +4405,25 @@ def generate_project_work_web(
             status_code=303,
         )
 
+
+
+@app.post("/projects/{project_id}/work-proposals/answer")
+def answer_project_work_question_web(project_id: str, _user: Annotated[str, Depends(_check_basic_auth)], answer: Annotated[str, Form()] = ""):
+    try:
+        _project_work_dialogue_action(project_id, "answer", {"answer": answer.strip()})
+        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1", status_code=303)
+    except Exception as exc:
+        print("[Project Work] Answer failed:", exc)
+        return RedirectResponse(url=f"/projects/{project_id}?error=Project+work+answer+could+not+be+saved.", status_code=303)
+
+@app.post("/projects/{project_id}/work-proposals/context")
+def accept_project_work_context_web(project_id: str, _user: Annotated[str, Depends(_check_basic_auth)], context_update: Annotated[str, Form()] = ""):
+    try:
+        _project_work_dialogue_action(project_id, "context", {"context_update": context_update.strip()})
+        return RedirectResponse(url=f"/projects/{project_id}?refresh_proposal=1", status_code=303)
+    except Exception as exc:
+        print("[Project Work] Context continuation failed:", exc)
+        return RedirectResponse(url=f"/projects/{project_id}?error=Project+context+could+not+be+added.", status_code=303)
 
 @app.post(
     "/projects/{project_id}/work-proposals/{proposal_id}/accept"

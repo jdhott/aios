@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aios.focus_activation import list_focus_activation_children
-from aios.project_work import generate_project_work
+from aios.project_work import generate_project_work, summarize_project_work_answer
 from aios.project_work_proposals import (
     list_project_work_feedback,
     replace_project_work_proposals,
@@ -16,6 +16,9 @@ MANUAL_STATE_PENDING = "pending"
 MANUAL_STATE_ACTIONABLE = "actionable"
 MANUAL_STATE_WAITING = "waiting"
 MANUAL_STATE_FAILED = "failed"
+MANUAL_STATE_CLARIFICATION = "clarification"
+MANUAL_STATE_ANSWER_PENDING = "answer_pending"
+MANUAL_STATE_CONTEXT_REVIEW = "context_review"
 
 
 def _manual_generation_requested(project: dict[str, Any]) -> bool:
@@ -70,7 +73,8 @@ def refresh_project_work_proposals(
         .select(
             "id,name,status,is_active,outcome,context,"
             "work_generation_requested_at,work_generation_completed_at,"
-            "work_generation_state"
+            "work_generation_state,work_generation_question,work_generation_answer,"
+            "work_generation_context_update,work_generation_round"
         )
         .eq("is_active", True)
         .execute()
@@ -86,6 +90,25 @@ def refresh_project_work_proposals(
         manual_requested = _manual_generation_requested(project)
 
         if not project_id or not project_name:
+            continue
+
+        generation_state = str(project.get("work_generation_state") or "").strip().lower()
+        if generation_state == MANUAL_STATE_ANSWER_PENDING:
+            summary = summarize_project_work_answer(
+                client,
+                project_context=str(project.get("context") or ""),
+                question=str(project.get("work_generation_question") or ""),
+                answer=str(project.get("work_generation_answer") or ""),
+            )
+            if summary:
+                (store.client.table("projects").update({
+                    "work_generation_context_update": summary,
+                    "work_generation_state": MANUAL_STATE_CONTEXT_REVIEW,
+                    "work_generation_completed_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", project_id).execute())
+                results.append({"project_id": project_id, "project_name": project_name, "state": MANUAL_STATE_CONTEXT_REVIEW, "proposals": [], "manual": True})
+            else:
+                _finish_manual_generation(store, project_id, MANUAL_STATE_FAILED)
             continue
 
         task_rows = (
@@ -190,6 +213,8 @@ def refresh_project_work_proposals(
             open_work=open_work,
             completed_activation_steps=completed_activation_steps,
             proposal_feedback=proposal_feedback,
+            clarification_round=int(project.get("work_generation_round") or 0),
+            allow_clarification=manual_requested,
         )
 
         titles: list[str] = []
@@ -198,6 +223,22 @@ def refresh_project_work_proposals(
             if generated
             else MANUAL_STATE_FAILED
         )
+
+        if generated_state == MANUAL_STATE_CLARIFICATION and manual_requested:
+            question = str(generated.get("question") or "").strip()
+            if question:
+                next_round = int(project.get("work_generation_round") or 0) + 1
+                (store.client.table("projects").update({
+                    "work_generation_state": MANUAL_STATE_CLARIFICATION,
+                    "work_generation_question": question,
+                    "work_generation_answer": None,
+                    "work_generation_context_update": None,
+                    "work_generation_round": next_round,
+                    "work_generation_completed_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", project_id).execute())
+                results.append({"project_id": project_id, "project_name": project_name, "state": MANUAL_STATE_CLARIFICATION, "proposals": [], "manual": True})
+                continue
+            generated_state = MANUAL_STATE_WAITING
 
         if generated_state == MANUAL_STATE_ACTIONABLE:
             titles = [

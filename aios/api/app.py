@@ -1232,6 +1232,10 @@ def request_project_work_generation_http(
             "work_generation_requested_at": now,
             "work_generation_completed_at": None,
             "work_generation_state": "pending",
+            "work_generation_question": None,
+            "work_generation_answer": None,
+            "work_generation_context_update": None,
+            "work_generation_round": 0,
         })
         .eq("id", project_id)
         .execute()
@@ -1251,6 +1255,39 @@ def request_project_work_generation_http(
         "state": "pending",
     }
 
+
+
+class ProjectWorkAnswerRequest(BaseModel):
+    answer: str
+
+class ProjectWorkContextRequest(BaseModel):
+    context_update: str
+
+@app.post("/projects/{project_id}/work-proposals/answer", tags=["projects"])
+def answer_project_work_question_http(project_id: str, payload: ProjectWorkAnswerRequest, background_tasks: BackgroundTasks) -> dict:
+    answer = str(payload.answer or "").strip()
+    if not answer:
+        raise HTTPException(status_code=400, detail="Answer is required")
+    rows = (_store().client.table("projects").select("id,work_generation_state").eq("id", project_id).limit(1).execute().data or [])
+    if not rows or str(rows[0].get("work_generation_state") or "") != "clarification":
+        raise HTTPException(status_code=409, detail="Project is not awaiting a Project Work answer")
+    _store().client.table("projects").update({"work_generation_answer": answer, "work_generation_state": "answer_pending", "work_generation_completed_at": None}).eq("id", project_id).execute()
+    background_tasks.add_task(_request_processor_run)
+    return {"accepted": True, "state": "answer_pending"}
+
+@app.post("/projects/{project_id}/work-proposals/context", tags=["projects"])
+def accept_project_work_context_http(project_id: str, payload: ProjectWorkContextRequest, background_tasks: BackgroundTasks) -> dict:
+    update = str(payload.context_update or "").strip()
+    if not update:
+        raise HTTPException(status_code=400, detail="Context update is required")
+    rows = (_store().client.table("projects").select("id,context,work_generation_state").eq("id", project_id).limit(1).execute().data or [])
+    if not rows or str(rows[0].get("work_generation_state") or "") != "context_review":
+        raise HTTPException(status_code=409, detail="Project context update is not awaiting review")
+    existing = str(rows[0].get("context") or "").strip()
+    merged = (existing + "\n" + update).strip() if existing else update
+    _store().client.table("projects").update({"context": merged, "work_generation_state": "pending", "work_generation_requested_at": datetime.now(timezone.utc).isoformat(), "work_generation_completed_at": None, "work_generation_question": None, "work_generation_answer": None, "work_generation_context_update": None}).eq("id", project_id).execute()
+    background_tasks.add_task(_request_processor_run)
+    return {"accepted": True, "state": "pending", "context": merged}
 
 @app.post(
     "/projects/{project_id}/work-proposals/{proposal_id}/dismiss",
@@ -1544,6 +1581,9 @@ def get_project_detail_http(project_id: str) -> dict:
             "work_generation_requested_at": project_row.get("work_generation_requested_at"),
             "work_generation_completed_at": project_row.get("work_generation_completed_at"),
             "work_generation_state": project_row.get("work_generation_state"),
+            "work_generation_question": project_row.get("work_generation_question"),
+            "work_generation_context_update": project_row.get("work_generation_context_update"),
+            "work_generation_round": project_row.get("work_generation_round"),
         },
         "tasks": tasks,
         "work_proposals": [

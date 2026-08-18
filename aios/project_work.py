@@ -117,6 +117,8 @@ def generate_project_work(
     open_work: list[str] | None = None,
     completed_activation_steps: list[str] | None = None,
     proposal_feedback: list[dict[str, Any]] | None = None,
+    clarification_round: int = 0,
+    allow_clarification: bool = False,
 ) -> dict[str, Any] | None:
     """
     Propose genuine executable project work.
@@ -126,6 +128,7 @@ def generate_project_work(
     Valid results:
       {"state": "actionable", "tasks": [{"title": "..."}]}
       {"state": "waiting", "tasks": []}
+      {"state": "clarification", "question": "...", "tasks": []}
 
     AI/parsing failures return None.
     """
@@ -261,6 +264,13 @@ or
 
 {{"state":"waiting","tasks":[]}}
 
+or, only when clarification is allowed and one answer would materially change the work you propose:
+
+{{"state":"clarification","question":"...","tasks":[]}}
+
+Clarification available: {allow_clarification and clarification_round < 2}
+Clarification round already used: {clarification_round} of 2
+
 Rules:
 - Treat the Known project context as authoritative facts, decisions, and constraints.
 - The most recent User correction is binding. The replacement must directly fix the specific problems the user identified.
@@ -273,7 +283,9 @@ Rules:
 - Do not infer that a project needs common optional elements such as decorations, entertainment, catering, gifts, seating plans, themes, or supplies unless the Known project context supports them.
 - A task is executable now only if all information required to start and meaningfully advance it is already available. Do not propose work that depends on pending RSVPs, unknown preferences, final headcounts, future replies, or other unresolved information.
 - Prefer tasks that follow directly from known facts or unfinished decisions in the Known project context.
-- If the Known project context and work history do not establish enough remaining executable work, return a waiting state rather than inventing conventional project tasks.
+- If one specific missing fact would materially change what useful work should be proposed, and clarification is available, ask ONE targeted question instead of guessing.
+- Ask only about information that is genuinely consequential to identifying missing work; do not conduct a general project interview.
+- If clarification is unavailable or no targeted question would help, return waiting rather than inventing conventional project tasks.
 - Tasks must be genuine project tasks, not tiny activation/JDI steps.
 - Each proposed task must advance the project outcome.
 - Each task must be executable now without waiting for another person, reply, delivery, approval, future date, or external event.
@@ -307,10 +319,13 @@ Rules:
         state = str(data.get("state") or "").strip().lower()
 
         if state == "waiting":
-            return {
-                "state": "waiting",
-                "tasks": [],
-            }
+            return {"state": "waiting", "tasks": []}
+
+        if state == "clarification":
+            question = str(data.get("question") or "").strip()
+            if allow_clarification and clarification_round < 2 and question:
+                return {"state": "clarification", "question": question[:500], "tasks": []}
+            return {"state": "waiting", "tasks": []}
 
         if state != "actionable":
             return None
@@ -402,6 +417,47 @@ Rules:
         print(
             f"[Project Work] AI generation failed: {exc}"
         )
+        return None
+
+
+def summarize_project_work_answer(client, *, project_context: str | None, question: str, answer: str) -> str | None:
+    """Turn a clarification answer into concise durable project context."""
+    if client is None or not str(answer or "").strip():
+        return None
+    model = os.getenv("AIOS_PROJECT_WORK_MODEL", os.getenv("AIOS_FOCUS_GUIDANCE_MODEL", "gpt-4.1-mini"))
+    prompt = f"""Convert the user's answer into concise durable project context.
+
+Existing project context:
+{str(project_context or '').strip() or '(none)'}
+
+Question AIOS asked:
+{str(question or '').strip()}
+
+User answer:
+{str(answer or '').strip()}
+
+Return JSON only: {{"context_update":"..."}}
+
+Rules:
+- Preserve the user's meaning exactly; do not invent facts or commitments.
+- Preserve uncertainty such as probably, maybe, or not yet decided.
+- Remove conversational filler and the question/answer framing.
+- Keep important dates, people, quantities, constraints, decisions, and preferences.
+- Write one concise reusable context statement, normally one or two sentences.
+- Do not repeat facts already clearly present in Existing project context unless needed to make the new fact understandable.
+"""
+    try:
+        response = client.responses.create(model=model, input=prompt)
+        raw = (response.output_text or '').strip()
+        if raw.startswith('```'):
+            raw = raw.strip('`')
+            if raw.lower().startswith('json'):
+                raw = raw[4:].strip()
+        data = json.loads(raw)
+        value = str(data.get('context_update') or '').strip()
+        return value[:1500] or None
+    except Exception as exc:
+        print(f"[Project Work] Context summary failed: {exc}")
         return None
 
 
