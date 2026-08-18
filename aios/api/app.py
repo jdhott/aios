@@ -542,12 +542,19 @@ def list_open_tasks_http(
             "sections": {"search_results": search_results},
         }
 
+    # Snoozed/deferred tasks remain searchable, but they should disappear from
+    # the actionable dashboard lists until their defer window expires.
+    actionable_rows = [
+        row for row in rows
+        if not _is_future_defer_value(row.get("defer_until"))
+    ]
+
     # Dashboard sections are independent views, not mutually exclusive buckets.
     # Best Next Action (rank 1) is rendered separately by the focus card.
     # Top 5 means the next five ranked execution tasks: ranks 2 through 6.
     top5 = sorted(
         [
-            row for row in rows
+            row for row in actionable_rows
             if row.get("execution_rank") is not None
             and 2 <= int(row.get("execution_rank")) <= 6
         ],
@@ -557,14 +564,14 @@ def list_open_tasks_http(
     # Today is a calendar view, not another ranking slice. Show every open
     # task due today or overdue, even when it also appears in another section.
     today_items = _respect_breakdown_step_order(sorted(
-        [row for row in rows if due_today(row)],
+        [row for row in actionable_rows if due_today(row)],
         key=lambda row: (str(row.get("due_at") or "")[:10], *score_key(row)),
     ))
 
     # JDI is also an independent view: show every open JDI task even when it
     # appears in BNA, Top 5, or Today.
     jdi_items = _respect_breakdown_step_order(sorted(
-        [row for row in rows if bool(row.get("is_just_do_it"))],
+        [row for row in actionable_rows if bool(row.get("is_just_do_it"))],
         key=score_key,
     ))
 
@@ -573,9 +580,8 @@ def list_open_tasks_http(
     stronger_ids = {str(row.get("id")) for row in top5 + today_items + jdi_items}
     quick_win_candidates = sorted(
         [
-            row for row in rows
+            row for row in actionable_rows
             if bool(row.get("is_quick_win"))
-            and not _is_future_defer_value(row.get("defer_until"))
             and not bool(row.get("best_next_action"))
             and row.get("execution_rank") != 1
             and str(row.get("id")) not in stronger_ids

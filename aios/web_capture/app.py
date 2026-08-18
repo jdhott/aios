@@ -1954,6 +1954,7 @@ function addProjectTaskRow(button) {{ const form=button.closest('form'),list=for
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
+{focus_submit_feedback_script}
 {pending_refresh_script}
 </body>
 </html>"""
@@ -3556,7 +3557,7 @@ def _page(
                     '<div class="focus-start">'
                     '<div class="focus-start-label">Start here</div>'
                     '<div class="focus-start-row">'
-                    f'<form class="complete-form focus-activation-complete" method="post" action="/tasks/{safe_activation_id}/complete">'
+                    f'<form class="complete-form focus-activation-complete" method="post" action="/tasks/{safe_activation_id}/complete" onsubmit="showFocusUpdating()">'
                     '<button class="complete-checkbox" type="submit" aria-label="Complete starting step" title="Complete starting step"><span aria-hidden="true"></span></button>'
                     '</form>'
                     '<div class="focus-start-main">'
@@ -3592,10 +3593,9 @@ def _page(
             f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
             + focus_parent_meta
             + f'<div class="focus-meta">{" · ".join(meta)}</div>'
-            '<div class="focus-parent-actions">'
+            + '</div>'
             + _task_snooze_control_html(focus_id, css_class="focus-snooze")
-            + '</div></div>'
-            f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
+            + f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
             '</div>'
             + starter_html
@@ -3616,6 +3616,17 @@ def _page(
             + html.escape(error)
             + "</div>"
         )
+
+    focus_submit_feedback_script = """
+<script>
+function showFocusUpdating() {
+  const card = document.querySelector('.focus-card');
+  if (!card) return true;
+  card.innerHTML = '<div class="focus-label">⭐ Best Next Action</div><div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>';
+  return true;
+}
+</script>
+"""
 
     pending_refresh_script = ""
 
@@ -3741,14 +3752,13 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-card {{ margin:0 0 20px; padding:18px 20px; border:1px solid rgba(255,201,60,.72); border-radius:16px; background:#fff8dc; box-shadow:0 4px 18px rgba(38,65,85,.05); }}
     .focus-label {{ margin-bottom:12px; color:var(--navy); font-size:.9rem; font-weight:850; }}
     .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
-    .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
+    .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px 44px; }}
     .focus-main {{ min-width:0; }}
     .focus-title {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.24; font-weight:850; }}
     .focus-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; line-height:1.35; }}
     .focus-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
     .focus-title:hover {{ text-decoration:underline; }}
     .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
-    .focus-parent-actions {{ display:flex; gap:10px; margin-top:9px; }}
     .focus-snooze, .task-snooze, .project-task-snooze {{ position:relative; }}
     .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
     .snooze-icon-button::-webkit-details-marker {{ display:none; }}
@@ -4128,6 +4138,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       }}
     }})();
   </script>
+{focus_submit_feedback_script}
 {pending_refresh_script}
 </body>
 </html>"""
