@@ -183,18 +183,17 @@ AIOS_DATASTORE = (
     .lower()
 )
 
-if AIOS_DATASTORE != "supabase":
+if AIOS_DATASTORE not in {"notion", "supabase"}:
     raise ValueError(
-        "The AIOS processor now supports AIOS_DATASTORE=supabase only. "
-        "Notion may still be used as an optional inbox/capture source."
+        "AIOS_DATASTORE must be 'notion' or 'supabase'"
     )
 
-print("[Datastore] Supabase is the sole processor datastore")
+print(f"[Datastore] Configured datastore: {AIOS_DATASTORE}")
 
 APP_SERVICE_BOUNDARY_INBOX_VERSION = "app-service-boundary-v1-phase1"
 
 AIOS_INBOX_SOURCE = (
-    os.getenv("AIOS_INBOX_SOURCE", "supabase")
+    os.getenv("AIOS_INBOX_SOURCE", "notion")
     .strip()
     .lower()
 )
@@ -202,20 +201,29 @@ AIOS_INBOX_SOURCE = (
 if AIOS_INBOX_SOURCE not in {"notion", "supabase"}:
     raise ValueError("AIOS_INBOX_SOURCE must be 'notion' or 'supabase'")
 
+if AIOS_INBOX_SOURCE == "supabase" and AIOS_DATASTORE != "supabase":
+    raise ValueError(
+        "AIOS_INBOX_SOURCE=supabase requires AIOS_DATASTORE=supabase"
+    )
+
 print(f"[Inbox Source] Configured source: {AIOS_INBOX_SOURCE}")
 INBOX_IDENTITY_SHADOW_FILTER_VERSION = "app-service-boundary-v1-phase1.3"
 
 # Observational-only audit of actual Notion mutations during Supabase-mode runs.
-try:
-    from core.storage.supabase_authority_audit import install_supabase_authority_audit
-    install_supabase_authority_audit(AIOS_DATASTORE)
-except Exception as exc:
-    print(f"[Supabase Authority Audit] Bootstrap failed: {exc}")
+if AIOS_DATASTORE == "supabase":
+    try:
+        from core.storage.supabase_authority_audit import install_supabase_authority_audit
+        install_supabase_authority_audit(AIOS_DATASTORE)
+    except Exception as exc:
+        print(f"[Supabase Authority Audit] Bootstrap failed: {exc}")
 
 # Notion is an optional integration, not a production processor dependency.
 # Explicit Notion datastore/inbox modes retain the legacy fail-fast behavior,
 # while the normal Supabase/Supabase runtime can start with no Notion secrets or IDs.
-NOTION_RUNTIME_REQUIRED = (AIOS_INBOX_SOURCE == "notion")
+NOTION_RUNTIME_REQUIRED = (
+    AIOS_DATASTORE == "notion"
+    or AIOS_INBOX_SOURCE == "notion"
+)
 
 if TEST_ONLY:
     NOTION_TOKEN = os.getenv("NOTION_TOKEN", "test-only-notion-token")
@@ -1155,12 +1163,31 @@ def get_title(page):
 
 
 # -------------------------------------------------------------------------
-# Optional capture adapters
+# Canonical Notion Brain Dump archive module
 # -------------------------------------------------------------------------
-# The processor no longer archives or presents processed items in Notion.
-# A Notion inbox adapter may still remove its source block after Supabase has
-# successfully processed the item.
+# Archive/presentation helpers now live in aios.notion.archive. Runtime globals
+# are injected conservatively so this extraction changes ownership, not behavior.
+from aios.notion import archive as archive_helpers
+
+archive_helpers.configure_archive_module(globals())
+
+create_archive_section = archive_helpers.create_archive_section
+archive_item = archive_helpers.archive_item
+append_archive_toggle = archive_helpers.append_archive_toggle
+find_child_toggle_by_title = archive_helpers.find_child_toggle_by_title
+get_or_create_archive_toggle = archive_helpers.get_or_create_archive_toggle
+archive_non_task_item = archive_helpers.archive_non_task_item
+archive_non_task_note_item = archive_helpers.archive_non_task_note_item
+archive_non_task_idea_item = archive_helpers.archive_non_task_idea_item
+delete_original_block = archive_helpers.delete_original_block
+trim_archive_runs = archive_helpers.trim_archive_runs
+
+print("[Notion Archive Module] Canonical Brain Dump archive helpers loaded")
+
+# Refresh Notion inbox-source dependencies now that canonical archive
+# lifecycle helpers (including delete_original_block) are available.
 notion_inbox_source.configure_notion_source(globals())
+print("[Inbox Source] Notion lifecycle dependencies refreshed")
 
 
 # ## 4. Text cleanup and actionability checks
@@ -2695,8 +2722,8 @@ def decide_task_action(original_title, prepared_title=None, allow_ai=True):
 def generate_subtasks(task_text, client, manual_context=""):
     """Use AI to break a clear parent task into linked subtasks.
 
-    Subtasks should stay clean enough for Notion, but also carry enough context
-    to make sense when seen outside the parent page or in search results.
+    Subtasks should be concise actions. Parent metadata supplies hierarchy context,
+    so child titles should not restate the parent unnecessarily.
     """
     prompt = f"""
 Break this task into the smallest useful set of 2–5 clear, actionable subtasks.
@@ -2712,9 +2739,10 @@ Rules:
 - If a detail is missing, write a step to check or confirm it.
 - Each step must start with a verb.
 - Keep each step concise; parent metadata will preserve hierarchy context.
-- Each step must be understandable on its own without seeing the parent task.
-- Include the key object/context from the parent when needed.
-- Do NOT repeat the full parent title in every step.
+- Each step must be understandable as an action when shown with its parent metadata.
+- Include only the object/context needed to distinguish the step.
+- Do NOT repeat information already supplied by the parent metadata.
+- Treat the 55-character title target as especially important for breakdown children; exceed it only when meaning would otherwise be lost.
 - Prefer natural context, e.g. "Create label mockup in Canva" instead of "Create digital mockup".
 - Avoid vague standalone steps like "Review details", "Gather materials", "Create mockup", or "Check inventory" unless the object is named.
 - No fluff.
@@ -5349,10 +5377,46 @@ from aios.review.clarification_transitions import (
     resolve_clarification_review,
 )
 
-print(
-    "[Clarification Review] Supabase/web authority configured; "
-    "legacy Notion clarification runtime removed"
-)
+clarification_helpers = None
+append_clarification_blocks = None
+get_checked_clarification_action = None
+update_task_from_selection = None
+clear_page_children = None
+update_clarification_title = None
+process_clarification_selection = None
+
+if AIOS_DATASTORE == "notion":
+    from aios import clarification as clarification_helpers
+
+    clarification_helpers.configure_clarification_module(globals())
+
+    append_clarification_blocks = (
+        clarification_helpers.append_clarification_blocks
+    )
+    get_checked_clarification_action = (
+        clarification_helpers.get_checked_clarification_action
+    )
+    update_task_from_selection = (
+        clarification_helpers.update_task_from_selection
+    )
+    clear_page_children = (
+        clarification_helpers.clear_page_children
+    )
+    update_clarification_title = (
+        clarification_helpers.update_clarification_title
+    )
+    process_clarification_selection = (
+        clarification_helpers.process_clarification_selection
+    )
+
+    print(
+        "[Clarification Review] Legacy Notion clarification UI configured"
+    )
+else:
+    print(
+        "[Clarification Review] Supabase/web authority configured; "
+        "legacy Notion clarification UI not initialized"
+    )
 
 clarification_shadow_inbox_repo = None
 clarification_shadow_review_repo = None
@@ -5432,7 +5496,15 @@ from aios.review.repository import InboxReviewRepository
 
 inbox_review_ui = None
 duplicate_review_ui = None
-print("[Possible Duplicate Review] Supabase/web review authority configured")
+
+if AIOS_DATASTORE == "notion":
+    from aios.notion import duplicate_review as duplicate_review_ui
+
+    duplicate_review_ui.configure_duplicate_review_ui(globals())
+    inbox_review_ui = duplicate_review_ui.NotionInboxReviewUI()
+    print("[Possible Duplicate Review] Legacy Notion review UI configured")
+else:
+    print("[Possible Duplicate Review] Supabase/web review authority configured")
 
 from aios.review.possible_duplicate_transitions import (
     refresh_possible_duplicate_payload,
@@ -5443,17 +5515,18 @@ from aios.duplicate_detection import judge_duplicate
 possible_duplicate_shadow_inbox_repo = None
 possible_duplicate_shadow_review_repo = None
 
-try:
-    _possible_duplicate_shadow_store = SupabaseStore()
-    possible_duplicate_shadow_inbox_repo = InboxRepository(
-        _possible_duplicate_shadow_store
-    )
-    possible_duplicate_shadow_review_repo = InboxReviewRepository(
-        _possible_duplicate_shadow_store
-    )
-    print("[Possible Duplicate Review] Supabase review repositories configured")
-except Exception as exc:
-    print(f"[Possible Duplicate Review] Bootstrap failed: {exc}")
+if AIOS_DATASTORE == "supabase":
+    try:
+        _possible_duplicate_shadow_store = SupabaseStore()
+        possible_duplicate_shadow_inbox_repo = InboxRepository(
+            _possible_duplicate_shadow_store
+        )
+        possible_duplicate_shadow_review_repo = InboxReviewRepository(
+            _possible_duplicate_shadow_store
+        )
+        print("[Possible Duplicate Review] Supabase review repositories configured")
+    except Exception as exc:
+        print(f"[Possible Duplicate Review] Bootstrap failed: {exc}")
 
 SOURCE_AWARE_REVIEW_PRESENTATION_VERSION = "possible-duplicate-supabase-web-v1"
 
@@ -7426,27 +7499,65 @@ def process_task_item(item):
 
     return task_pages_created
 
-def archive_created_item(item, created_pages, archive_section_id=None):
-    """Finalize one successfully processed inbox item at its source."""
+def archive_created_item(item, created_pages, archive_section_id):
+    """Finalize a successfully created inbox item.
+
+    Supabase inbox rows are marked processed directly. The historical Notion
+    archive presentation is retained only when Notion is the configured inbox
+    source.
+    """
     if not created_pages:
         return
+
     if DRY_RUN:
         print(f"[DRY RUN] Would finalize processed item: {item['text']}")
         return
+
+    if AIOS_INBOX_SOURCE == "supabase":
+        inbox_source.remove_item(item)
+        return
+
+    if not ARCHIVE_PROCESSED_ITEMS:
+        print(f"[NO ARCHIVE] Leaving original item in place: {item['text']}")
+        return
+
+    if not archive_section_id:
+        return
+
+
+    first_task_url = created_pages[0].get("url")
+    archive_item(item, archive_section_id, first_task_url)
     inbox_source.remove_item(item)
 
-
-def archive_reviewed_items(items, archive_section_id=None):
-    """Finalize reviewed inbox items without any presentation/archive side effect."""
+def archive_reviewed_items(items, archive_section_id):
+    """Finalize processed inbox items that did not create new tasks."""
     if not items:
         return
+
+
     if DRY_RUN:
         for item in items:
             print(f"[DRY RUN] Would finalize reviewed item: {item['text']}")
         return
-    for item in items:
-        inbox_source.remove_item(item)
 
+
+    if AIOS_INBOX_SOURCE == "supabase":
+        for item in items:
+            inbox_source.remove_item(item)
+        return
+
+    if not ARCHIVE_PROCESSED_ITEMS:
+        for item in items:
+            print(f"[NO ARCHIVE] Leaving reviewed item in place: {item['text']}")
+        return
+
+    if not archive_section_id:
+        return
+
+
+    for item in items:
+        archive_item(item, archive_section_id)
+        inbox_source.remove_item(item)
 
 def limit_items_for_controlled_production(items):
     """Limit how many new inbox items are processed during early production testing."""
@@ -7536,7 +7647,16 @@ def run_task_creation_pipeline():
         + non_task_idea_items
     )
 
-    archive_section_id = None
+    should_archive = (
+        (not DRY_RUN)
+        and ARCHIVE_PROCESSED_ITEMS
+        and AIOS_INBOX_SOURCE == "notion"
+    )
+    archive_section_id = (
+        create_archive_section()
+        if should_archive and items_to_archive
+        else None
+    )
 
     print("\n--- RUN MODE ---")
     print("DRY_RUN:", DRY_RUN)
@@ -7703,10 +7823,16 @@ def run_task_creation_pipeline():
     archive_reviewed_items(reviewed_possible_items, archive_section_id)
 
     for item in non_task_note_items:
-        inbox_source.remove_item(item)
+        if AIOS_INBOX_SOURCE == "supabase":
+            inbox_source.remove_item(item)
+        else:
+            archive_non_task_note_item(item, archive_section_id)
 
     for item in non_task_idea_items:
-        inbox_source.remove_item(item)
+        if AIOS_INBOX_SOURCE == "supabase":
+            inbox_source.remove_item(item)
+        else:
+            archive_non_task_idea_item(item, archive_section_id)
 
     if DRY_RUN:
         print(f"[DRY RUN] Would create {len(created_tasks)} task(s)")
@@ -8732,6 +8858,13 @@ else:
 
 # In[74]:
 
+# Archive trimming is a live Notion maintenance action, so skip it in TEST_MODE.
+if TEST_MODE:
+    print("TEST_MODE is enabled → skipping archive trimming.")
+elif archive_section_id:
+    trim_archive_runs(keep=5)
+
+
 # === AIOS METADATA RECONCILIATION PHASE 2.5 INLINE RUN ===
 # Run reconciliation before summary/notification/dashboard so Notion never sees
 # a late post-notification clear/rewrite cycle.
@@ -9315,8 +9448,10 @@ def update_aios_dashboard():
         print(f"AIOS dashboard generation failed: {e}")
         return False
 
-if not TEST_MODE:
-    print("[Dashboard] Supabase/web authority active; legacy Notion dashboard runtime removed.")
+if not TEST_MODE and AIOS_DATASTORE == "notion":
+    update_aios_dashboard()
+elif not TEST_MODE:
+    print("[Dashboard] Supabase/web authority active; legacy Notion dashboard update disabled.")
 
 # === AIOS METADATA RECONCILIATION PHASE 2.5 BOOTSTRAP ===
 # Reconciliation no longer runs via atexit.

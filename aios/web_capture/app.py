@@ -3294,7 +3294,7 @@ def _page(
     tasks = tasks or {}
     focus_id = str(focus.get("id") or "") if focus else ""
 
-    def render_task(task: dict) -> str:
+    def render_task(task: dict, section_key: str = "") -> str:
         title = html.escape(
             str(task.get("title") or "Untitled task")
         )
@@ -3351,7 +3351,12 @@ def _page(
             else ""
         )
 
-        row_return_to = f"/?search={quote_plus(search)}" if search else ""
+        if search:
+            row_return_to = f"/?search={quote_plus(search)}#search-results"
+        elif section_key:
+            row_return_to = f"/#section-{quote_plus(section_key)}"
+        else:
+            row_return_to = "/"
         snooze_html = _task_snooze_control_html(
             str(task.get("id") or ""),
             return_to=row_return_to,
@@ -3441,14 +3446,14 @@ def _page(
 
         renderer = render_completed_task if key == "completed_today" else render_task
         rows_html = "".join(
-            renderer(task)
+            renderer(task) if key == "completed_today" else renderer(task, key)
             for task in section_tasks
         )
 
         search_open = ' open' if key == "search_results" else ''
         task_sections += (
             f'<details class="task-group" data-section="{html.escape(key)}"'
-            + (' id="search-results"' if key == "search_results" else '')
+            + (f' id="search-results"' if key == "search_results" else f' id="section-{html.escape(key, quote=True)}"')
             + f'{search_open}>'
             f'<summary class="task-group-heading">'
             f'<span>{html.escape(heading)}</span>'
@@ -3496,7 +3501,7 @@ def _page(
 
     if refresh_pending:
         focus_card = (
-            '<section class="focus-card">'
+            '<section class="focus-card" id="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
             '<div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>'
             '</section>'
@@ -3583,7 +3588,7 @@ def _page(
         ) if timebox_text else ""
 
         focus_card = (
-            '<section class="focus-card">'
+            '<section class="focus-card" id="focus-card">'
             '<div class="focus-label">⭐ Best Next Action</div>'
             '<div class="focus-task-row focus-parent-row">'
             f'<form class="complete-form focus-parent-complete" method="post" action="/tasks/{safe_id}/complete">'
@@ -3594,7 +3599,11 @@ def _page(
             + focus_parent_meta
             + f'<div class="focus-meta">{" · ".join(meta)}</div>'
             + '</div>'
-            + _task_snooze_control_html(focus_id, css_class="focus-snooze")
+            + _task_snooze_control_html(
+                focus_id,
+                return_to="/?refresh_focus=1#focus-card",
+                css_class="focus-snooze",
+            )
             + f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
             '</div>'
@@ -3750,6 +3759,9 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .bna-open {{ display:inline-block; margin-top:13px; color:var(--navy); text-decoration:none; font-size:.86rem; font-weight:800; }}
     .bna-open:hover {{ text-decoration:underline; }}
     .focus-card {{ margin:0 0 20px; padding:18px 20px; border:1px solid rgba(255,201,60,.72); border-radius:16px; background:#fff8dc; box-shadow:0 4px 18px rgba(38,65,85,.05); }}
+    .focus-pending {{ display:flex; align-items:center; gap:10px; color:var(--ink); font-size:1.08rem; margin-top:14px; }}
+    .focus-pending .mini-spinner {{ display:inline-block; flex:0 0 auto; width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--navy); border-radius:50%; animation:dashboard-spin .8s linear infinite; }}
+    @keyframes dashboard-spin {{ to {{ transform:rotate(360deg); }} }}
     .focus-label {{ margin-bottom:12px; color:var(--navy); font-size:.9rem; font-weight:850; }}
     .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
     .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px 44px; }}
