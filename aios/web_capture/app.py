@@ -186,6 +186,8 @@ def _task_snooze_control_html(
         + preset_button('three_days', '3 days')
         + preset_button('one_week', '1 week')
         + custom_controls
+        + '<button class="snooze-cancel" type="button" '
+          'onclick="this.closest(\'details\').removeAttribute(\'open\')">Cancel</button>'
         + '</div></details>'
     )
 
@@ -876,11 +878,16 @@ def _pattern_rows(steps: list[dict]) -> str:
     return ''.join('<div class="pattern-row" draggable="true"><button class="drag" type="button">☷</button><div><input name="step_title" required value="'+html.escape(str(s.get("title") or ""),quote=True)+'" placeholder="Task title"><input name="step_context" value="'+html.escape(str(s.get("context") or ""),quote=True)+'" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button></div>' for s in steps)
 
 def _pattern_shell(title: str, body: str) -> str:
-    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} · AIOS</title><style>body{{margin:0;background:#f7f7f3;color:#17242d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(820px,100%);margin:auto;padding:28px 18px}}a{{color:#264155;font-weight:750}}h1,h2{{color:#264155}}.card,.pattern-row{{background:white;border:1px solid #d9dedf;border-radius:12px}}.card{{padding:16px;margin:12px 0}}.pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:8px;padding:8px;margin:8px 0}}.pattern-row>div{{display:grid;gap:6px}}input,textarea{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d9dedf;border-radius:9px;font:inherit}}textarea{{min-height:80px}}button,.button{{border:1px solid #d9dedf;background:white;color:#264155;border-radius:9px;padding:9px 12px;font:inherit;font-weight:750;cursor:pointer;text-decoration:none}}.primary{{background:#264155;color:white}}.actions{{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}}.drag{{cursor:grab;padding:0;font-size:20px}}.trash{{padding:0}}.muted{{color:#66747d}}.pattern-card{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.pattern-card h2{{margin:0;font-size:1.05rem}}.pattern-card p{{margin:5px 0}}.dragging{{opacity:.45}}</style></head><body><main>{body}</main></body></html>'''
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} · AIOS</title><style>body{{margin:0;background:#f7f7f3;color:#17242d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(820px,100%);margin:auto;padding:28px 18px}}a{{color:#264155;font-weight:750}}h1,h2{{color:#264155}}.card,.pattern-row{{background:white;border:1px solid #d9dedf;border-radius:12px}}.card{{padding:16px;margin:12px 0}}.pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:8px;padding:8px;margin:8px 0}}.pattern-row>div{{display:grid;gap:6px}}input,textarea{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d9dedf;border-radius:9px;font:inherit}}textarea{{min-height:80px}}button,.button{{border:1px solid #d9dedf;background:white;color:#264155;border-radius:9px;padding:9px 12px;font:inherit;font-weight:750;cursor:pointer;text-decoration:none}}.primary{{background:#264155;color:white}}.actions{{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}}.drag{{cursor:grab;padding:0;font-size:20px}}.trash{{padding:0}}.muted{{color:#66747d}}.pattern-card{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.pattern-card h2{{margin:0;font-size:1.05rem}}.pattern-card p{{margin:5px 0}}.dragging{{opacity:.45}}
+.pattern-card .actions{{margin-top:0}}
+.pattern-choice{{text-decoration:none}}
+.pattern-choice:hover{{border-color:#aeb9bd}}
+@media(max-width:640px){{.pattern-card{{align-items:stretch;flex-direction:column}}.pattern-card .actions{{margin-top:8px}}}}
+</style></head><body><main>{body}</main></body></html>'''
 
 def _pattern_editor(pattern: dict | None = None) -> str:
     p=dict(pattern or {}); pid=str(p.get("id") or ""); steps=list(p.get("steps") or []) or [{"title":"","context":""}]; action=f"/work-patterns/{pid}" if pid else "/work-patterns"
-    body=f'''<a href="/work-patterns">← Work Patterns</a><h1>{'Edit' if pid else 'New'} Work Pattern</h1><form method="post" action="{action}"><label>Name</label><input name="name" required value="{html.escape(str(p.get('name') or ''),quote=True)}"><p><label>Context <span class="muted">(optional)</span></label></p><textarea name="context">{html.escape(str(p.get('context') or ''))}</textarea><h2>Steps</h2><div data-list>{_pattern_rows(steps)}</div><button type="button" onclick="addRow()">+ Add step</button><div class="actions"><button class="primary" type="submit">Save Pattern</button><a href="/work-patterns">Cancel</a></div></form>'''
+    body=f'''<a href="/work-patterns">← Work Patterns</a><h1>{'Edit' if pid else 'New'} Work Pattern</h1><form method="post" action="{action}"><label>Name</label><input name="name" required value="{html.escape(str(p.get('name') or ''),quote=True)}"><p><label>Context <span class="muted">(optional)</span></label></p><textarea name="context">{html.escape(str(p.get('context') or ''))}</textarea><h2>Steps</h2><div data-list>{_pattern_rows(steps)}</div><button type="button" onclick="addRow()">+ Add step</button><div class="actions"><button class="primary" type="submit">Save</button><a href="/work-patterns">Done</a></div></form>'''
     return _pattern_shell("Work Pattern",body+_pattern_js())
 
 def _pattern_js() -> str:
@@ -895,20 +902,39 @@ def work_patterns_web(_user: Annotated[str, Depends(_check_basic_auth)]): return
 @app.get("/work-patterns/new")
 def new_work_pattern_web(_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_pattern_editor())
 @app.get("/work-patterns/{pattern_id}")
-def edit_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_pattern_editor(_fetch_work_pattern(pattern_id)))
+def edit_work_pattern_web(
+    pattern_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    saved: str = "",
+):
+    page = _pattern_editor(_fetch_work_pattern(pattern_id))
+    if saved == "1":
+        page = page.replace(
+            "<h1>Edit Work Pattern</h1>",
+            '<div class="muted" style="margin-top:8px">Saved</div><h1>Edit Work Pattern</h1>',
+            1,
+        )
+    return HTMLResponse(page)
 @app.post("/work-patterns")
 def create_work_pattern_web(_user: Annotated[str, Depends(_check_basic_auth)],name: Annotated[str,Form()],context: Annotated[str,Form()]="",step_title: Annotated[list[str]|None,Form()]=None,step_context: Annotated[list[str]|None,Form()]=None):
     titles=list(step_title or []); contexts=list(step_context or [])+[""]*len(titles); _work_patterns_api("POST","/work-patterns",{"name":name,"context":context,"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]}); return RedirectResponse("/work-patterns",303)
 @app.post("/work-patterns/{pattern_id}")
 def update_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)],name: Annotated[str,Form()],context: Annotated[str,Form()]="",step_title: Annotated[list[str]|None,Form()]=None,step_context: Annotated[list[str]|None,Form()]=None):
-    titles=list(step_title or []); contexts=list(step_context or [])+[""]*len(titles); _work_patterns_api("PUT",f"/work-patterns/{pattern_id}",{"name":name,"context":context,"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]}); return RedirectResponse("/work-patterns",303)
+    titles=list(step_title or [])
+    contexts=list(step_context or [])+[""]*len(titles)
+    _work_patterns_api(
+        "PUT",
+        f"/work-patterns/{pattern_id}",
+        {"name":name,"context":context,"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]},
+    )
+    return RedirectResponse(f"/work-patterns/{pattern_id}?saved=1",303)
 @app.post("/work-patterns/{pattern_id}/duplicate")
 def duplicate_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): _work_patterns_api("POST",f"/work-patterns/{pattern_id}/duplicate",{}); return RedirectResponse("/work-patterns",303)
 @app.post("/work-patterns/{pattern_id}/delete")
 def delete_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): _work_patterns_api("DELETE",f"/work-patterns/{pattern_id}"); return RedirectResponse("/work-patterns",303)
 @app.get("/projects/{project_id}/work-patterns")
 def choose_project_pattern_web(project_id: str,_user: Annotated[str, Depends(_check_basic_auth)]):
-    cards=''.join(f'<a class="card pattern-card" href="/projects/{project_id}/work-patterns/{p.get("id")}/use"><strong>{html.escape(str(p.get("name") or "Untitled Pattern"))}</strong><span>{int(p.get("step_count") or 0)} steps</span></a>' for p in _fetch_work_patterns()) or '<div class="card">No patterns yet. <a href="/work-patterns/new">Create one.</a></div>'; return HTMLResponse(_pattern_shell("Use Work Pattern",f'<a href="/projects/{project_id}">← Project</a><h1>Use Work Pattern</h1><p>Choose a starting pattern. You can edit every task before creating anything.</p>{cards}'))
+    cards=''.join(f'<a class="card pattern-card pattern-choice" href="/projects/{project_id}/work-patterns/{p.get("id")}/use"><strong>{html.escape(str(p.get("name") or "Untitled Pattern"))}</strong><span>{int(p.get("step_count") or 0)} steps</span></a>' for p in _fetch_work_patterns()) or '<div class="card">No patterns yet. <a href="/work-patterns/new">Create one.</a></div>'; return HTMLResponse(_pattern_shell("Use Work Pattern",f'<a href="/projects/{project_id}">← Project</a><h1>Use Work Pattern</h1><p>Choose a starting pattern. You can edit every task before creating anything.</p>{cards}'))
 @app.get("/projects/{project_id}/work-patterns/{pattern_id}/use")
 def use_project_pattern_web(project_id: str,pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]):
     p=_fetch_work_pattern(pattern_id); body=f'<a href="/projects/{project_id}/work-patterns">← Choose Pattern</a><h1>{html.escape(str(p.get("name") or "Work Pattern"))}</h1><p>Review, edit, reorder, remove, or add tasks. Nothing is created until you accept.</p><form method="post" action="/projects/{project_id}/work-patterns/{pattern_id}/instantiate"><div data-list>{_pattern_rows(list(p.get("steps") or []))}</div><button type="button" onclick="addRow()">+ Add task</button><div class="actions"><button class="primary">Create Project Tasks</button><a href="/projects/{project_id}">Cancel</a></div></form>'; return HTMLResponse(_pattern_shell("Use Work Pattern",body+_pattern_js()))
@@ -1704,18 +1730,18 @@ h1 {{
 .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
 .snooze-icon-button::-webkit-details-marker {{ display:none; }}
 .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
-.task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+.task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:260px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
 .task-snooze-menu form {{ display:block; margin:0; }}
 .task-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
 .task-snooze-menu button:hover {{ background:#f3f4f2; }}
-.task-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
-.task-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
+.task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
+.task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:.8rem; }}
 .task-snooze-date button {{ width:auto; white-space:nowrap; }}
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:#fbfbf8; }}
 .task-title {{ font-weight:700; }}
-.task-parent-meta { margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35; }
-.task-parent-meta a { color:inherit; text-decoration:underline; font-weight:inherit; }
+.task-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35; }}
+.task-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
 .task-meta {{
   margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35;
 }}
@@ -1991,7 +2017,7 @@ h1 {{
   {generation_result_html}
   </div>
 
-  <section class="proposal-card" id="work-patterns"><h2>Reusable work</h2><p class="proposal-note">Start with a saved work pattern, review the proposed steps, then create them as normal project tasks.</p><div class="context-actions"><a class="context-save" style="text-decoration:none" href="/projects/{project_id}/work-patterns">Use Work Pattern</a> <a class="secondary-link" href="/work-patterns">Manage Patterns</a></div></section>
+  <section class="proposal-card" id="work-patterns"><h2>Work Patterns</h2><p class="proposal-note">Reuse a saved set of tasks, review the steps, then add them to this project.</p><div class="context-actions"><a class="context-save" style="text-decoration:none" href="/projects/{project_id}/work-patterns">Use Work Pattern</a> <a class="secondary-link" href="/work-patterns">Manage Patterns</a></div></section>
 
   <section class="project-task-editor" id="project-tasks">
     <h2>Project tasks</h2>
@@ -2013,7 +2039,6 @@ function addProjectTaskRow(button) {{ const form=button.closest('form'),list=for
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
-{focus_submit_feedback_script}
 {pending_refresh_script}
 </body>
 </html>"""
@@ -3867,12 +3892,12 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
     .snooze-icon-button::-webkit-details-marker {{ display:none; }}
     .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
-    .task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:210px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+    .task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:260px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
     .task-snooze-menu form {{ display:block; margin:0; }}
     .task-snooze-menu button {{ width:100%; min-height:0; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
     .task-snooze-menu button:hover {{ background:#f3f4f2; }}
-    .task-snooze-date {{ display:grid !important; grid-template-columns:1fr auto; gap:6px !important; padding:6px 4px 2px; }}
-    .task-snooze-date input[type="date"] {{ width:100%; min-width:0; border:1px solid var(--border); border-radius:8px; padding:7px; font:inherit; font-size:.8rem; }}
+    .task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
+    .task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:.8rem; }}
     .task-snooze-date button {{ width:auto; white-space:nowrap; }}
     .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
     .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
@@ -5132,8 +5157,11 @@ def project_detail_web(
                 refresh_proposal=refresh_proposal,
             )
         )
-    except Exception:
-        return RedirectResponse(url="/projects", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(
+            url="/projects?error=Project+detail+could+not+be+rendered.",
+            status_code=303,
+        )
 
 
 @app.get("/tasks/{task_id}")
