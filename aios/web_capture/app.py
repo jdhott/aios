@@ -4548,9 +4548,13 @@ box.addEventListener("keydown",e=>{
 form.addEventListener("submit",async e=>{
   e.preventDefault();
 
-  const text=box.value.trim();
+  const text=box.value
+    .split("\n")
+    .map(line=>line.replace(/^\s*•\s*/, ""))
+    .join("\n")
+    .trim();
 
-  if(!text || text==="•"){
+  if(!text){
     status.textContent="Enter something first.";
     box.focus();
     return;
