@@ -182,7 +182,7 @@ def capture_inbox(
         notes=request.notes,
         parser=parse_capture_metadata,
         source_metadata={
-            "capture_interface": "cloud_run_api_v1",
+            "capture_interface": request.capture_interface or "cloud_run_api_v1",
         },
     )
 

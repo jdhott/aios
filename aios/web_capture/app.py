@@ -221,7 +221,7 @@ def _breakdown_action(task_id: str, action: str, payload: dict | None = None) ->
     return response.json()
 
 
-def _capture_to_aios(text: str) -> dict:
+def _capture_to_aios(text: str, *, capture_interface: str = "cloud_run_web") -> dict:
     api_url = _api_url()
     token = _identity_token(api_url)
 
@@ -231,7 +231,7 @@ def _capture_to_aios(text: str) -> dict:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
-        json={"text": text},
+        json={"text": text, "capture_interface": capture_interface},
         timeout=30,
     )
 
@@ -4297,6 +4297,185 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
 </body>
 </html>"""
 
+
+_CAPTURE_PWA_MANIFEST = '''{
+  "name": "Brain Dump",
+  "short_name": "Brain Dump",
+  "description": "Fast brain dump capture",
+  "start_url": "/capture",
+  "scope": "/capture",
+  "display": "standalone",
+  "background_color": "#f7f7f3",
+  "theme_color": "#264155"
+}'''
+
+_CAPTURE_SERVICE_WORKER = '''const CACHE="aios-capture-v1";const SHELL=["/capture","/capture/manifest.webmanifest"];self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));self.skipWaiting()});self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})'''
+
+def _capture_pwa_page() -> str:
+    return r'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#264155">
+<link rel="manifest" href="/capture/manifest.webmanifest">
+<title>Brain Dump</title>
+<style>
+:root{color-scheme:light dark;--bg:#f7f7f3;--card:#fff;--ink:#17242d;--navy:#264155;--muted:#66747d;--border:#d9dedf;--ok:#2d6a4f}
+@media(prefers-color-scheme:dark){:root{--bg:#111719;--card:#182126;--ink:#edf2f2;--navy:#9fc2d8;--muted:#aab6bb;--border:#34434a;--ok:#8bd3a8}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center}
+main{width:min(620px,100%);padding:24px 18px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
+h1{font-size:1.45rem;margin:0 0 6px;color:var(--navy)}
+.sub{color:var(--muted);margin:0 0 18px}
+textarea{display:block;width:100%;min-height:34dvh;max-height:60dvh;resize:vertical;border:1px solid var(--border);border-radius:13px;background:transparent;color:var(--ink);padding:14px;font:inherit;font-size:1.05rem;line-height:1.45}
+.actions{display:flex;align-items:center;gap:12px;margin-top:14px}
+button{border:0;border-radius:11px;background:#264155;color:white;font:inherit;font-weight:750;padding:11px 18px;cursor:pointer}
+.status{min-height:1.3em;color:var(--muted);font-size:.92rem}
+.status.ok{color:var(--ok)}
+.hint{margin-top:12px;color:var(--muted);font-size:.8rem}
+@media(max-width:520px){main{padding:14px 12px}.card{padding:18px}textarea{min-height:42dvh}.actions{align-items:stretch;flex-direction:column}button{width:100%;padding:13px}.status{text-align:center}}
+</style>
+</head>
+<body>
+<main>
+<section class="card">
+<h1>Brain Dump</h1>
+<p class="sub">What’s on your mind?</p>
+
+<form id="captureForm">
+<textarea id="captureText" maxlength="10000" autofocus placeholder="• What do you need to remember or act on?"></textarea>
+<div class="actions">
+<button id="captureButton" type="submit">Capture</button>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+</div>
+</form>
+
+<div class="hint">On desktop, press ⌘/Ctrl + Enter to capture.</div>
+</section>
+</main>
+
+<script>
+const key="aios-capture-draft-v1";
+const box=document.getElementById("captureText");
+const form=document.getElementById("captureForm");
+const button=document.getElementById("captureButton");
+const status=document.getElementById("status");
+
+function normalizeBullets(value){
+  return value.split("\n").map(line=>{
+    if(!line.trim()) return line;
+    return /^\s*[•*-]\s+/.test(line)
+      ? line.replace(/^\s*[•*-]\s+/, "• ")
+      : "• "+line;
+  }).join("\n");
+}
+
+const savedDraft=localStorage.getItem(key)||"";
+box.value=savedDraft ? normalizeBullets(savedDraft) : "• ";
+
+box.addEventListener("input",()=>{
+  localStorage.setItem(key,box.value);
+});
+
+box.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){
+    e.preventDefault();
+    form.requestSubmit();
+    return;
+  }
+
+  if(e.key==="Enter"){
+    e.preventDefault();
+
+    const start=box.selectionStart;
+    const end=box.selectionEnd;
+    const before=box.value.slice(0,start);
+    const after=box.value.slice(end);
+
+    const insert="\n• ";
+    box.value=before+insert+after;
+    box.selectionStart=box.selectionEnd=start+insert.length;
+
+    localStorage.setItem(key,box.value);
+  }
+});
+
+form.addEventListener("submit",async e=>{
+  e.preventDefault();
+
+  const text=box.value.trim();
+
+  if(!text || text==="•"){
+    status.textContent="Enter something first.";
+    box.focus();
+    return;
+  }
+
+  button.disabled=true;
+  status.textContent="Adding…";
+
+  try{
+    const r=await fetch("/capture/submit",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text})
+    });
+
+    if(!r.ok) throw new Error();
+
+    localStorage.removeItem(key);
+    box.value="• ";
+    status.textContent="✓ Added to AIOS";
+    status.className="status ok";
+    box.focus();
+
+    setTimeout(()=>{
+      status.textContent="";
+      status.className="status";
+    },2200);
+
+  }catch(err){
+    status.textContent="Couldn’t add it. Your text is saved here—try again.";
+    localStorage.setItem(key,box.value);
+  }finally{
+    button.disabled=false;
+  }
+});
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("/capture/service-worker.js");
+  });
+}
+</script>
+</body>
+</html>'''
+
+
+@app.get('/capture', response_class=HTMLResponse)
+def capture_pwa(_user: Annotated[str, Depends(_check_basic_auth)]) -> HTMLResponse:
+    return HTMLResponse(_capture_pwa_page())
+
+@app.get('/capture/manifest.webmanifest')
+def capture_manifest():
+    from fastapi.responses import Response
+    return Response(_CAPTURE_PWA_MANIFEST, media_type='application/manifest+json')
+
+@app.get('/capture/service-worker.js')
+def capture_service_worker():
+    from fastapi.responses import Response
+    return Response(_CAPTURE_SERVICE_WORKER, media_type='application/javascript')
+
+@app.post('/capture/submit')
+async def capture_pwa_submit(request: Request, _user: Annotated[str, Depends(_check_basic_auth)]):
+    payload=await request.json(); text=str(payload.get('text') or '').strip()
+    if not has_meaningful_capture_text(text): raise HTTPException(status_code=400,detail='Please enter something.')
+    try:
+        result=_capture_to_aios(text,capture_interface='capture_pwa_v1'); return {'ok':True,'id':result.get('id')}
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail='AIOS could not accept the capture.') from exc
 
 @app.get("/health")
 def health() -> dict:

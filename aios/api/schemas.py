@@ -16,6 +16,7 @@ class HealthResponse(BaseModel):
 class InboxCaptureRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10000)
     notes: list[str] = Field(default_factory=list)
+    capture_interface: str = Field(default="cloud_run_api_v1", max_length=100)
 
 
 class InboxCaptureResponse(BaseModel):
