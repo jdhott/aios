@@ -4104,6 +4104,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       <nav class="dashboard-nav" aria-label="Primary">
         <a href="/projects">Projects</a>
         <a href="/reviews">{f"Reviews ({review_count})" if review_count else "Reviews"}</a>
+        <a href="/work-patterns">Work Patterns</a>
         <a class="new-task-link" href="/tasks/new">New Task</a>
       </nav>
     </div>
