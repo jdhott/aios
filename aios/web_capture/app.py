@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import html
 import os
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote_plus
 
@@ -4306,7 +4307,11 @@ _CAPTURE_PWA_MANIFEST = '''{
   "scope": "/capture",
   "display": "standalone",
   "background_color": "#f7f7f3",
-  "theme_color": "#264155"
+  "theme_color": "#264155",
+  "icons": [
+    {"src": "/capture/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/capture/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
 }'''
 
 _CAPTURE_SERVICE_WORKER = '''const CACHE="aios-capture-v1";const SHELL=["/capture","/capture/manifest.webmanifest"];self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));self.skipWaiting()});self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})'''
@@ -4316,45 +4321,186 @@ def _capture_pwa_page() -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#264155">
 <link rel="manifest" href="/capture/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="/capture/favicon.png">
+<link rel="apple-touch-icon" href="/capture/icon-192.png">
 <title>Brain Dump</title>
 <style>
-:root{color-scheme:light dark;--bg:#f7f7f3;--card:#fff;--ink:#17242d;--navy:#264155;--muted:#66747d;--border:#d9dedf;--ok:#2d6a4f}
-@media(prefers-color-scheme:dark){:root{--bg:#111719;--card:#182126;--ink:#edf2f2;--navy:#9fc2d8;--muted:#aab6bb;--border:#34434a;--ok:#8bd3a8}}
+:root{
+  color-scheme:light dark;
+  --bg:#f7f7f3;
+  --card:#fff;
+  --ink:#17242d;
+  --navy:#264155;
+  --muted:#66747d;
+  --border:#d9dedf;
+  --ok:#2d6a4f;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#111719;
+    --card:#182126;
+    --ink:#edf2f2;
+    --navy:#9fc2d8;
+    --muted:#aab6bb;
+    --border:#34434a;
+    --ok:#8bd3a8;
+  }
+}
 *{box-sizing:border-box}
-body{margin:0;min-height:100dvh;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center}
-main{width:min(620px,100%);padding:24px 18px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
-h1{font-size:1.45rem;margin:0 0 6px;color:var(--navy)}
-.sub{color:var(--muted);margin:0 0 18px}
-textarea{display:block;width:100%;min-height:34dvh;max-height:60dvh;resize:vertical;border:1px solid var(--border);border-radius:13px;background:transparent;color:var(--ink);padding:14px;font:inherit;font-size:1.05rem;line-height:1.45}
-.actions{display:flex;align-items:center;gap:12px;margin-top:14px}
-button{border:0;border-radius:11px;background:#264155;color:white;font:inherit;font-weight:750;padding:11px 18px;cursor:pointer}
-.status{min-height:1.3em;color:var(--muted);font-size:.92rem}
+html,body{
+  margin:0;
+  padding:0;
+  width:100%;
+  height:100dvh;
+  min-height:0;
+  overflow:hidden;
+}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+.app-wrapper{
+  width:100%;
+  height:100%;
+  min-height:0;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+}
+.capture-card{
+  width:100%;
+  max-width:none;
+  height:100%;
+  min-height:0;
+  margin:0;
+  padding:16px;
+  display:flex;
+  flex-direction:column;
+  container-type:inline-size;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow:0 4px 16px rgba(0,0,0,.05);
+}
+.card-header{
+  flex:0 0 auto;
+  margin-bottom:10px;
+}
+.card-title{
+  margin:0;
+  color:var(--navy);
+  font-size:1.45rem;
+  font-weight:750;
+}
+.sub{display:none}
+.capture-form{
+  flex:1 1 auto;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+.input-area{
+  flex:1 1 auto;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+textarea{
+  width:100%;
+  height:100%;
+  min-height:0;
+  resize:none;
+  border:1px solid var(--border);
+  border-radius:13px;
+  background:transparent;
+  color:var(--ink);
+  padding:12px;
+  font:inherit;
+  font-size:clamp(14px,3.5cqw,24px);
+  line-height:1.5;
+}
+textarea:focus{
+  outline:2px solid #0b66d4;
+  outline-offset:0;
+}
+.card-footer{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:10px;
+}
+button{
+  border:0;
+  border-radius:11px;
+  background:#264155;
+  color:white;
+  font:inherit;
+  font-weight:750;
+  padding:9px 16px;
+  min-height:40px;
+  cursor:pointer;
+}
+button:disabled{opacity:.55}
+.status{
+  min-height:1.3em;
+  color:var(--muted);
+  font-size:.92rem;
+}
 .status.ok{color:var(--ok)}
-.hint{margin-top:12px;color:var(--muted);font-size:.8rem}
-@media(max-width:520px){main{padding:14px 12px}.card{padding:18px}textarea{min-height:42dvh}.actions{align-items:stretch;flex-direction:column}button{width:100%;padding:13px}.status{text-align:center}}
+.hint{
+  margin:0;
+  color:var(--muted);
+  font-size:.8rem;
+  white-space:nowrap;
+}
+@media(max-width:520px){
+  .app-wrapper{padding:12px}
+  .capture-card{padding:18px}
+  .sub{
+    display:block;
+    color:var(--muted);
+    margin:4px 0 12px;
+  }
+  .card-header{margin-bottom:0}
+  .card-footer{
+    align-items:stretch;
+    flex-direction:column;
+  }
+  button{
+    width:100%;
+    padding:13px;
+  }
+  .hint{display:none}
+  .status{text-align:center}
+}
 </style>
 </head>
 <body>
-<main>
-<section class="card">
-<h1>Brain Dump</h1>
-<p class="sub">What’s on your mind?</p>
+<div class="app-wrapper">
+  <section class="capture-card">
+    <div class="card-header">
+      <h1 class="card-title">Brain Dump</h1>
+      <p class="sub">What’s on your mind?</p>
+    </div>
 
-<form id="captureForm">
-<textarea id="captureText" maxlength="10000" autofocus placeholder="• What do you need to remember or act on?"></textarea>
-<div class="actions">
-<button id="captureButton" type="submit">Capture</button>
-<div id="status" class="status" role="status" aria-live="polite"></div>
+    <form id="captureForm" class="capture-form">
+      <div class="input-area">
+        <textarea id="captureText" maxlength="10000" autofocus placeholder="• What do you need to remember or act on?"></textarea>
+      </div>
+
+      <div class="card-footer">
+        <button id="captureButton" type="submit">Capture</button>
+        <div class="hint">⌘/Ctrl + Enter</div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </div>
+    </form>
+  </section>
 </div>
-</form>
-
-<div class="hint">On desktop, press ⌘/Ctrl + Enter to capture.</div>
-</section>
-</main>
 
 <script>
 const key="aios-capture-draft-v1";
@@ -4388,16 +4534,13 @@ box.addEventListener("keydown",e=>{
 
   if(e.key==="Enter"){
     e.preventDefault();
-
     const start=box.selectionStart;
     const end=box.selectionEnd;
     const before=box.value.slice(0,start);
     const after=box.value.slice(end);
-
     const insert="\n• ";
     box.value=before+insert+after;
     box.selectionStart=box.selectionEnd=start+insert.length;
-
     localStorage.setItem(key,box.value);
   }
 });
@@ -4457,6 +4600,24 @@ if("serviceWorker" in navigator){
 @app.get('/capture', response_class=HTMLResponse)
 def capture_pwa(_user: Annotated[str, Depends(_check_basic_auth)]) -> HTMLResponse:
     return HTMLResponse(_capture_pwa_page())
+
+@app.get('/capture/favicon.png')
+def capture_favicon():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name("static") / "brain-dump-32.png", media_type="image/png")
+
+
+@app.get('/capture/icon-192.png')
+def capture_icon_192():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name("static") / "brain-dump-192.png", media_type="image/png")
+
+
+@app.get('/capture/icon-512.png')
+def capture_icon_512():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name("static") / "brain-dump-512.png", media_type="image/png")
+
 
 @app.get('/capture/manifest.webmanifest')
 def capture_manifest():
