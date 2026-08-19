@@ -34,6 +34,7 @@ from aios.services.review_service import ReviewService
 from aios.storage.inbox_repository import InboxRepository
 from aios.storage.supabase_store import SupabaseStore
 from aios.project_work import create_supabase_project_task
+from aios.work_patterns import delete_work_pattern, duplicate_work_pattern, get_work_pattern, instantiate_pattern_for_project, list_work_patterns, save_work_pattern
 from aios.storage.task_creation_writer import (
     create_supabase_children_for_existing_parent,
     edit_supabase_children_for_existing_parent,
@@ -839,6 +840,19 @@ class ProjectTaskListItem(BaseModel):
 
 class ProjectTaskListUpdate(BaseModel):
     tasks: list[ProjectTaskListItem]
+
+
+class WorkPatternStepRequest(BaseModel):
+    title: str
+    context: str | None = None
+
+class WorkPatternSaveRequest(BaseModel):
+    name: str
+    context: str | None = None
+    steps: list[WorkPatternStepRequest]
+
+class WorkPatternInstantiateRequest(BaseModel):
+    steps: list[WorkPatternStepRequest]
 
 
 class ProjectWorkAcceptRequest(BaseModel):
@@ -1903,6 +1917,43 @@ def update_project_task_list_http(project_id: str, request: ProjectTaskListUpdat
     # immediate processor run can race the authoritative edit and restore the
     # old title. The project-list mutation itself is authoritative in Supabase.
     return {"project_id": project_id, "tasks": saved, "removed": len(removed_ids)}
+
+
+@app.get("/work-patterns", tags=["work-patterns"])
+def list_work_patterns_http() -> dict:
+    return {"patterns": list_work_patterns(_store())}
+
+@app.post("/work-patterns", tags=["work-patterns"])
+def create_work_pattern_http(request: WorkPatternSaveRequest) -> dict:
+    try: return {"pattern": save_work_pattern(_store(), pattern_id=None, name=request.name, context=request.context, steps=[s.model_dump() for s in request.steps])}
+    except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.get("/work-patterns/{pattern_id}", tags=["work-patterns"])
+def get_work_pattern_http(pattern_id: str) -> dict:
+    pattern=get_work_pattern(_store(),pattern_id)
+    if not pattern: raise HTTPException(status_code=404,detail="Work pattern not found")
+    return {"pattern":pattern}
+
+@app.put("/work-patterns/{pattern_id}", tags=["work-patterns"])
+def update_work_pattern_http(pattern_id: str, request: WorkPatternSaveRequest) -> dict:
+    try: return {"pattern":save_work_pattern(_store(),pattern_id=pattern_id,name=request.name,context=request.context,steps=[s.model_dump() for s in request.steps])}
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc)) from exc
+
+@app.delete("/work-patterns/{pattern_id}", tags=["work-patterns"])
+def delete_work_pattern_http(pattern_id: str) -> dict:
+    try: delete_work_pattern(_store(),pattern_id); return {"deleted":True}
+    except ValueError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
+
+@app.post("/work-patterns/{pattern_id}/duplicate", tags=["work-patterns"])
+def duplicate_work_pattern_http(pattern_id: str) -> dict:
+    try: return {"pattern":duplicate_work_pattern(_store(),pattern_id)}
+    except ValueError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
+
+@app.post("/projects/{project_id}/work-patterns/{pattern_id}/instantiate", tags=["work-patterns"])
+def instantiate_work_pattern_http(project_id: str, pattern_id: str, request: WorkPatternInstantiateRequest) -> dict:
+    if not get_work_pattern(_store(),pattern_id): raise HTTPException(status_code=404,detail="Work pattern not found")
+    try: return {"tasks":instantiate_pattern_for_project(_store(),project_id=project_id,steps=[s.model_dump() for s in request.steps])}
+    except ValueError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
 
 
 @app.get("/projects/{project_id}", tags=["projects"])

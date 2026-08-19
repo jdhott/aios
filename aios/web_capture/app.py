@@ -863,6 +863,60 @@ def _update_project_tasks(project_id: str, tasks: list[dict]) -> dict:
     return dict(response.json() or {})
 
 
+def _work_patterns_api(method: str, path: str, payload: dict | None = None) -> dict:
+    api_url=_api_url(); token=_identity_token(api_url)
+    response=requests.request(method,f"{api_url}{path}",headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json=payload,timeout=30)
+    if not response.ok: raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return dict(response.json() or {})
+
+def _fetch_work_patterns() -> list[dict]: return list(_work_patterns_api("GET","/work-patterns").get("patterns") or [])
+def _fetch_work_pattern(pattern_id: str) -> dict: return dict(_work_patterns_api("GET",f"/work-patterns/{pattern_id}").get("pattern") or {})
+
+def _pattern_rows(steps: list[dict]) -> str:
+    return ''.join('<div class="pattern-row" draggable="true"><button class="drag" type="button">☷</button><div><input name="step_title" required value="'+html.escape(str(s.get("title") or ""),quote=True)+'" placeholder="Task title"><input name="step_context" value="'+html.escape(str(s.get("context") or ""),quote=True)+'" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button></div>' for s in steps)
+
+def _pattern_shell(title: str, body: str) -> str:
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} · AIOS</title><style>body{{margin:0;background:#f7f7f3;color:#17242d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(820px,100%);margin:auto;padding:28px 18px}}a{{color:#264155;font-weight:750}}h1,h2{{color:#264155}}.card,.pattern-row{{background:white;border:1px solid #d9dedf;border-radius:12px}}.card{{padding:16px;margin:12px 0}}.pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:8px;padding:8px;margin:8px 0}}.pattern-row>div{{display:grid;gap:6px}}input,textarea{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d9dedf;border-radius:9px;font:inherit}}textarea{{min-height:80px}}button,.button{{border:1px solid #d9dedf;background:white;color:#264155;border-radius:9px;padding:9px 12px;font:inherit;font-weight:750;cursor:pointer;text-decoration:none}}.primary{{background:#264155;color:white}}.actions{{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}}.drag{{cursor:grab;padding:0;font-size:20px}}.trash{{padding:0}}.muted{{color:#66747d}}.pattern-card{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.pattern-card h2{{margin:0;font-size:1.05rem}}.pattern-card p{{margin:5px 0}}.dragging{{opacity:.45}}</style></head><body><main>{body}</main></body></html>'''
+
+def _pattern_editor(pattern: dict | None = None) -> str:
+    p=dict(pattern or {}); pid=str(p.get("id") or ""); steps=list(p.get("steps") or []) or [{"title":"","context":""}]; action=f"/work-patterns/{pid}" if pid else "/work-patterns"
+    body=f'''<a href="/work-patterns">← Work Patterns</a><h1>{'Edit' if pid else 'New'} Work Pattern</h1><form method="post" action="{action}"><label>Name</label><input name="name" required value="{html.escape(str(p.get('name') or ''),quote=True)}"><p><label>Context <span class="muted">(optional)</span></label></p><textarea name="context">{html.escape(str(p.get('context') or ''))}</textarea><h2>Steps</h2><div data-list>{_pattern_rows(steps)}</div><button type="button" onclick="addRow()">+ Add step</button><div class="actions"><button class="primary" type="submit">Save Pattern</button><a href="/work-patterns">Cancel</a></div></form>'''
+    return _pattern_shell("Work Pattern",body+_pattern_js())
+
+def _pattern_js() -> str:
+    return '''<script>function wire(r){r.querySelector('.trash').onclick=()=>r.remove();r.addEventListener('dragstart',()=>r.classList.add('dragging'));r.addEventListener('dragend',()=>r.classList.remove('dragging'));}function addRow(){const l=document.querySelector('[data-list]'),r=document.createElement('div');r.className='pattern-row';r.draggable=true;r.innerHTML='<button class="drag" type="button">☷</button><div><input name="step_title" required placeholder="Task title"><input name="step_context" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button>';l.appendChild(r);wire(r);r.querySelector('input').focus();}document.querySelectorAll('.pattern-row').forEach(wire);document.querySelector('[data-list]')?.addEventListener('dragover',e=>{e.preventDefault();const l=e.currentTarget,d=l.querySelector('.dragging');if(!d)return;const a=[...l.querySelectorAll('.pattern-row:not(.dragging)')].find(x=>e.clientY<x.getBoundingClientRect().top+x.offsetHeight/2);a?l.insertBefore(d,a):l.appendChild(d);});</script>'''
+
+def _patterns_library(patterns: list[dict]) -> str:
+    cards=''.join(f'''<div class="card pattern-card"><div><h2>{html.escape(str(p.get('name') or 'Untitled Pattern'))}</h2><p class="muted">{html.escape(str(p.get('context') or ''))}</p><span class="muted">{int(p.get('step_count') or 0)} steps</span></div><div class="actions"><a href="/work-patterns/{p.get('id')}">Edit</a><form method="post" action="/work-patterns/{p.get('id')}/duplicate"><button>Duplicate</button></form><form method="post" action="/work-patterns/{p.get('id')}/delete"><button>Delete</button></form></div></div>''' for p in patterns) or '<div class="card">No work patterns yet.</div>'
+    return _pattern_shell("Work Patterns",f'<a href="/projects">← Projects</a><div class="pattern-card"><div><h1>Work Patterns</h1><p class="muted">Reusable ordered sets of work.</p></div><a class="button primary" href="/work-patterns/new">+ New Pattern</a></div>{cards}')
+
+@app.get("/work-patterns")
+def work_patterns_web(_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_patterns_library(_fetch_work_patterns()))
+@app.get("/work-patterns/new")
+def new_work_pattern_web(_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_pattern_editor())
+@app.get("/work-patterns/{pattern_id}")
+def edit_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_pattern_editor(_fetch_work_pattern(pattern_id)))
+@app.post("/work-patterns")
+def create_work_pattern_web(_user: Annotated[str, Depends(_check_basic_auth)],name: Annotated[str,Form()],context: Annotated[str,Form()]="",step_title: Annotated[list[str]|None,Form()]=None,step_context: Annotated[list[str]|None,Form()]=None):
+    titles=list(step_title or []); contexts=list(step_context or [])+[""]*len(titles); _work_patterns_api("POST","/work-patterns",{"name":name,"context":context,"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]}); return RedirectResponse("/work-patterns",303)
+@app.post("/work-patterns/{pattern_id}")
+def update_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)],name: Annotated[str,Form()],context: Annotated[str,Form()]="",step_title: Annotated[list[str]|None,Form()]=None,step_context: Annotated[list[str]|None,Form()]=None):
+    titles=list(step_title or []); contexts=list(step_context or [])+[""]*len(titles); _work_patterns_api("PUT",f"/work-patterns/{pattern_id}",{"name":name,"context":context,"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]}); return RedirectResponse("/work-patterns",303)
+@app.post("/work-patterns/{pattern_id}/duplicate")
+def duplicate_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): _work_patterns_api("POST",f"/work-patterns/{pattern_id}/duplicate",{}); return RedirectResponse("/work-patterns",303)
+@app.post("/work-patterns/{pattern_id}/delete")
+def delete_work_pattern_web(pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]): _work_patterns_api("DELETE",f"/work-patterns/{pattern_id}"); return RedirectResponse("/work-patterns",303)
+@app.get("/projects/{project_id}/work-patterns")
+def choose_project_pattern_web(project_id: str,_user: Annotated[str, Depends(_check_basic_auth)]):
+    cards=''.join(f'<a class="card pattern-card" href="/projects/{project_id}/work-patterns/{p.get("id")}/use"><strong>{html.escape(str(p.get("name") or "Untitled Pattern"))}</strong><span>{int(p.get("step_count") or 0)} steps</span></a>' for p in _fetch_work_patterns()) or '<div class="card">No patterns yet. <a href="/work-patterns/new">Create one.</a></div>'; return HTMLResponse(_pattern_shell("Use Work Pattern",f'<a href="/projects/{project_id}">← Project</a><h1>Use Work Pattern</h1><p>Choose a starting pattern. You can edit every task before creating anything.</p>{cards}'))
+@app.get("/projects/{project_id}/work-patterns/{pattern_id}/use")
+def use_project_pattern_web(project_id: str,pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)]):
+    p=_fetch_work_pattern(pattern_id); body=f'<a href="/projects/{project_id}/work-patterns">← Choose Pattern</a><h1>{html.escape(str(p.get("name") or "Work Pattern"))}</h1><p>Review, edit, reorder, remove, or add tasks. Nothing is created until you accept.</p><form method="post" action="/projects/{project_id}/work-patterns/{pattern_id}/instantiate"><div data-list>{_pattern_rows(list(p.get("steps") or []))}</div><button type="button" onclick="addRow()">+ Add task</button><div class="actions"><button class="primary">Create Project Tasks</button><a href="/projects/{project_id}">Cancel</a></div></form>'; return HTMLResponse(_pattern_shell("Use Work Pattern",body+_pattern_js()))
+@app.post("/projects/{project_id}/work-patterns/{pattern_id}/instantiate")
+def instantiate_project_pattern_web(project_id: str,pattern_id: str,_user: Annotated[str, Depends(_check_basic_auth)],step_title: Annotated[list[str]|None,Form()]=None,step_context: Annotated[list[str]|None,Form()]=None):
+    titles=list(step_title or []); contexts=list(step_context or [])+[""]*len(titles); _work_patterns_api("POST",f"/projects/{project_id}/work-patterns/{pattern_id}/instantiate",{"steps":[{"title":t,"context":c} for t,c in zip(titles,contexts) if t.strip()]}); return RedirectResponse(f"/projects/{project_id}#project-tasks",303)
+
+
 def _update_project_outcome(
     project_id: str,
     outcome: str,
@@ -1326,7 +1380,7 @@ h1 {{
       <h1>Projects</h1>
       <p class="subtitle">Projects with unfinished work.</p>
     </div>
-    <a class="nav-link" href="/">Home</a>
+    <div style="display:flex;gap:10px"><a class="nav-link" href="/work-patterns">Work Patterns</a><a class="nav-link" href="/">Home</a></div>
   </div>
 
   {notice}
@@ -1936,6 +1990,8 @@ h1 {{
   {pending_html}
   {generation_result_html}
   </div>
+
+  <section class="proposal-card" id="work-patterns"><h2>Reusable work</h2><p class="proposal-note">Start with a saved work pattern, review the proposed steps, then create them as normal project tasks.</p><div class="context-actions"><a class="context-save" style="text-decoration:none" href="/projects/{project_id}/work-patterns">Use Work Pattern</a> <a class="secondary-link" href="/work-patterns">Manage Patterns</a></div></section>
 
   <section class="project-task-editor" id="project-tasks">
     <h2>Project tasks</h2>
