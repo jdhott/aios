@@ -11,6 +11,7 @@ WEB_SERVICE="${AIOS_WEB_SERVICE:-aios-web}"
 WEB_RUNTIME_SA="${AIOS_WEB_RUNTIME_SERVICE_ACCOUNT_EMAIL:-aios-web-runtime@${PROJECT}.iam.gserviceaccount.com}"
 WEB_USERNAME="${AIOS_WEB_USERNAME:-aios}"
 PASSWORD_SECRET="${AIOS_WEB_PASSWORD_SECRET:-aios-web-password}"
+SESSION_SECRET="${AIOS_WEB_SESSION_SECRET_SECRET:-aios-web-session-secret}"
 
 API_URL="$(
   gcloud run services describe aios-api \
@@ -46,7 +47,7 @@ gcloud run deploy "$WEB_SERVICE" \
   --service-account "$WEB_RUNTIME_SA" \
   --allow-unauthenticated \
   --set-env-vars "AIOS_WEB_USERNAME=${WEB_USERNAME},AIOS_API_URL=${API_URL}" \
-  --set-secrets "AIOS_WEB_PASSWORD=${PASSWORD_SECRET}:latest" \
+  --set-secrets "AIOS_WEB_PASSWORD=${PASSWORD_SECRET}:latest,AIOS_WEB_SESSION_SECRET=${SESSION_SECRET}:latest" \
   --port 8080 \
   --memory 256Mi \
   --cpu 1 \

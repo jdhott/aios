@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from aios.temporal import serialize_task_datetime
+
 import json
 import os
 from typing import Any
@@ -48,7 +50,7 @@ def _resolve_supabase_task(
     rows = (
         store.client
         .table("tasks")
-        .select("id,title,legacy_notion_id,is_open,is_done,is_archived")
+        .select("id,title,context,project_id,legacy_notion_id,is_open,is_done,is_archived")
         .eq("id", task_id)
         .limit(1)
         .execute()
@@ -61,7 +63,7 @@ def _resolve_supabase_task(
     rows = (
         store.client
         .table("tasks")
-        .select("id,title,legacy_notion_id,is_open,is_done,is_archived")
+        .select("id,title,context,project_id,legacy_notion_id,is_open,is_done,is_archived")
         .eq("legacy_notion_id", task_id)
         .limit(1)
         .execute()
@@ -167,7 +169,8 @@ def get_active_focus_activation(
         .eq("is_open", True)
         .eq("is_done", False)
         .eq("is_archived", False)
-        .is_("activation_disposition", "null")
+        # A Start Here marked not useful remains open while context coaching
+        # is active so the dashboard can keep showing what the user rejected.
         .order("step_order")
         .limit(1)
         .execute()
@@ -312,6 +315,7 @@ def snooze_focus_activation(
     defer_until = str(defer_until or "").strip()
     if not defer_until:
         raise ValueError("defer_until is required.")
+    defer_until = serialize_task_datetime(defer_until)
 
     rows = (
         store.client
@@ -365,6 +369,8 @@ def generate_next_focus_activation(
     client,
     *,
     parent_title: str,
+    task_context: str = "",
+    project_context: str = "",
     completed_steps: list[str],
     unavailable_steps: list[str] | None = None,
 ) -> dict[str, Any] | None:
@@ -410,6 +416,12 @@ def generate_next_focus_activation(
 Parent task:
 {parent_title}
 
+Authoritative Task Context:
+{task_context or "(none)"}
+
+Relevant Project Context:
+{project_context or "(none)"}
+
 Previously completed activation steps:
 {history}
 
@@ -423,6 +435,8 @@ Return JSON only with exactly:
 
 Rules:
 - The action must advance the parent task.
+- Treat Task Context as authoritative; never contradict it.
+- Use Project Context when relevant, but prefer more-specific Task Context.
 - Do not repeat or substantially duplicate any completed or unavailable activation step.
 - The action must be executable now and must not depend on waiting for a reply, delivery, approval, future date, or external event.
 - It must be a concrete action the person can do now.
@@ -515,6 +529,15 @@ def ensure_next_focus_activation(
         return None
 
     parent_task_id = str(resolved["id"])
+
+    # Context coaching owns the next-step decision while it is active. Do not
+    # blindly generate another Start Here until the user saves the draft.
+    coaching_rows = (store.client.table("tasks").select("focus_context_help_state").eq("id", parent_task_id).limit(1).execute().data or [])
+    coaching_state = str((coaching_rows[0] if coaching_rows else {}).get("focus_context_help_state") or "")
+    if coaching_state in {"pending", "answer_pending", "ready"}:
+        print(f"[Focus Activation] Waiting for context coaching on: {parent_task_id}")
+        return None
+
     parent_title = str(
         resolved.get("title")
         or _plain_title(execution_task)
@@ -551,15 +574,28 @@ def ensure_next_focus_activation(
         if not row.get("is_done")
         and not row.get("is_archived")
         and (
-            row.get("activation_disposition") == "not_now"
+            row.get("activation_disposition") in {"not_now", "not_useful"}
             or row.get("defer_until")
         )
         and str(row.get("title") or "").strip()
     ]
 
+    task_context = str(resolved.get("context") or "").strip()
+    project_context = ""
+    project_id = str(resolved.get("project_id") or "").strip()
+    if project_id:
+        try:
+            project_rows = (store.client.table("projects").select("context").eq("id", project_id).limit(1).execute().data or [])
+            if project_rows:
+                project_context = str(project_rows[0].get("context") or "").strip()
+        except Exception as exc:
+            print(f"[Focus Activation] Project context lookup failed: {exc}")
+
     generated = generate_next_focus_activation(
         client,
         parent_title=parent_title,
+        task_context=task_context,
+        project_context=project_context,
         completed_steps=completed_steps,
         unavailable_steps=unavailable_steps,
     )

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from aios.models import Task
+from aios.temporal import serialize_task_datetime, task_datetime
 from aios.storage.supabase_store import SupabaseStore
 
 
@@ -51,10 +52,10 @@ class TaskRepository:
             urgency=row.get("urgency"),
             effort=row.get("effort"),
             duration=row.get("duration"),
-            due_at=parse_datetime(
+            due_at=task_datetime(
                 row.get("due_at")
             ),
-            defer_until=parse_datetime(
+            defer_until=task_datetime(
                 row.get("defer_until")
             ),
             is_just_do_it=row.get(
@@ -283,16 +284,8 @@ class TaskRepository:
             "urgency": task.urgency,
             "effort": task.effort,
             "duration": task.duration,
-            "due_at": (
-                task.due_at.isoformat()
-                if task.due_at
-                else None
-            ),
-            "defer_until": (
-                task.defer_until.isoformat()
-                if task.defer_until
-                else None
-            ),
+            "due_at": serialize_task_datetime(task.due_at),
+            "defer_until": serialize_task_datetime(task.defer_until),
             "is_just_do_it": task.is_just_do_it,
             "is_quick_win": task.is_quick_win,
             "suggested_project": task.suggested_project,

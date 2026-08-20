@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
+import json
+import time
 import html
 import os
 from pathlib import Path
@@ -39,8 +43,8 @@ app = FastAPI(
     openapi_url=None,
 )
 
-security = HTTPBasic()
-
+SESSION_COOKIE_NAME = "aios_session"
+SESSION_DEFAULT_DAYS = 30
 
 def _env(name: str) -> str:
     value = (os.getenv(name) or "").strip()
@@ -48,31 +52,151 @@ def _env(name: str) -> str:
         raise RuntimeError(f"{name} is not configured")
     return value
 
+def _session_secret() -> bytes:
+    return _env("AIOS_WEB_SESSION_SECRET").encode("utf-8")
 
-def _check_basic_auth(
-    credentials: Annotated[HTTPBasicCredentials, Depends(security)],
-) -> str:
+def _session_days() -> int:
+    raw = (os.getenv("AIOS_WEB_SESSION_DAYS") or "").strip()
+    try:
+        value = int(raw) if raw else SESSION_DEFAULT_DAYS
+    except ValueError:
+        value = SESSION_DEFAULT_DAYS
+    return min(max(value, 1), 365)
+
+def _encode_session(username: str) -> str:
+    exp = int(time.time()) + (_session_days() * 86400)
+    payload = json.dumps(
+        {"u": username, "exp": exp},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        _session_secret(),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+def _decode_session(value: str | None) -> str | None:
+    token = str(value or "").strip()
+    if "." not in token:
+        return None
+    encoded, signature = token.rsplit(".", 1)
+    expected = hmac.new(
+        _session_secret(),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        padded = encoded + ("=" * (-len(encoded) % 4))
+        payload = json.loads(
+            base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        )
+        username = str(payload.get("u") or "")
+        expires_at = int(payload.get("exp") or 0)
+    except Exception:
+        return None
+    if expires_at <= int(time.time()):
+        return None
+    expected_username = _env("AIOS_WEB_USERNAME")
+    if not hmac.compare_digest(
+        username.encode("utf-8"),
+        expected_username.encode("utf-8"),
+    ):
+        return None
+    return username
+
+def _safe_login_next(value: str | None) -> str:
+    target = str(value or "").strip()
+    if not target.startswith("/") or target.startswith("//"):
+        return "/"
+    return target
+
+def _login_page(next_url: str = "/", error: str = "") -> str:
+    safe_next = html.escape(_safe_login_next(next_url), quote=True)
+    error_html = (
+        f'<p style="color:#a33">{html.escape(error)}</p>'
+        if error else ""
+    )
+    return f'''<!doctype html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · AIOS</title>
+<style>
+body{{margin:0;min-height:100dvh;background:#f7f7f3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center}}
+main{{width:min(420px,100%);padding:20px}}.card{{background:white;border:1px solid #d9dedf;border-radius:16px;padding:22px}}
+input,button{{width:100%;box-sizing:border-box;min-height:44px;margin-top:8px;padding:9px 11px;font:inherit}}
+button{{background:#264155;color:white;border:0;border-radius:10px;font-weight:750}}label{{display:block;margin-top:12px;font-weight:700}}h1{{color:#264155}}
+</style></head><body><main><section class="card">
+<h1>AIOS</h1><p>Sign in to continue.</p>{error_html}
+<form method="post" action="/login">
+<input type="hidden" name="next" value="{safe_next}">
+<label>Username</label><input name="username" autocomplete="username" required autofocus>
+<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button>
+</form></section></main></body></html>'''
+
+def _check_basic_auth(request: Request) -> str:
+    username = _decode_session(request.cookies.get(SESSION_COOKIE_NAME))
+    if username:
+        return username
+    next_url = _safe_login_next(
+        request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    )
+    raise HTTPException(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": f"/login?next={quote_plus(next_url)}"},
+    )
+
+@app.get("/login", response_class=HTMLResponse)
+def login_web(request: Request, next: str = "/"):
+    username = _decode_session(request.cookies.get(SESSION_COOKIE_NAME))
+    if username:
+        return RedirectResponse(_safe_login_next(next), status_code=303)
+    return HTMLResponse(_login_page(next))
+
+@app.post("/login")
+def login_submit_web(
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    next: Annotated[str, Form()] = "/",
+):
     expected_username = _env("AIOS_WEB_USERNAME")
     expected_password = _env("AIOS_WEB_PASSWORD")
-
-    username_ok = hmac.compare_digest(
-        credentials.username.encode("utf-8"),
-        expected_username.encode("utf-8"),
+    ok = (
+        hmac.compare_digest(str(username).encode(), expected_username.encode())
+        and hmac.compare_digest(str(password).encode(), expected_password.encode())
     )
-    password_ok = hmac.compare_digest(
-        credentials.password.encode("utf-8"),
-        expected_password.encode("utf-8"),
-    )
-
-    if not (username_ok and password_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
+    if not ok:
+        return HTMLResponse(
+            _login_page(next, "Invalid username or password."),
+            status_code=401,
         )
+    response = RedirectResponse(_safe_login_next(next), status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        _encode_session(expected_username),
+        max_age=_session_days() * 86400,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
 
-    return credentials.username
-
+@app.post("/logout")
+def logout_web():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 def _api_url() -> str:
     return _env("AIOS_API_URL").rstrip("/")
@@ -187,8 +311,6 @@ def _task_snooze_control_html(
         + preset_button('three_days', '3 days')
         + preset_button('one_week', '1 week')
         + custom_controls
-        + '<button class="snooze-cancel" type="button" '
-          'onclick="this.closest(\'details\').removeAttribute(\'open\')">Cancel</button>'
         + '</div></details>'
     )
 
@@ -266,13 +388,17 @@ def _split_brain_dump(text: str) -> list[str]:
     return items
 
 
-def _capture_many(lines: list[str]) -> tuple[int, list[str]]:
+def _capture_many(
+    lines: list[str],
+    *,
+    capture_interface: str = "cloud_run_web",
+) -> tuple[int, list[str]]:
     sent = 0
     failures: list[str] = []
 
     for line in lines:
         try:
-            _capture_to_aios(line)
+            _capture_to_aios(line, capture_interface=capture_interface)
             sent += 1
         except Exception:
             failures.append(line)
@@ -319,6 +445,27 @@ def _update_task_detail(task_id: str, payload: dict) -> dict:
         )
 
     return dict((response.json() or {}).get("task") or {})
+
+
+def _request_focus_context_help(task_id: str) -> dict:
+    api_url = _api_url(); token = _identity_token(api_url)
+    response = requests.post(f"{api_url}/tasks/{task_id}/focus-context/help", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    if not response.ok: raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return dict(response.json() or {})
+
+
+def _answer_focus_context(task_id: str, answer: str) -> dict:
+    api_url = _api_url(); token = _identity_token(api_url)
+    response = requests.post(f"{api_url}/tasks/{task_id}/focus-context/answer", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={"answer": answer}, timeout=30)
+    if not response.ok: raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return dict(response.json() or {})
+
+
+def _save_focus_context(task_id: str, context: str) -> dict:
+    api_url = _api_url(); token = _identity_token(api_url)
+    response = requests.post(f"{api_url}/tasks/{task_id}/focus-context", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={"context": context}, timeout=30)
+    if not response.ok: raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return dict(response.json() or {})
 
 
 def _safe_return_to(value: str | None) -> str:
@@ -3543,14 +3690,14 @@ def _page(
             if completed_summary:
                 completed_summary_html = (
                     '<div class="completed-today-summary">'
-                    '<div class="completed-today-summary-label">Today\'s focus</div>'
+                    '<div class="completed-today-summary-label">Today\'s summary</div>'
                     f'<div class="completed-today-summary-text">{html.escape(completed_summary)}</div>'
                     '</div>'
                 )
             elif completed_summary_state == "pending":
                 completed_summary_html = (
                     '<div class="completed-today-summary pending">'
-                    '<div class="completed-today-summary-label">Today\'s focus</div>'
+                    '<div class="completed-today-summary-label">Today\'s summary</div>'
                     '<div class="completed-today-summary-text">Updating the day\'s summary…</div>'
                     '</div>'
                 )
@@ -3620,12 +3767,18 @@ def _page(
         focus_id = str(focus.get("id") or "")
         safe_id = html.escape(focus_id)
         title = html.escape(str(focus.get("title") or "Untitled task"))
+        focus_context = str(focus.get("context") or "").strip()
+        focus_context_state = str(focus.get("focus_context_help_state") or "").strip()
+        focus_context_draft = str(focus.get("focus_context_draft") or "").strip()
+        focus_context_question = str(focus.get("focus_context_question") or "").strip()
         meta = []
         if focus.get("execution_rank") is not None: meta.append(f"Rank {html.escape(str(focus.get('execution_rank')))}")
         if focus.get("execution_score") is not None: meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
         if focus.get("importance"): meta.append(html.escape(str(focus.get("importance"))))
 
         activation_title = str(activation.get("title") or "").strip()
+        activation_disposition = str(activation.get("activation_disposition") or "").strip()
+        activation_not_useful = activation_disposition == "not_useful"
         activation_pending = bool(focus.get("activation_pending"))
 
         # Activation child is canonical. Never fall back to stale legacy
@@ -3652,6 +3805,12 @@ def _page(
                 else ""
             )
 
+        focus_step_actions_html = (
+            '<div class="focus-step-actions"><span class="focus-rejected-note">Marked not useful</span></div>'
+            if activation_not_useful
+            else ""
+        )
+
         starter_html = ""
 
         if activation_pending:
@@ -3677,11 +3836,20 @@ def _page(
                     '<div class="focus-start-main">'
                     f'<a class="focus-start-step" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
                     '</div>'
-                    f'<form class="focus-not-now-form" method="post" action="/tasks/{safe_activation_id}/not-now">'
-                    '<button class="focus-not-now" type="submit">Not now</button>'
-                    '</form>'
-                    '</div>'
-                    '</div>'
+                    + (
+                        focus_step_actions_html
+                        if activation_not_useful
+                        else (
+                            '<div class="focus-step-actions">'
+                            f'<form class="focus-not-now-form" method="post" action="/tasks/{safe_activation_id}/not-now">'
+                            '<button class="focus-not-now" type="submit">Not now</button></form>'
+                            f'<form class="focus-not-useful-form" method="post" action="/tasks/{safe_activation_id}/not-useful">'
+                            '<button class="focus-not-useful" type="submit">Not useful</button></form>'
+                            '</div>'
+                        )
+                    )
+                    + '</div>'
+                    + '</div>'
                 )
             else:
                 starter_html = (
@@ -3695,6 +3863,35 @@ def _page(
             f'<div class="focus-timebox">Give it {html.escape(timebox_text)}'
             '<span> — only for this starting move.</span></div>'
         ) if timebox_text else ""
+
+        context_value = focus_context_draft if focus_context_state in {"ready", "answer_pending"} else focus_context
+        context_summary = "Edit context" if focus_context else "Add context"
+        context_question_html = ""
+        if focus_context_state == "ready" and focus_context_question:
+            context_question_html = (
+                '<div class="focus-context-question"><strong>One useful question:</strong> ' + html.escape(focus_context_question) + '</div>'
+                + f'<form class="focus-context-answer-form" method="post" action="/tasks/{safe_id}/focus-context/answer">'
+                + '<label>Your answer<textarea class="focus-autoexpand focus-context-answer" name="answer" rows="2" required placeholder="Type your answer here…"></textarea></label>'
+                + '<button class="focus-context-answer-button" type="submit">Use my answer</button></form>'
+            )
+        context_help_status = (
+            '<div class="focus-context-pending"><span class="mini-spinner"></span> <span class="focus-context-processing"><span class="focus-context-spinner" aria-hidden="true"></span>Improving your context…</span></div>'
+            if focus_context_state in {"pending", "answer_pending"} else ""
+        )
+        context_help_button = (
+            "" if focus_context_state in {"pending", "answer_pending", "ready"} else
+            f'<form method="post" action="/tasks/{safe_id}/focus-context/help"><button class="focus-context-help-button" type="submit">Help me improve this context</button></form>'
+        )
+        focus_context_html = (
+            '<details class="focus-context-panel"' + (' open' if focus_context_state in {"pending", "answer_pending", "ready"} else '') + '>'
+            + f'<summary>{context_summary}</summary><div class="focus-context-body">'
+            + '<p>Tell AIOS what is already decided, what matters, or what would make the next step more relevant.</p>'
+            + context_question_html + context_help_status
+            + f'<form method="post" action="/tasks/{safe_id}/focus-context">'
+            + f'<textarea name="context" rows="4" placeholder="What should AIOS know about this task?" class="focus-autoexpand">{html.escape(context_value)}</textarea>'
+            + '<button class="focus-context-save" type="submit">Save context &amp; refresh Start Here</button></form>'
+            + context_help_button + '</div></details>'
+        )
 
         focus_card = (
             '<section class="focus-card" id="focus-card">'
@@ -3718,6 +3915,7 @@ def _page(
             '</div>'
             + starter_html
             + timebox_html
+            + focus_context_html
             + '</section>'
         )
 
@@ -3748,7 +3946,7 @@ function showFocusUpdating() {
 
     pending_refresh_script = ""
 
-    refresh_needed = refresh_pending
+    refresh_needed = refresh_pending or bool(focus and str(focus.get("focus_context_help_state") or "") == "pending")
 
     if refresh_needed:
         pending_refresh_script = """
@@ -3812,38 +4010,23 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       padding: max(24px, env(safe-area-inset-top)) 18px
                max(32px, env(safe-area-inset-bottom));
     }}
-    .dashboard-header {{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:18px;
-      margin-bottom:22px;
-    }}
-    .dashboard-subtitle {{
-      margin:4px 0 0;
-      color:var(--muted);
-      font-size:.98rem;
-    }}
-    .dashboard-nav {{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      margin-top:7px;
-    }}
-    .dashboard-nav a {{
-      min-height:40px;
-      display:inline-flex;
-      align-items:center;
-      padding:0 13px;
-      border-radius:10px;
-      color:var(--navy);
-      text-decoration:none;
-      font-weight:750;
-      white-space:nowrap;
-    }}
-    .dashboard-nav a:hover {{ background:#eceeed; }}
+    .app-header {{ display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:24px; }}
+    .app-home {{ color:var(--navy); text-decoration:none; font-weight:850; font-size:1.05rem; letter-spacing:-.02em; white-space:nowrap; }}
+    .dashboard-nav {{ display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-left:auto; }}
+    .dashboard-nav a, .menu-button {{ min-height:40px; display:inline-flex; align-items:center; padding:0 13px; border:0; border-radius:10px; background:transparent; color:var(--navy); text-decoration:none; font:inherit; font-weight:750; white-space:nowrap; cursor:pointer; }}
+    .dashboard-nav a:hover, .menu-button:hover {{ background:#eceeed; }}
     .dashboard-nav .new-task-link {{ background:var(--yellow); }}
     .dashboard-nav .new-task-link:hover {{ background:#f6bf2d; }}
+    .nav-menu {{ position:relative; }}
+    .nav-menu summary {{ list-style:none; }}
+    .nav-menu summary::-webkit-details-marker {{ display:none; }}
+    .menu-button {{ font-size:1.2rem; padding:0 11px; }}
+    .menu-panel {{ position:absolute; z-index:30; top:46px; right:0; min-width:190px; padding:7px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 10px 30px rgba(24,40,52,.14); }}
+    .menu-panel a, .menu-panel button {{ width:100%; min-height:42px; display:flex; align-items:center; box-sizing:border-box; padding:0 11px; border:0; border-radius:8px; background:transparent; color:var(--navy); text-decoration:none; font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }}
+    .menu-panel a:hover, .menu-panel button:hover {{ background:#f3f4f2; }}
+    .page-heading {{ margin-bottom:22px; }}
+    .page-heading .brand {{ margin-bottom:4px; }}
+    .dashboard-subtitle {{ margin:0; color:var(--muted); font-size:.98rem; }}
     .capture-heading {{
       display:flex;
       justify-content:space-between;
@@ -3906,13 +4089,40 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .focus-start-main {{ min-width:0; }}
     .focus-start-step {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.45; font-weight:700; }}
     .focus-start-step:hover {{ text-decoration:underline; }}
-    .focus-not-now-form {{ display:block; }}
-    .focus-not-now {{
+    .focus-context-panel {{ margin:14px 44px 0 44px; padding-top:12px; border-top:1px solid rgba(38,65,85,.12); }}
+    .focus-context-panel > summary {{ color:var(--navy); font-size:.84rem; font-weight:800; cursor:pointer; width:max-content; }}
+    .focus-context-body {{ margin-top:10px; max-width:720px; }}
+    .focus-context-body p {{ margin:0 0 9px; color:var(--muted); font-size:.84rem; line-height:1.4; }}
+    .focus-context-question {{ margin:0 0 10px; padding:9px 11px; border-radius:9px; background:rgba(255,255,255,.62); color:var(--ink); font-size:.86rem; line-height:1.4; }}
+    .focus-context-body textarea {{ width:100%; resize:vertical; border:1px solid var(--border); border-radius:10px; padding:10px 11px; font:inherit; font-size:.9rem; line-height:1.4; background:white; }}
+    .focus-context-save, .focus-context-help-button, .focus-context-answer-button {{ margin-top:8px; min-height:38px; border:0; border-radius:9px; padding:0 12px; font:inherit; font-size:.84rem; font-weight:800; cursor:pointer; }}
+    .focus-context-save {{ background:var(--navy); color:white; }}
+    .focus-context-help-button {{ background:transparent; color:var(--navy); padding-left:0; }}
+    .focus-context-answer-form {{ margin:0 0 12px; }}
+    .focus-context-answer-form label {{ color:var(--navy); font-size:.82rem; font-weight:800; }}
+    .focus-context-answer-form textarea {{ display:block; margin-top:6px; min-height:72px; }}
+    .focus-context-answer-button {{ width:max-content; background:white; color:var(--navy); border:1px solid var(--border); }}
+    .focus-context-answer {{ font-weight:400 !important; }}
+    .focus-autoexpand {{ overflow-y:hidden; resize:vertical; }}
+    .focus-context-processing {{ display:inline-flex; align-items:center; gap:.55rem; }}
+    .focus-context-spinner {{
+      width:1rem; height:1rem; border:2px solid currentColor;
+      border-right-color:transparent; border-radius:50%;
+      display:inline-block; animation:focus-context-spin .8s linear infinite;
+      flex:0 0 auto;
+    }}
+    @keyframes focus-context-spin {{ to {{ transform:rotate(360deg); }} }}
+    .focus-context-pending {{ display:flex; align-items:center; gap:8px; margin:8px 0; color:var(--muted); font-size:.84rem; }}
+
+    .focus-step-actions {{ display:flex; align-items:center; gap:10px; }}
+    .focus-not-now-form, .focus-not-useful-form {{ display:block; }}
+    .focus-not-now, .focus-not-useful {{
       border:0; background:transparent; color:var(--muted);
       font:inherit; font-size:.84rem; font-weight:700;
       cursor:pointer; padding:7px 4px;
     }}
-    .focus-not-now:hover {{ color:var(--navy); text-decoration:underline; }}
+    .focus-not-now:hover, .focus-not-useful:hover {{ color:var(--navy); text-decoration:underline; }}
+    .focus-rejected-note {{ color:var(--muted); font-weight:800; font-size:.86rem; white-space:nowrap; }}
     .focus-timebox {{ margin:10px 44px 0 54px; color:var(--navy); font-size:.88rem; font-weight:800; }}
     .focus-timebox span {{ color:var(--muted); font-weight:500; }}
     .brand {{
@@ -4081,8 +4291,11 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       font-weight:800;
     }}
     @media (max-width:560px) {{
-      .dashboard-header {{ flex-direction:column; }}
-      .dashboard-nav {{ margin-top:0; }}
+      .app-header {{ gap:8px; }}
+      .dashboard-nav {{ gap:3px; }}
+      .dashboard-nav > a:not(.new-task-link) {{ display:none; }}
+      .dashboard-nav a, .menu-button {{ padding:0 10px; }}
+      .app-home {{ font-size:1rem; }}
       .tasks-toolbar {{ align-items:flex-start; }}
       .section-toggle-controls {{ flex-direction:column; }}
     }}
@@ -4096,17 +4309,25 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
 </head>
 <body>
   <main>
-    <div class="dashboard-header">
-      <div>
-        <h1 class="brand">Dashboard</h1>
-        <p class="dashboard-subtitle">Capture, prioritize, and act.</p>
-      </div>
+    <header class="app-header">
+      <a class="app-home" href="/">AIOS</a>
       <nav class="dashboard-nav" aria-label="Primary">
         <a href="/projects">Projects</a>
         <a href="/reviews">{f"Reviews ({review_count})" if review_count else "Reviews"}</a>
-        <a href="/work-patterns">Work Patterns</a>
-        <a class="new-task-link" href="/tasks/new">New Task</a>
+        <a class="new-task-link" href="/tasks/new">+ New Task</a>
+        <details class="nav-menu" id="dashboard-nav-menu">
+          <summary class="menu-button" aria-label="More navigation" title="Menu">☰</summary>
+          <div class="menu-panel">
+            <a href="/work-patterns">Work Patterns</a>
+            <a href="/journal">Journal</a>
+            <form method="post" action="/logout"><button type="submit">Sign Out</button></form>
+          </div>
+        </details>
       </nav>
+    </header>
+    <div class="page-heading">
+      <h1 class="brand">Dashboard</h1>
+      <p class="dashboard-subtitle">Capture, prioritize, and act.</p>
     </div>
     {notice}
     {focus_card}
@@ -4149,6 +4370,39 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
   </main>
   <script>
     (() => {{
+      const navMenu = document.getElementById("dashboard-nav-menu");
+      if (navMenu) {{
+        document.addEventListener("click", (event) => {{
+          if (navMenu.open && !navMenu.contains(event.target)) {{
+            navMenu.open = false;
+          }}
+        }});
+        document.addEventListener("keydown", (event) => {{
+          if (event.key === "Escape" && navMenu.open) {{
+            navMenu.open = false;
+            const trigger = navMenu.querySelector("summary");
+            if (trigger) trigger.focus();
+          }}
+        }});
+      }}
+
+      function resizeFocusTextarea(el) {{
+        if (!el || !el.classList.contains("focus-autoexpand")) return;
+        el.style.height = "auto";
+        const lineHeight = parseFloat(window.getComputedStyle(el).lineHeight) || 24;
+        const maxHeight = lineHeight * 10 + 28;
+        el.style.height = Math.min(el.scrollHeight, maxHeight) + "px";
+        el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+      }}
+
+      document.querySelectorAll("textarea.focus-autoexpand").forEach((el) => {{
+        resizeFocusTextarea(el);
+        el.addEventListener("input", () => resizeFocusTextarea(el));
+      }});
+
+      if (document.querySelector(".focus-context-processing")) {{
+        window.setTimeout(() => window.location.reload(), 2500);
+      }}
       const scrollKey = "aios-task-scroll-y";
 
       const saveScroll = () => {{
@@ -4205,6 +4459,35 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
           }} else {{
             saveScroll();
           }}
+        }});
+      }});
+
+      const snoozeMenus = Array.from(
+        document.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze")
+      );
+
+      snoozeMenus.forEach((menu) => {{
+        menu.addEventListener("toggle", () => {{
+          if (!menu.open) return;
+          snoozeMenus.forEach((other) => {{
+            if (other !== menu) other.open = false;
+          }});
+        }});
+      }});
+
+      document.addEventListener("click", (event) => {{
+        snoozeMenus.forEach((menu) => {{
+          if (menu.open && !menu.contains(event.target)) menu.open = false;
+        }});
+      }});
+
+      document.addEventListener("keydown", (event) => {{
+        if (event.key !== "Escape") return;
+        snoozeMenus.forEach((menu) => {{
+          if (!menu.open) return;
+          menu.open = false;
+          const trigger = menu.querySelector("summary");
+          if (trigger) trigger.focus();
         }});
       }});
 
@@ -4296,6 +4579,8 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
   </script>
 {focus_submit_feedback_script}
 {pending_refresh_script}
+
+
 </body>
 </html>"""
 
@@ -4636,12 +4921,22 @@ def capture_service_worker():
 
 @app.post('/capture/submit')
 async def capture_pwa_submit(request: Request, _user: Annotated[str, Depends(_check_basic_auth)]):
-    payload=await request.json(); text=str(payload.get('text') or '').strip()
-    if not has_meaningful_capture_text(text): raise HTTPException(status_code=400,detail='Please enter something.')
-    try:
-        result=_capture_to_aios(text,capture_interface='capture_pwa_v1'); return {'ok':True,'id':result.get('id')}
-    except Exception as exc:
-        raise HTTPException(status_code=502,detail='AIOS could not accept the capture.') from exc
+    payload = await request.json()
+    text = str(payload.get('text') or '').strip()
+    lines = _split_brain_dump(text)
+    if not lines:
+        raise HTTPException(status_code=400, detail='Please enter something.')
+
+    sent, failures = _capture_many(lines, capture_interface='capture_pwa_v1')
+    if failures:
+        if sent == 0:
+            raise HTTPException(status_code=502, detail='AIOS could not accept the capture.')
+        raise HTTPException(
+            status_code=502,
+            detail=f'{sent} item(s) sent, {len(failures)} failed. Your text is still saved here—retry the failed lines.',
+        )
+
+    return {'ok': True, 'sent': sent}
 
 @app.get("/health")
 def health() -> dict:
@@ -5535,6 +5830,36 @@ def task_detail_web(
         )
 
 
+@app.post("/tasks/{task_id}/focus-context/help")
+def focus_context_help_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]):
+    try:
+        _request_focus_context_help(task_id)
+        return RedirectResponse(url="/?refresh_focus=1#focus-card", status_code=303)
+    except Exception as exc:
+        print("[Focus Context] Help request failed:", exc)
+        return RedirectResponse(url="/?error=Context+help+could+not+be+requested.#focus-card", status_code=303)
+
+
+@app.post("/tasks/{task_id}/focus-context/answer")
+def focus_context_answer_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)], answer: Annotated[str, Form()] = ""):
+    try:
+        _answer_focus_context(task_id, answer.strip())
+        return RedirectResponse(url="/?refresh_focus=1#focus-card", status_code=303)
+    except Exception as exc:
+        print("[Focus Context] Answer failed:", exc)
+        return RedirectResponse(url="/?error=Context+answer+could+not+be+used.#focus-card", status_code=303)
+
+
+@app.post("/tasks/{task_id}/focus-context")
+def focus_context_save_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)], context: Annotated[str, Form()] = ""):
+    try:
+        _save_focus_context(task_id, context.strip())
+        return RedirectResponse(url="/?message=Context+saved.&refresh_focus=1#focus-card", status_code=303)
+    except Exception as exc:
+        print("[Focus Context] Save failed:", exc)
+        return RedirectResponse(url="/?error=Context+could+not+be+saved.#focus-card", status_code=303)
+
+
 @app.post("/tasks/{task_id}/edit")
 def edit_task_web(
     task_id: str,
@@ -5698,6 +6023,15 @@ def not_now_task_web(
         )
 
 
+@app.post("/tasks/{task_id}/not-useful")
+def not_useful_task_web(task_id: str, _user: Annotated[str, Depends(_check_basic_auth)]) -> RedirectResponse:
+    try:
+        _task_action(task_id, "not-useful")
+        return RedirectResponse(url="/?refresh_focus=1#focus-card", status_code=303)
+    except Exception:
+        return RedirectResponse(url="/?error=Starting+step+feedback+could+not+be+saved.", status_code=303)
+
+
 @app.post("/tasks/{task_id}/snooze")
 def snooze_task_web(
     task_id: str,
@@ -5780,3 +6114,442 @@ def submit(
         url=f"/?message={sent}+{label}+sent+to+AIOS.",
         status_code=303,
     )
+
+# === DAILY JOURNAL V1 ===
+def _journal_api(method: str, path: str, payload: dict | None = None) -> dict:
+    api_url = _api_url()
+    token = _identity_token(api_url)
+    response = requests.request(method, f"{api_url}{path}", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload, timeout=30)
+    if not response.ok:
+        raise RuntimeError(f"AIOS API returned {response.status_code}: {response.text}")
+    return response.json()
+
+
+def _journal_today_iso() -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    zone_name = os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto").strip()
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone = ZoneInfo("America/Toronto")
+    return datetime.now(zone).date().isoformat()
+
+
+def _journal_page(journal_date: str, payload: dict) -> str:
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    day = date.fromisoformat(journal_date)
+    today = date.fromisoformat(_journal_today_iso())
+
+    prev = (day - timedelta(days=1)).isoformat()
+    nxt = (day + timedelta(days=1)).isoformat()
+
+    heading = (
+        "Today"
+        if day == today
+        else day.strftime("%A, %B %-d, %Y")
+    )
+
+    body = html.escape(
+        str((payload.get("journal") or {}).get("body") or "")
+    )
+
+    completed = list(payload.get("completed_work") or [])
+
+    completion_summary = str(
+        payload.get("completion_summary") or ""
+    ).strip()
+
+    completion_summary_state = str(
+        payload.get("completion_summary_state") or "empty"
+    ).strip().lower()
+
+    completed_count = int(
+        payload.get("completed_count") or len(completed)
+    )
+
+    try:
+        zone = ZoneInfo(
+            os.getenv(
+                "AIOS_LOCAL_TIMEZONE",
+                "America/Toronto",
+            ).strip()
+        )
+    except Exception:
+        zone = ZoneInfo("America/Toronto")
+
+    rows = []
+
+    for task in completed:
+        title = html.escape(
+            str(task.get("title") or "Untitled")
+        )
+
+        project = html.escape(
+            str(task.get("project_name") or "")
+        )
+
+        raw = str(task.get("completed_at") or "")
+        when = "Completed"
+
+        if raw:
+            try:
+                dt = datetime.fromisoformat(
+                    raw.replace("Z", "+00:00")
+                )
+                if dt.tzinfo:
+                    dt = dt.astimezone(zone)
+                when = dt.strftime("%-I:%M %p")
+            except (TypeError, ValueError):
+                pass
+
+        meta = (
+            (
+                f'<span class="project">{project}</span>'
+                if project
+                else ""
+            )
+            + f'<span>{html.escape(when)}</span>'
+        )
+
+        rows.append(
+            '<li>'
+            '<span class="check">✓</span>'
+            '<div>'
+            f'<strong>{title}</strong>'
+            f'<div class="meta">{meta}</div>'
+            '</div>'
+            '</li>'
+        )
+
+    completed_html = (
+        "<ul>" + "".join(rows) + "</ul>"
+        if rows
+        else '<p class="empty">No completed tasks recorded for this day.</p>'
+    )
+
+    if completion_summary:
+        summary_html = (
+            '<div class="summary-text">'
+            f'{html.escape(completion_summary)}'
+            '</div>'
+        )
+    elif completion_summary_state == "pending":
+        summary_html = (
+            '<div class="summary-text pending">'
+            "Updating the day's summary…"
+            '</div>'
+        )
+    else:
+        summary_html = (
+            '<div class="summary-text empty">'
+            "No daily summary yet."
+            '</div>'
+        )
+
+    detail_label = (
+        f"Completed work · {completed_count}"
+        if completed_count
+        else "Completed work"
+    )
+
+    focus_label = (
+        "Today's summary"
+        if day == today
+        else "Day's summary"
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(heading)} - Daily Journal</title>
+<style>
+:root{{
+  --bg:#f7f7f3;
+  --card:#fff;
+  --ink:#17242d;
+  --navy:#264155;
+  --muted:#66747d;
+  --border:#d9dedf;
+  --ok:#2d6a4f;
+}}
+*{{box-sizing:border-box}}
+body{{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}}
+main{{
+  width:min(860px,100%);
+  margin:0 auto;
+  padding:28px 18px 46px;
+}}
+.top{{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  align-items:flex-start;
+  margin-bottom:22px;
+}}
+.back{{
+  color:var(--navy);
+  text-decoration:none;
+  font-weight:750;
+}}
+nav{{display:flex;gap:8px}}
+nav a{{
+  color:var(--navy);
+  text-decoration:none;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:7px 10px;
+  background:white;
+  font-weight:700;
+}}
+h1{{
+  margin:0;
+  color:var(--navy);
+  font-size:2rem;
+}}
+.label{{
+  margin-top:4px;
+  color:var(--muted);
+}}
+.card{{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:20px;
+  margin-top:18px;
+  box-shadow:0 4px 18px rgba(38,65,85,.04);
+}}
+.summary-label{{
+  color:var(--navy);
+  font-size:.78rem;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  margin-bottom:7px;
+}}
+.summary-text{{
+  font-size:1.05rem;
+  line-height:1.55;
+}}
+.summary-text.pending,
+.summary-text.empty{{
+  color:var(--muted);
+}}
+.completed-details{{
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px solid var(--border);
+}}
+.completed-details summary{{
+  cursor:pointer;
+  color:var(--navy);
+  font-weight:750;
+  list-style:none;
+}}
+.completed-details summary::-webkit-details-marker{{
+  display:none;
+}}
+.completed-details summary::before{{
+  content:"▸";
+  display:inline-block;
+  margin-right:7px;
+  transition:transform .12s ease;
+}}
+.completed-details[open] summary::before{{
+  transform:rotate(90deg);
+}}
+ul{{
+  list-style:none;
+  margin:8px 0 0;
+  padding:0;
+}}
+li{{
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr);
+  gap:10px;
+  padding:10px 0;
+  border-bottom:1px solid var(--border);
+}}
+li:last-child{{border-bottom:0}}
+.check{{
+  color:var(--ok);
+  font-weight:900;
+}}
+.meta{{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:4px;
+  color:var(--muted);
+  font-size:.82rem;
+}}
+.project{{
+  color:var(--navy);
+  font-weight:700;
+}}
+.empty{{color:var(--muted)}}
+.card h2{{
+  margin:0 0 6px;
+  color:var(--navy);
+  font-size:1.2rem;
+}}
+.note{{
+  margin:0 0 14px;
+  color:var(--muted);
+}}
+textarea{{
+  display:block;
+  width:100%;
+  min-height:260px;
+  resize:vertical;
+  border:1px solid var(--border);
+  border-radius:13px;
+  padding:14px;
+  background:white;
+  color:var(--ink);
+  font:inherit;
+  font-size:1rem;
+  line-height:1.5;
+}}
+textarea:focus{{
+  outline:2px solid #0b66d4;
+}}
+#saveStatus{{
+  min-height:24px;
+  margin-top:8px;
+  color:var(--muted);
+  font-size:.86rem;
+}}
+#saveStatus.saved{{color:var(--ok)}}
+@media(max-width:560px){{
+  main{{padding:18px 12px 34px}}
+  .top{{flex-direction:column}}
+  nav{{width:100%;justify-content:space-between}}
+  .card{{padding:16px}}
+  textarea{{min-height:34dvh}}
+}}
+</style>
+</head>
+<body>
+<main>
+<div class="top">
+  <div>
+    <a class="back" href="/">← Dashboard</a>
+    <h1>{html.escape(heading)}</h1>
+    <div class="label">Daily Journal</div>
+  </div>
+  <nav aria-label="Journal dates">
+    <a href="/journal/{prev}" aria-label="Previous day">←</a>
+    <a href="/journal/{_journal_today_iso()}">Today</a>
+    <a href="/journal/{nxt}" aria-label="Next day">→</a>
+  </nav>
+</div>
+
+<section class="card">
+  <div class="summary-label">{html.escape(focus_label)}</div>
+  {summary_html}
+
+  <details class="completed-details">
+    <summary>{html.escape(detail_label)}</summary>
+    {completed_html}
+  </details>
+</section>
+
+<section class="card">
+  <h2>Your journal</h2>
+  <p class="note">Anything worth remembering about today?</p>
+  <textarea
+    id="journalBody"
+    maxlength="50000"
+    placeholder="Write anything you want to remember…"
+  >{body}</textarea>
+  <div id="saveStatus" role="status" aria-live="polite"></div>
+</section>
+</main>
+
+<script>
+(() => {{
+  const body=document.getElementById("journalBody");
+  const status=document.getElementById("saveStatus");
+
+  let timer=null;
+  let lastSaved=body.value;
+
+  async function save(){{
+    if(body.value===lastSaved)return;
+
+    status.textContent="Saving…";
+    status.className="";
+
+    try{{
+      const r=await fetch(
+        "/journal/{journal_date}/save",
+        {{
+          method:"POST",
+          headers:{{"Content-Type":"application/json"}},
+          body:JSON.stringify({{body:body.value}})
+        }}
+      );
+
+      if(!r.ok)throw new Error();
+
+      lastSaved=body.value;
+      status.textContent="Saved";
+      status.className="saved";
+    }}catch(_e){{
+      status.textContent="Couldn’t save. Your text is still here.";
+    }}
+  }}
+
+  body.addEventListener("input",()=>{{
+    status.textContent="Unsaved";
+    status.className="";
+    clearTimeout(timer);
+    timer=setTimeout(save,700);
+  }});
+}})();
+</script>
+</body>
+</html>"""
+
+
+@app.get("/journal")
+def journal_today_web(_user: Annotated[str, Depends(_check_basic_auth)]):
+    return RedirectResponse(f"/journal/{_journal_today_iso()}", status_code=303)
+
+
+@app.get("/journal/{journal_date}")
+def journal_day_web(journal_date: str, _user: Annotated[str, Depends(_check_basic_auth)]):
+    from datetime import date
+    try:
+        date.fromisoformat(journal_date)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid journal date")
+    try:
+        payload = _journal_api("GET", f"/journal/{journal_date}")
+    except Exception:
+        payload = {
+            "journal": {"journal_date": journal_date, "body": ""},
+            "completion_summary": "",
+            "completion_summary_state": "empty",
+            "completed_count": 0,
+            "completed_work": [],
+        }
+    return HTMLResponse(_journal_page(journal_date, payload))
+
+
+@app.post("/journal/{journal_date}/save")
+async def journal_save_web(journal_date: str, request: Request, _user: Annotated[str, Depends(_check_basic_auth)]):
+    payload = await request.json()
+    result = _journal_api("PUT", f"/journal/{journal_date}", {"body": str(payload.get("body") or "")})
+    return {"saved": bool(result.get("saved"))}
+# === END DAILY JOURNAL V1 ===

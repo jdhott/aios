@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from aios.storage.supabase_store import SupabaseStore
+from aios.temporal import serialize_task_datetime
 
 
 PROJECT_WORK_SOURCE = "project_work"
@@ -78,11 +79,7 @@ def create_supabase_project_task(
             "is_quick_win": False,
             "importance": importance,
             "urgency": urgency,
-            "due_at": (
-                due_at.isoformat()
-                if due_at
-                else None
-            ),
+            "due_at": serialize_task_datetime(due_at),
             "project_id": project_id,
             "parent_task_id": None,
             "step_order": None,
@@ -254,7 +251,11 @@ Most recent rejected proposal and binding correction:
 Earlier proposal feedback:
 {feedback_text}
 
-Determine whether there is useful project work that can actually be done now.
+Identify genuine MISSING project work that is not already represented in the current or completed work.
+
+A valid project task does not need every fact required for its eventual completion. Research, comparison, decision, outreach, assessment, or information-gathering can itself be legitimate project work when the need for that work is grounded in the project outcome or Known project context.
+
+Prefer work that can be STARTED now and meaningfully advances the project.
 
 Return JSON only in exactly one of these forms:
 
@@ -281,20 +282,26 @@ Rules:
 - Do not propose work that contradicts the Known project context.
 - Do not invent missing requirements merely because they are common for this type of project.
 - Do not infer that a project needs common optional elements such as decorations, entertainment, catering, gifts, seating plans, themes, or supplies unless the Known project context supports them.
-- A task is executable now only if all information required to start and meaningfully advance it is already available. Do not propose work that depends on pending RSVPs, unknown preferences, final headcounts, future replies, or other unresolved information.
-- Prefer tasks that follow directly from known facts or unfinished decisions in the Known project context.
+- A task is eligible when it can be started now and meaningfully advances the project. It does NOT need every fact required for eventual completion.
+- Research, assessment, comparison, decision, outreach, quote/estimate gathering, or information-gathering are legitimate project tasks when they are directly grounded in the outcome or Known project context.
+- An unresolved fact may itself justify a task to resolve that uncertainty. For example, if the context says a backwater valve is being investigated but necessity is not established, "Determine whether a backwater valve is warranted" is grounded work; "Install a backwater valve" is not yet grounded.
+- Do not propose downstream work that assumes an unresolved decision, approval, response, delivery, preference, or requirement has already been resolved.
+- Prefer tasks that follow directly from known facts, explicit uncertainties, or unfinished decisions in the Known project context.
 - If one specific missing fact would materially change what useful work should be proposed, and clarification is available, ask ONE targeted question instead of guessing.
 - Ask only about information that is genuinely consequential to identifying missing work; do not conduct a general project interview.
 - If clarification is unavailable or no targeted question would help, return waiting rather than inventing conventional project tasks.
 - Tasks must be genuine project tasks, not tiny activation/JDI steps.
 - Each proposed task must advance the project outcome.
-- Each task must be executable now without waiting for another person, reply, delivery, approval, future date, or external event.
-- Do not create a task that merely says to wait, monitor, check later, or review something that does not yet exist.
-- Do not repeat or substantially duplicate completed project work, open project work, or completed activation history.
+- Each task must be startable now. It may involve contacting another person, requesting an assessment/quote, or gathering information; do not reject such work merely because another person will later respond.
+- Do not create a task that merely says to wait, monitor, check later, or perform downstream work that cannot begin until a future reply, approval, delivery, decision, date, or external event.
+- Current open work is ALREADY PLANNED. Do not repeat, paraphrase, rename, or slightly broaden it.
+- Completed work and completed activation history are ALREADY DONE. Do not recreate them.
+- Before proposing a task, perform a gap check: identify what the outcome/context requires that is not already represented by open or completed work. Propose only that uncovered work.
+- Proposed tasks must represent DISTINCT gaps. Do not return multiple tasks that address the same underlying need using different wording, scopes, or methods. If several candidates substantially overlap, return only the clearest and most useful one.
 - Do not restate the project outcome as a task.
 - Do not invent people, deadlines, places, preferences, decisions, or facts not provided.
 - Prefer 1 to 3 concrete project tasks.
-- Every proposed task title must be 75 characters or fewer, including spaces.
+- Aim for task titles under 60 characters. Absolute maximum: 75 characters including spaces.
 - Prefer direct task wording. Do not pack explanation, rationale, or later steps into the title.
 - These should be meaningful tasks that could later become a Best Next Action.
 - Do not break tasks down into 5–15 minute starting moves; JDI activation is handled elsewhere.
@@ -318,7 +325,15 @@ Rules:
 
         state = str(data.get("state") or "").strip().lower()
 
+        print(
+            f"[Project Work][Generator] project={project_name!r} "
+            f"state={state or 'missing'}"
+        )
+
         if state == "waiting":
+            print(
+                "[Project Work][Generator] No actionable candidates returned."
+            )
             return {"state": "waiting", "tasks": []}
 
         if state == "clarification":
@@ -333,6 +348,15 @@ Rules:
         raw_tasks = data.get("tasks") or []
         if not isinstance(raw_tasks, list):
             return None
+
+        print(
+            "[Project Work][Generator] Raw candidates:",
+            [
+                str(item.get("title") or "").strip()
+                for item in raw_tasks
+                if isinstance(item, dict)
+            ],
+        )
 
         blocked_titles = {
             " ".join(item.lower().split())
@@ -370,6 +394,10 @@ Rules:
             normalized = " ".join(title.lower().split())
 
             if normalized in blocked_titles:
+                print(
+                    "[Project Work][Generator] BLOCKED existing/rejected work: "
+                    f"{title}"
+                )
                 continue
 
             if normalized in seen:
@@ -386,6 +414,11 @@ Rules:
                 "state": "waiting",
                 "tasks": [],
             }
+
+        print(
+            "[Project Work][Generator] Candidates sent to validator:",
+            [item["title"] for item in tasks],
+        )
 
         validated_tasks = validate_project_work_candidates(
             client,
@@ -475,8 +508,8 @@ def validate_project_work_candidates(
     """
     Strictly validate proposed project tasks against known project state.
 
-    A plausible task is not enough. It must be grounded in known facts and
-    executable now. Validation fails closed.
+    A plausible task is not enough. It must be grounded in known project
+    state and represent meaningful missing work. Validation fails closed.
     """
     if client is None or not candidates:
         return []
@@ -581,14 +614,19 @@ STRICT RULES:
 - Reject any candidate title longer than 75 characters.
 - User proposal feedback may establish the preferred approach to the work, but do not treat unsupported factual details within it as durable project facts.
 - Common or conventional activities for this type of project are NOT evidence.
+- The project name or project type by itself is NOT evidence that a conventional task is needed.
+- For every candidate, identify the explicit basis for its need in the project outcome, Known project context, current/open work, completed work, or user proposal feedback. If no such basis exists, REJECT it even if the task would normally be sensible for this type of project.
 - Reject tasks that introduce unsupported assumptions, requirements, preferences, or optional elements.
-- Reject tasks requiring information that is still unresolved or pending.
-- Reject a task if it assumes that required information, commitments, responses, documents, materials, or decisions already exist when the Known project context or work history does not explicitly establish that they exist.
-- Do not interpret "in progress", "coming in", or "pending" as meaning that enough information exists to complete a dependent task.
-- Reject tasks that depend on future replies, RSVPs, final headcounts, unknown preferences, approvals, deliveries, or future events.
-- Reject work already completed or substantially duplicated.
-- The task must be useful and executable now.
-- When uncertain, REJECT.
+- Do NOT reject a task merely because information is unresolved when the task itself is grounded work to resolve that uncertainty through research, assessment, comparison, decision, outreach, or information gathering.
+- Reject downstream work that assumes unresolved information, commitments, responses, documents, materials, approvals, preferences, deliveries, or decisions already exist.
+- Do not interpret "in progress", "coming in", or "pending" as meaning an unresolved fact is already known.
+- A task involving another person can be valid when the task itself is to contact them, request an assessment/quote, or gather information and that need is grounded in known project state.
+- Project Work is a PROJECT PLAN, not a Best Next Action list. Do not reject an otherwise grounded missing task merely because another project task should logically happen first. Dependencies between sibling project tasks are allowed.
+- Reject a downstream task only when an unresolved external fact, decision, approval, preference, response, or event could make the task unnecessary or materially change what the task should be.
+- Reject work already completed or substantially duplicated. Also reject paraphrases or slight reformulations of current open work.
+- Compare the candidate tasks with EACH OTHER. If two or more candidates address substantially the same underlying need or outcome, approve only one. Prefer the clearest, broadest useful formulation and reject the others as overlapping sibling work.
+- The task must be useful, grounded, and genuinely missing.
+- When uncertain whether the NEED for the task is grounded, REJECT. Do not reject merely because the task will produce information that is not yet known or because another sibling task may precede it.
 - It is completely valid to approve none.
 """
 
@@ -611,11 +649,37 @@ STRICT RULES:
             for item in (data.get("approved") or [])
         }
 
+        rejected_items = [
+            item
+            for item in (data.get("rejected") or [])
+            if isinstance(item, dict)
+        ]
+        rejected_reasons = {
+            str(item.get("id") or "").strip(): str(item.get("reason") or "").strip()
+            for item in rejected_items
+            if str(item.get("id") or "").strip()
+        }
+
         approved = []
 
         for index, candidate in enumerate(candidates, start=1):
-            if f"C{index}" in approved_ids:
+            candidate_id = f"C{index}"
+            title = str(candidate.get("title") or "").strip()
+
+            if candidate_id in approved_ids:
+                print(
+                    f"[Project Work][Validator] APPROVED {candidate_id}: {title}"
+                )
                 approved.append(candidate)
+            else:
+                reason = rejected_reasons.get(
+                    candidate_id,
+                    "(validator returned no rejection reason)",
+                )
+                print(
+                    f"[Project Work][Validator] REJECTED {candidate_id}: "
+                    f"{title} | reason={reason}"
+                )
 
         return approved
 

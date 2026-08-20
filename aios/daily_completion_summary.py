@@ -5,7 +5,7 @@ from hashlib import sha256
 from zoneinfo import ZoneInfo
 
 SUMMARY_MODEL = "gpt-4.1-mini"
-SUMMARY_VERSION = "v1.3"
+SUMMARY_VERSION = "v2.0"
 MIN_TASKS_FOR_AI_SUMMARY = 2
 
 
@@ -128,18 +128,27 @@ def generate_daily_summary(ai_client, tasks: list[dict]) -> str:
     response = ai_client.responses.create(
         model=SUMMARY_MODEL,
         input=(
-            "Write a very short retrospective that captures what made today distinctive. "
-            "Aim for 25-45 words, usually two sentences; shorter is fine when sufficient. "
-            "Lead with the single dominant thread or outcome of the day. "
-            "Mention at most one secondary thread, and only if it adds useful context. "
-            "Do not try to account for all completed work. It is expected that most individual tasks will go unmentioned. "
-            "Synthesize rather than enumerate: avoid lists of actions, ingredients, chores, or task categories. "
-            "Prefer concrete, natural language over analytical or report-style language. "
-            "Use a specific project, product, or outcome name when it helps convey what the day was about. "
-            "Write like a brief journal reflection someone could scan months later. "
-            "Be grounded only in the completed work below; do not invent motives, emotions, priorities, or events. "
-            "Do not praise or judge productivity. "
-            "Do not say 'completed tasks', 'the task list', 'secondary themes', 'focused on', 'tasks included', or 'system enhancements'.\n\n"
+            "Summarize today's completed work in one concise sentence; use two only when genuinely needed. "
+            "Write directly about the work itself, not about the person doing it. "
+            "Never say 'the user', 'they', 'them', 'their', or otherwise refer to the person in the third person. "
+            "Use the meaningful theme or themes only as an internal selection mechanism for deciding what belongs in the summary. Never state, label, list, or explain the themes in the output. Output only the final retrospective prose. "
+            "There may be one meaningful area of work or several equally important ones; do not force a primary-versus-secondary hierarchy. "
+            "Before writing, silently decide which work would actually be worth remembering months later. Include only those meaningful themes. "
+            "Judge significance by the substance of the work, not by how many completed items belong to a category. Several small routine chores should not outweigh one substantial block of project work. "
+            "Routine chores, cleanup, maintenance, and minor administrative work may be omitted entirely, even when several such tasks were completed. The number of tasks in an area is not evidence that the area belongs in the summary. "
+            "If one meaningful theme clearly dominates the day, summarize only that theme. Do not add minor routine work just to make the summary feel comprehensive. "
+            "For example, if a day contains several substantial tasks advancing one project plus several ordinary household chores, summarize the substantial project work only. "
+            "Prefer direct active phrasing without a subject, such as 'Prepared ingredients and levain...' rather than passive phrasing like 'Ingredients were prepared...' or third-person phrasing. "
+            "Synthesize rather than enumerate. Do not list individual chores, every product, or every completed item unless one concrete example materially improves the summary. "
+            "Omit routine or low-significance work entirely when more meaningful work already explains the day. A summary does not need to represent every category of completed work. "
+            "Mention routine household, cleanup, maintenance, or administrative work only when it is itself a meaningful part of the day; when mentioned, compress it into a broad natural phrase rather than naming individual actions. "
+            "Use plain, factual, natural journal language that will still be useful when read months later. "
+            "Prefer a simple description of the work over internal project/category labels unless a project name is itself meaningful context. "
+            "Do not embellish, dramatize, praise, or characterize how well, carefully, efficiently, or smoothly the work was performed. "
+            "Do not infer motives, emotions, priorities, significance, or events that are not established by the completed work. "
+            "Avoid report-style transitions such as 'Additionally' and decorative phrases such as 'centered on', 'intertwined', 'meticulously', or 'seamlessly'. "
+            "Be grounded only in the completed work below. "
+            "Do not say 'completed tasks', 'the task list', 'secondary themes', 'tasks included', or 'system enhancements'.\n\n"
             f"Completed work:\n{_summary_prompt(tasks)}"
         ),
     )

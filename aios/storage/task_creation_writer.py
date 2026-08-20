@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from aios.storage.supabase_store import SupabaseStore
+from aios.temporal import serialize_task_datetime
 
 
 NotionCreateFn = Callable[..., Optional[dict[str, Any]]]
@@ -149,7 +150,7 @@ class SupabasePrimaryTaskCreator:
             "urgency": "High Urgency" if is_urgent else None,
             "importance": importance or ("High Importance" if is_important else None),
             "effort": effort,
-            "due_at": due_date.isoformat() if due_date else None,
+            "due_at": serialize_task_datetime(due_date),
             "suggested_project": manual_project or None,
         }
 
@@ -238,7 +239,7 @@ class SupabasePrimaryTaskHierarchyCreator:
             "is_quick_win": False,
             "urgency": "High Urgency" if is_urgent else None,
             "importance": "High Importance" if is_important else None,
-            "due_at": due_date.isoformat() if due_date else None,
+            "due_at": serialize_task_datetime(due_date),
             "suggested_project": manual_project or None,
             "project_id": project_id,
             "parent_task_id": parent_task_id,

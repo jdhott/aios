@@ -6,6 +6,8 @@ EXECUTION_ENGINE_WINNERS = []
 
 from datetime import datetime, timezone
 
+from aios.temporal import is_future_task_datetime, local_date_for_task_datetime, local_now
+
 import os
 import re
 
@@ -645,47 +647,22 @@ def get_defer_until_date(task):
 
 
 def is_deferred_until_future(task, today=None, now=None):
-    """Return True while a task's Defer Until date/time is still in the future.
+    """Return True while a task's timezone-aware Defer Until instant is future.
 
-    Date-only values keep the historical AIOS meaning: the task is eligible
-    again when that calendar date arrives. Timestamp values support short
-    snoozes such as "Later today" without changing date-only behaviour.
+    Legacy date-only values are interpreted as local midnight in the canonical
+    AIOS timezone, so old data remains safe during migration.
     """
     raw = get_defer_until_start(task)
     if not raw:
         return False
-
-    text = str(raw).strip()
-    if "T" in text:
-        try:
-            target = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if now is None:
-                current = (
-                    datetime.now(target.tzinfo)
-                    if target.tzinfo is not None
-                    else datetime.now()
-                )
-            else:
-                current = now
-                if (
-                    target.tzinfo is not None
-                    and getattr(current, "tzinfo", None) is None
-                ):
-                    current = current.replace(tzinfo=target.tzinfo)
-                elif (
-                    target.tzinfo is None
-                    and getattr(current, "tzinfo", None) is not None
-                ):
-                    current = current.replace(tzinfo=None)
-            return target > current
-        except (TypeError, ValueError):
-            pass
-
-    defer_until = parse_notion_date(text)
-    if not defer_until:
+    try:
+        if today is not None and now is None:
+            # Backward-compatible test hook: compare using the supplied local date.
+            target_date = local_date_for_task_datetime(raw)
+            return bool(target_date and target_date > today)
+        return is_future_task_datetime(raw, now=now)
+    except (TypeError, ValueError):
         return False
-    today = today or datetime.now().date()
-    return defer_until > today
 
 
 def is_jdi(task):
@@ -809,13 +786,9 @@ def compute_execution_score(task):
             due_dt_raw = datetime.fromisoformat(
                 due_date.replace("Z", "+00:00")
             )
-            if due_dt_raw.tzinfo is None:
-                due_dt = due_dt_raw.date()
-                today = datetime.now(timezone.utc).date()
-                days = (due_dt - today).days
-            else:
-                now = datetime.now(timezone.utc)
-                days = (due_dt_raw - now).days
+            due_dt = local_date_for_task_datetime(due_date)
+            today = local_now().date()
+            days = (due_dt - today).days
 
             if days <= 0:
                 score += 30

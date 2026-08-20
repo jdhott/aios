@@ -46,6 +46,12 @@ from aios.project_work_proposals import (
 )
 from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 from aios.text_utils import normalize
+from aios.temporal import (
+    is_future_task_datetime,
+    local_now,
+    local_timezone,
+    serialize_task_datetime,
+)
 from aios.daily_completion_summary import completion_fingerprint
 from aios.processing.trigger_coordinator import (
     ProcessingTriggerCoordinator,
@@ -266,27 +272,17 @@ def _is_future_defer_value(
     now: datetime | None = None,
     timezone_name: str = "America/Toronto",
 ) -> bool:
-    if not value:
-        return False
-    local_tz = ZoneInfo(timezone_name)
-    current = now.astimezone(local_tz) if now else datetime.now(local_tz)
-    text = str(value).strip()
-    if "T" in text:
-        try:
-            target = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if target.tzinfo is None:
-                target = target.replace(tzinfo=local_tz)
-            return target.astimezone(local_tz) > current
-        except (TypeError, ValueError):
-            pass
     try:
-        target_date = datetime.strptime(text[:10], "%Y-%m-%d").date()
+        return is_future_task_datetime(
+            value,
+            now=now,
+            timezone_name=timezone_name,
+        )
     except (TypeError, ValueError):
         return False
-    return target_date > current.date()
 
 
-AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.2-today-includes-overdue"
+AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.3-today-importance-due-sort"
 AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.4-dashboard-semantics"
 
 AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
@@ -483,8 +479,8 @@ def list_open_tasks_http(
             *score_key(row),
         )
 
-    toronto = ZoneInfo("America/Toronto")
-    today = datetime.now(toronto).date()
+    toronto = local_timezone()
+    today = local_now().date()
 
     def due_today(row: dict) -> bool:
         raw = row.get("effective_due_at") or row.get("due_at")
@@ -591,9 +587,31 @@ def list_open_tasks_http(
 
     # Today is a calendar view, not another ranking slice. Show every open
     # task due today or overdue, even when it also appears in another section.
+    # Default order is user-facing priority first: Importance, then Due Date
+    # ascending. Execution score remains only a deterministic tie-breaker.
+    def today_sort_key(row: dict):
+        raw_due = row.get("effective_due_at") or row.get("due_at")
+        try:
+            due_dt = datetime.fromisoformat(str(raw_due).replace("Z", "+00:00"))
+            if due_dt.tzinfo is None:
+                due_dt = due_dt.replace(tzinfo=toronto)
+            else:
+                due_dt = due_dt.astimezone(toronto)
+            due_key = due_dt
+        except (TypeError, ValueError):
+            # due_today() already excludes missing due values. This fallback
+            # keeps malformed legacy values stable without changing eligibility.
+            due_key = datetime.max.replace(tzinfo=toronto)
+
+        return (
+            importance_order.get(row.get("importance"), 99),
+            due_key,
+            *score_key(row),
+        )
+
     today_items = _respect_breakdown_step_order(sorted(
         [row for row in actionable_rows if due_today(row)],
-        key=lambda row: (str(row.get("effective_due_at") or row.get("due_at") or "")[:10], *score_key(row)),
+        key=today_sort_key,
     ))
 
     # JDI is also an independent view: show every open JDI task even when it
@@ -730,6 +748,34 @@ def not_now_task_http(task_id: str) -> dict:
     }
 
 
+@app.post("/tasks/{task_id}/not-useful", tags=["tasks"])
+def not_useful_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
+    store = _store()
+    rows = (store.client.table("tasks").select("id,parent_task_id,generated_source,is_done,is_archived").eq("id", task_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Starting step not found")
+    task = rows[0]
+    if task.get("generated_source") != "focus_activation" or task.get("is_done") or task.get("is_archived"):
+        raise HTTPException(status_code=409, detail="Only an active Start Here step can be marked Not useful")
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    if not parent_id:
+        raise HTTPException(status_code=409, detail="Starting step has no parent task")
+    now = datetime.now(timezone.utc).isoformat()
+    # Keep the rejected Start Here open while coaching is active. This lets
+    # the dashboard retain the exact suggestion the user said was not useful.
+    store.client.table("tasks").update({
+        "activation_disposition": "not_useful",
+        "updated_at": now,
+    }).eq("id", task_id).execute()
+    store.client.table("tasks").update({
+        "focus_context_help_state": "pending", "focus_context_draft": None,
+        "focus_context_question": None, "focus_context_answer": None,
+        "focus_context_help_updated_at": now, "updated_at": now,
+    }).eq("id", parent_id).execute()
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "not_useful": True, "parent_task_id": parent_id}
+
+
 class TaskSnoozeRequest(BaseModel):
     preset: str
     custom_date: str | None = None
@@ -741,8 +787,8 @@ def _resolve_task_snooze_until(
     now: datetime | None = None,
 ) -> str:
     timezone_name = os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto")
-    local_tz = ZoneInfo(timezone_name)
-    current = now.astimezone(local_tz) if now else datetime.now(local_tz)
+    local_tz = local_timezone(timezone_name)
+    current = local_now(now=now, timezone_name=timezone_name)
     preset = str(request.preset or "").strip().lower()
 
     if preset == "later_today":
@@ -754,14 +800,17 @@ def _resolve_task_snooze_until(
                 target = end_of_day
         if target <= current:
             raise HTTPException(status_code=409, detail="Later today is no longer available")
-        return target.isoformat()
+        return serialize_task_datetime(target, timezone_name=timezone_name)
 
     if preset == "tomorrow":
-        return (current.date() + timedelta(days=1)).isoformat()
+        target = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
+        return serialize_task_datetime(target, timezone_name=timezone_name)
     if preset == "three_days":
-        return (current.date() + timedelta(days=3)).isoformat()
+        target = datetime.combine(current.date() + timedelta(days=3), datetime.min.time(), tzinfo=local_tz)
+        return serialize_task_datetime(target, timezone_name=timezone_name)
     if preset == "one_week":
-        return (current.date() + timedelta(days=7)).isoformat()
+        target = datetime.combine(current.date() + timedelta(days=7), datetime.min.time(), tzinfo=local_tz)
+        return serialize_task_datetime(target, timezone_name=timezone_name)
     if preset == "pick_date":
         custom = str(request.custom_date or "").strip()
         try:
@@ -770,7 +819,8 @@ def _resolve_task_snooze_until(
             raise HTTPException(status_code=422, detail="Choose a valid snooze date") from exc
         if chosen <= current.date():
             raise HTTPException(status_code=422, detail="Snooze date must be after today")
-        return chosen.isoformat()
+        target = datetime.combine(chosen, datetime.min.time(), tzinfo=local_tz)
+        return serialize_task_datetime(target, timezone_name=timezone_name)
 
     raise HTTPException(status_code=422, detail="Unsupported snooze option")
 
@@ -812,6 +862,101 @@ def snooze_task_http(
 
     background_tasks.add_task(_request_processor_run)
     return {"id": task_id, "snoozed": True, "defer_until": defer_until}
+
+
+class FocusContextSaveRequest(BaseModel):
+    context: str
+
+
+class FocusContextAnswerRequest(BaseModel):
+    answer: str
+
+
+@app.post("/tasks/{task_id}/focus-context/help", tags=["tasks"])
+def request_focus_context_help_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
+    rows = (_store().client.table("tasks").select("id,is_open,is_done,is_archived").eq("id", task_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = rows[0]
+    if not task.get("is_open") or task.get("is_done") or task.get("is_archived"):
+        raise HTTPException(status_code=409, detail="Closed tasks cannot request context help")
+    _store().client.table("tasks").update({
+        "focus_context_help_state": "pending",
+        "focus_context_draft": None,
+        "focus_context_question": None,
+        "focus_context_answer": None,
+        "focus_context_help_updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", task_id).execute()
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "focus_context_help_state": "pending"}
+
+
+@app.post("/tasks/{task_id}/focus-context/answer", tags=["tasks"])
+def answer_focus_context_http(task_id: str, request: FocusContextAnswerRequest, background_tasks: BackgroundTasks) -> dict:
+    answer = str(request.answer or "").strip()
+    if not answer:
+        raise HTTPException(status_code=422, detail="Please answer the question")
+    rows = (_store().client.table("tasks").select("id,is_open,is_done,is_archived,focus_context_help_state,focus_context_question").eq("id", task_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = rows[0]
+    if not task.get("is_open") or task.get("is_done") or task.get("is_archived"):
+        raise HTTPException(status_code=409, detail="Closed tasks cannot update focus context")
+    if str(task.get("focus_context_help_state") or "") != "ready" or not str(task.get("focus_context_question") or "").strip():
+        raise HTTPException(status_code=409, detail="There is no context question awaiting an answer")
+    now = datetime.now(timezone.utc).isoformat()
+    _store().client.table("tasks").update({
+        "focus_context_help_state": "answer_pending",
+        "focus_context_answer": answer,
+        "focus_context_help_updated_at": now,
+        "updated_at": now,
+    }).eq("id", task_id).execute()
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "focus_context_help_state": "answer_pending"}
+
+
+@app.post("/tasks/{task_id}/focus-context", tags=["tasks"])
+def save_focus_context_http(task_id: str, request: FocusContextSaveRequest, background_tasks: BackgroundTasks) -> dict:
+    rows = (_store().client.table("tasks").select("id,is_open,is_done,is_archived").eq("id", task_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = rows[0]
+    if not task.get("is_open") or task.get("is_done") or task.get("is_archived"):
+        raise HTTPException(status_code=409, detail="Closed tasks cannot update focus context")
+    context = str(request.context or "").strip() or None
+    now = datetime.now(timezone.utc).isoformat()
+    _store().client.table("tasks").update({
+        "context": context,
+        "focus_context_help_state": None,
+        "focus_context_draft": None,
+        "focus_context_question": None,
+        "focus_context_answer": None,
+        "focus_context_help_updated_at": now,
+        "updated_at": now,
+    }).eq("id", task_id).execute()
+    # Commit point: only now retire the old Start Here. Preserve a
+    # not_useful disposition so the next generator knows not to repeat it.
+    (_store().client.table("tasks").update({
+        "is_open": False,
+        "updated_at": now,
+    }).eq("parent_task_id", task_id)
+      .eq("generated_source", "focus_activation")
+      .eq("activation_disposition", "not_useful")
+      .eq("is_open", True).eq("is_done", False).eq("is_archived", False)
+      .execute())
+
+    # Any other still-open generated activation is being replaced because the
+    # durable context changed, not because the user explicitly rejected it.
+    (_store().client.table("tasks").update({
+        "is_open": False,
+        "activation_disposition": "context_changed",
+        "updated_at": now,
+    }).eq("parent_task_id", task_id)
+      .eq("generated_source", "focus_activation")
+      .eq("is_open", True).eq("is_done", False).eq("is_archived", False)
+      .execute())
+    background_tasks.add_task(_request_processor_run)
+    return {"id": task_id, "context": context, "regenerating_start_here": True}
 
 
 @app.post("/tasks/{task_id}/delete", tags=["tasks"])
@@ -1114,6 +1259,13 @@ def update_task_detail_http(task_id: str, update: TaskDetailUpdate) -> dict:
     ):
         if field in values and values[field] == "":
             values[field] = None
+
+    for field in ("due_at", "defer_until"):
+        if field in values and values[field] is not None:
+            try:
+                values[field] = serialize_task_datetime(values[field])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f"Invalid {field.replace('_', ' ')}") from exc
 
     if values:
         (
@@ -2112,6 +2264,11 @@ def create_task_http(request: CreateTaskRequest) -> dict:
     ):
         value = getattr(request, field)
         if value not in (None, ""):
+            if field in ("due_at", "defer_until"):
+                try:
+                    value = serialize_task_datetime(value)
+                except (TypeError, ValueError) as exc:
+                    raise HTTPException(status_code=422, detail=f"Invalid {field.replace('_', ' ')}") from exc
             values[field] = value
 
     result = (
@@ -2158,7 +2315,7 @@ def get_dashboard_focus_http() -> dict:
         if not candidate_id:
             continue
         tasks = (store.client.table("tasks")
-            .select("id,title,context,status,due_at,defer_until,importance,urgency,effort,duration,project_id,parent_task_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived")
+            .select("id,title,context,status,due_at,defer_until,importance,urgency,effort,duration,project_id,parent_task_id,is_quick_win,is_just_do_it,is_open,is_done,is_archived,focus_context_help_state,focus_context_draft,focus_context_question")
             .eq("id", candidate_id).eq("is_open", True).eq("is_done", False).eq("is_archived", False)
             .limit(1).execute().data or [])
         if not tasks:
@@ -2617,3 +2774,197 @@ def clarification_resolve_http(
     response = ReviewResponse(**resolved.to_dict())
     _mark_review_inbox_processed(response)
     return response
+
+# === DAILY JOURNAL V1 ===
+class DailyJournalUpdate(BaseModel):
+    body: str = ""
+
+
+def _journal_day_bounds(journal_date: str):
+    from datetime import date, datetime, time, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    try:
+        day = date.fromisoformat(str(journal_date or "").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="journal_date must be YYYY-MM-DD") from exc
+    zone_name = os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto").strip()
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone = ZoneInfo("America/Toronto")
+    start_local = datetime.combine(day, time.min, tzinfo=zone)
+    end_local = start_local + timedelta(days=1)
+    return day, start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def _journal_completed_work(journal_date: str) -> list[dict]:
+    _day, start_utc, end_utc = _journal_day_bounds(journal_date)
+    store = _store()
+
+    rows = (
+        store.client.table("tasks")
+        .select(
+            "id,title,project_id,parent_task_id,generated_source,"
+            "task_role,completed_at"
+        )
+        .eq("is_done", True)
+        .eq("is_archived", False)
+        .gte("completed_at", start_utc.isoformat())
+        .lt("completed_at", end_utc.isoformat())
+        .order("completed_at")
+        .execute().data
+        or []
+    )
+
+    # Match the population used by Completed Today Summary:
+    # activation helper children are not meaningful completed project work.
+    rows = [
+        dict(row)
+        for row in rows
+        if row.get("generated_source") != "focus_activation"
+        and row.get("task_role") != "focus_activation"
+    ]
+
+    project_ids = sorted({
+        str(row.get("project_id") or "").strip()
+        for row in rows
+        if str(row.get("project_id") or "").strip()
+    })
+
+    project_by_id = {}
+    if project_ids:
+        project_rows = (
+            store.client.table("projects")
+            .select("id,name")
+            .in_("id", project_ids)
+            .execute().data
+            or []
+        )
+        project_by_id = {
+            str(row.get("id")): str(row.get("name") or "").strip()
+            for row in project_rows
+            if row.get("id")
+        }
+
+    result = []
+
+    for row in rows:
+        item = dict(row)
+        project_id = str(item.get("project_id") or "").strip()
+        item["project_name"] = project_by_id.get(project_id, "")
+        result.append(item)
+
+    return result
+
+
+def _journal_completion_summary(
+    journal_date: str,
+    completed_work: list[dict],
+) -> tuple[str, str]:
+    """
+    Read the existing cached Completed Today Summary.
+
+    This never calls AI. The cache is used only when its fingerprint still
+    matches the authoritative completed-work set for the day.
+    """
+    if len(completed_work) < 2:
+        return "", "empty"
+
+    try:
+        fingerprint = completion_fingerprint(completed_work)
+
+        rows = (
+            _store().client
+            .table("daily_completion_summaries")
+            .select("fingerprint,summary,completed_count")
+            .eq("summary_date", journal_date)
+            .limit(1)
+            .execute().data
+            or []
+        )
+
+        if rows and str(rows[0].get("fingerprint") or "") == fingerprint:
+            summary = str(rows[0].get("summary") or "").strip()
+            return summary, ("ready" if summary else "empty")
+
+    except Exception as exc:
+        print(
+            "[Journal] Daily completion summary could not be loaded:",
+            exc,
+        )
+        return "", "empty"
+
+    # For today, a fingerprint mismatch normally means the existing processor
+    # is still regenerating the shared Completed Today Summary.
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    zone_name = os.getenv(
+        "AIOS_LOCAL_TIMEZONE",
+        "America/Toronto",
+    ).strip()
+
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone = ZoneInfo("America/Toronto")
+
+    if journal_date == datetime.now(zone).date().isoformat():
+        return "", "pending"
+
+    return "", "empty"
+
+
+@app.get("/journal/{journal_date}", tags=["journal"])
+def get_daily_journal_http(journal_date: str) -> dict:
+    day, _start, _end = _journal_day_bounds(journal_date)
+
+    rows = (
+        _store().client.table("daily_journal")
+        .select("journal_date,body,created_at,updated_at")
+        .eq("journal_date", day.isoformat())
+        .limit(1)
+        .execute().data
+        or []
+    )
+
+    journal = (
+        dict(rows[0])
+        if rows
+        else {
+            "journal_date": day.isoformat(),
+            "body": "",
+            "created_at": None,
+            "updated_at": None,
+        }
+    )
+
+    completed_work = _journal_completed_work(day.isoformat())
+
+    completion_summary, completion_summary_state = (
+        _journal_completion_summary(
+            day.isoformat(),
+            completed_work,
+        )
+    )
+
+    return {
+        "journal": journal,
+        "completion_summary": completion_summary,
+        "completion_summary_state": completion_summary_state,
+        "completed_count": len(completed_work),
+        "completed_work": completed_work,
+    }
+
+
+@app.put("/journal/{journal_date}", tags=["journal"])
+def save_daily_journal_http(journal_date: str, request: DailyJournalUpdate) -> dict:
+    from datetime import datetime, timezone
+    day, _start, _end = _journal_day_bounds(journal_date)
+    body = str(request.body or "")
+    if len(body) > 50000:
+        raise HTTPException(status_code=400, detail="Journal entry is too long.")
+    payload = {"journal_date": day.isoformat(), "body": body, "updated_at": datetime.now(timezone.utc).isoformat()}
+    rows = _store().client.table("daily_journal").upsert(payload, on_conflict="journal_date").execute().data or []
+    return {"saved": True, "journal": dict(rows[0]) if rows else payload}
+# === END DAILY JOURNAL V1 ===

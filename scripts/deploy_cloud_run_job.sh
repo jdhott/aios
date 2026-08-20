@@ -16,7 +16,9 @@ if [ -z "$PROJECT" ]; then
   exit 1
 fi
 
-IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/${IMAGE_NAME}:$(git rev-parse --short HEAD)"
+GIT_SHA="$(git rev-parse --short HEAD)"
+BUILD_TAG="${GIT_SHA}-$(date -u +%Y%m%d%H%M%S)"
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/${IMAGE_NAME}:${BUILD_TAG}"
 
 echo "=== AIOS CLOUD RUN JOB V1 DEPLOY ==="
 echo "Project: $PROJECT"

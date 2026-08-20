@@ -27,8 +27,8 @@ def _plain_title(task: dict[str, Any]) -> str:
     return "Untitled task"
 
 
-def _generation_key(task_id: str, title: str) -> str:
-    raw = f"{FOCUS_GUIDANCE_VERSION}|{task_id}|{title}".encode("utf-8")
+def _generation_key(task_id: str, title: str, task_context: str = "", project_context: str = "") -> str:
+    raw = f"{FOCUS_GUIDANCE_VERSION}|{task_id}|{title}|{task_context}|{project_context}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -36,10 +36,10 @@ def _resolve_supabase_task(store, task: dict[str, Any]) -> dict[str, Any] | None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
         return None
-    rows = (store.client.table("tasks").select("id,title,legacy_notion_id").eq("id", task_id).limit(1).execute().data or [])
+    rows = (store.client.table("tasks").select("id,title,context,project_id,legacy_notion_id").eq("id", task_id).limit(1).execute().data or [])
     if rows:
         return dict(rows[0])
-    rows = (store.client.table("tasks").select("id,title,legacy_notion_id").eq("legacy_notion_id", task_id).limit(1).execute().data or [])
+    rows = (store.client.table("tasks").select("id,title,context,project_id,legacy_notion_id").eq("legacy_notion_id", task_id).limit(1).execute().data or [])
     return dict(rows[0]) if rows else None
 
 
@@ -59,13 +59,19 @@ def _fallback_guidance(title: str) -> dict[str, Any]:
     }
 
 
-def generate_focus_guidance(client, title: str) -> dict[str, Any]:
+def generate_focus_guidance(client, title: str, *, task_context: str = "", project_context: str = "") -> dict[str, Any]:
     if client is None:
         return _fallback_guidance(title)
     model = os.getenv("AIOS_FOCUS_GUIDANCE_MODEL", "gpt-4.1-mini")
     prompt = f'''You are helping a person start ONE already-selected priority task.
 
 Task: {title}
+
+Authoritative Task Context:
+{task_context or "(none)"}
+
+Relevant Project Context:
+{project_context or "(none)"}
 
 Return JSON only with exactly:
 {{"starter_step":"...","starter_minutes":10}}
@@ -107,12 +113,22 @@ def ensure_focus_guidance(store, client, execution_task: dict[str, Any]) -> dict
         return None
     task_id = str(resolved["id"])
     title = str(resolved.get("title") or _plain_title(execution_task)).strip()
-    generation_key = _generation_key(task_id, title)
+    task_context = str(resolved.get("context") or "").strip()
+    project_context = ""
+    project_id = str(resolved.get("project_id") or "").strip()
+    if project_id:
+        try:
+            project_rows = (store.client.table("projects").select("context").eq("id", project_id).limit(1).execute().data or [])
+            if project_rows:
+                project_context = str(project_rows[0].get("context") or "").strip()
+        except Exception:
+            project_context = ""
+    generation_key = _generation_key(task_id, title, task_context, project_context)
     rows = (store.client.table("task_focus_guidance").select("*").eq("task_id", task_id).limit(1).execute().data or [])
     if rows and rows[0].get("generation_key") == generation_key:
         print(f"[Focus Guidance] Reusing cached guidance for: {title}")
         return dict(rows[0])
-    guidance = generate_focus_guidance(client, title)
+    guidance = generate_focus_guidance(client, title, task_context=task_context, project_context=project_context)
     row = {
         "task_id": task_id,
         "generation_key": generation_key,

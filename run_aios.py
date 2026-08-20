@@ -67,10 +67,12 @@ print("__file__ =", __file__)
 from execution_engine_v2 import rebuild_execution_state
 from aios.storage.execution_task_source import get_supabase_execution_tasks
 from aios.storage.supabase_store import SupabaseStore as _FocusSupabaseStore
+from aios.temporal import is_future_task_datetime, local_date_for_task_datetime, local_now
 from aios.project_work_processor import (
     refresh_project_work_proposals,
 )
 from aios.focus_guidance import ensure_focus_guidance
+from aios.focus_context import ensure_focus_context_help
 from aios.focus_activation import ensure_next_focus_activation
 from aios.task_writing import AI_TASK_TITLE_GUIDANCE
 from aios.daily_completion_summary import refresh_daily_completion_summary
@@ -4159,19 +4161,13 @@ def get_date_start_value(props, property_name):
     return date_value.get("start")
 
 def parse_notion_date_start(date_start):
-    """Parse a Notion date/datetime start value into a date, or None."""
+    """Parse a task date/datetime into its canonical AIOS local calendar date."""
     if not date_start:
         return None
-
     try:
-        # Notion date-only values are YYYY-MM-DD. Datetime values may include
-        # a timezone or trailing Z; for defer logic we only need the local date.
-        return datetime.fromisoformat(str(date_start).replace("Z", "+00:00")).date()
-    except ValueError:
-        try:
-            return datetime.strptime(str(date_start)[:10], "%Y-%m-%d").date()
-        except ValueError:
-            return None
+        return local_date_for_task_datetime(date_start)
+    except (TypeError, ValueError):
+        return None
 
 def get_defer_until_start(task):
     props = task.get("properties", {})
@@ -4182,40 +4178,21 @@ def get_defer_until_date(task):
     return parse_notion_date_start(get_defer_until_start(task))
 
 def is_deferred_until_future(task, today=None, now=None):
-    """Return True while Defer Until is still in the future.
+    """Return True while Defer Until remains in the future.
 
-    Date-only values retain the existing rule: eligibility returns on that
-    calendar date. Timestamp values allow short execution snoozes within a day.
+    Stored values are absolute instants. Legacy date-only values are interpreted
+    as local midnight in the canonical AIOS timezone.
     """
     raw = get_defer_until_start(task)
     if not raw:
         return False
-
-    text = str(raw).strip()
-    if "T" in text:
-        try:
-            target = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            if now is None:
-                current = (
-                    datetime.now(target.tzinfo)
-                    if target.tzinfo is not None
-                    else datetime.now()
-                )
-            else:
-                current = now
-                if target.tzinfo is not None and getattr(current, "tzinfo", None) is None:
-                    current = current.replace(tzinfo=target.tzinfo)
-                elif target.tzinfo is None and getattr(current, "tzinfo", None) is not None:
-                    current = current.replace(tzinfo=None)
-            return target > current
-        except (TypeError, ValueError):
-            pass
-
-    defer_until = parse_notion_date_start(text)
-    if not defer_until:
+    try:
+        if today is not None and now is None:
+            target_date = local_date_for_task_datetime(raw)
+            return bool(target_date and target_date > today)
+        return is_future_task_datetime(raw, now=now)
+    except (TypeError, ValueError):
         return False
-    today = today or datetime.now().date()
-    return defer_until > today
 
 def get_parent_task_id(task):
     """Return the first Parent Task relation ID, if this task is a breakdown step."""
@@ -8705,6 +8682,13 @@ else:
                 _focus_store = _FocusSupabaseStore()
                 _focus_task = EXECUTION_ENGINE_WINNERS[0].get("task") or {}
 
+                # Optional AI-assisted durable context, only when requested from the BNA card.
+                ensure_focus_context_help(
+                    _focus_store,
+                    client,
+                    _focus_task,
+                )
+
                 # Legacy dashboard guidance remains temporarily available
                 # during the transition to durable activation child tasks.
                 ensure_focus_guidance(
@@ -8864,7 +8848,7 @@ def is_due_today_or_overdue(task, today=None):
     if not due_date:
         return False
 
-    today = today or datetime.now().date()
+    today = today or local_now().date()
     return due_date <= today
 
 
@@ -8874,7 +8858,7 @@ def has_near_due_date(task, today=None, days=7):
     if not due_date:
         return False
 
-    today = today or datetime.now().date()
+    today = today or local_now().date()
     delta_days = (due_date - today).days
     return 0 < delta_days <= days
 
