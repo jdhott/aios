@@ -1389,6 +1389,40 @@ def delete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
     return {"id": task_id, "deleted": True, "mode": "soft_archive"}
 
 
+@app.post("/tasks/{task_id}/undo-delete", tags=["tasks"])
+def undo_delete_task_http(task_id: str) -> dict:
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id,is_archived,is_open")
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    current = rows[0]
+    if not current.get("is_archived"):
+        return {"id": task_id, "restored": True, "already_open": True}
+
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        store.client.table("tasks")
+        .update({
+            "is_archived": False,
+            "is_open": True,
+            "updated_at": now,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+
+    return {"id": task_id, "restored": True}
+
+
 
 class ProjectOutcomeUpdate(BaseModel):
     outcome: str | None = None

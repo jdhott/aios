@@ -29,7 +29,7 @@ WEB_TASK_ACTION_UI_VERSION = "aios-web-tasks-v1.2-checkbox-trash"
 WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v3"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
-WEB_OPTIMISTIC_DELETE_VERSION = "optimistic-delete-v1"
+WEB_OPTIMISTIC_DELETE_VERSION = "optimistic-delete-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
 WEB_DASHBOARD_UI_VERSION = "home-v2.5"
 WEB_HOME_FAST_NAV_VERSION = "home-fast-nav-v1"
@@ -350,6 +350,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Fragment polling", "version": WEB_PENDING_FRAGMENT_POLL_VERSION},
                 {"label": "Optimistic complete", "version": WEB_OPTIMISTIC_COMPLETE_VERSION},
                 {"label": "Optimistic snooze", "version": WEB_OPTIMISTIC_SNOOZE_VERSION},
+                {"label": "Optimistic delete", "version": WEB_OPTIMISTIC_DELETE_VERSION},
                 {"label": "Focus context loading", "version": WEB_FOCUS_CONTEXT_LOADING_VERSION},
                 {"label": "Empty-state copy", "version": WEB_EMPTY_STATE_COPY_VERSION},
                 {"label": "Brain Dump sheet", "version": WEB_BRAIN_DUMP_SHEET_VERSION},
@@ -5535,8 +5536,8 @@ def _focus_card_view(
                 return_to="/?refresh_focus=1#focus-card",
                 css_class="focus-snooze",
             )
-            + f'<form class="delete-form focus-delete" data-task-id="{safe_id}" method="post" action="/tasks/{safe_id}/delete">'
-            '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
+            + f'<form class="delete-form focus-delete" data-task-id="{safe_id}">'
+            '<button class="trash-button" type="button" data-aios-delete="1" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
             + "</div></div>"
             + starter_html
             + focus_context_html
@@ -5704,8 +5705,8 @@ def _render_dashboard_task_row(
         + meta_html
         + '<div class="task-action-bar">'
         + snooze_html
-        + f'<form class="delete-form" data-task-id="{task_id}" method="post" action="/tasks/{task_id}/delete">'
-        + '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
+        + f'<form class="delete-form" data-task-id="{task_id}">'
+        + '<button class="trash-button" type="button" data-aios-delete="1" aria-label="Delete task" title="Delete task">'
         + '<span aria-hidden="true">🗑️</span></button></form>'
         + "</div></div></article>"
     )
@@ -6823,7 +6824,7 @@ def _page(
           initFocusCard(state.focusCard);
         }}
         (state?.hiddenNodes || []).forEach((node) => {{
-          node.querySelectorAll(".complete-checkbox").forEach((button) => {{
+          node.querySelectorAll(".complete-checkbox, [data-aios-delete]").forEach((button) => {{
             button.dataset.submitting = "0";
           }});
         }});
@@ -7049,6 +7050,11 @@ def _page(
         toast.querySelector("button")?.addEventListener("click", async () => {{
           if (!optimisticCompletion || optimisticCompletion.taskId !== state.taskId) return;
 
+          const undoPath =
+            state.action === "delete"
+              ? `/tasks/${{encodeURIComponent(state.taskId)}}/undo-delete-optimistic`
+              : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
+
           const undoRequest = async () => {{
             clearOptimisticTimer();
             restoreOptimisticNodes(state);
@@ -7056,7 +7062,7 @@ def _page(
             optimisticCompletion = null;
 
             try {{
-              const response = await fetch(`/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`, {{
+              const response = await fetch(undoPath, {{
                 method: "POST",
                 headers: {{ "X-Requested-With": "fetch" }},
               }});
@@ -7085,7 +7091,11 @@ def _page(
         removeOptimisticToast();
         optimisticCompletion = null;
         if (!state.affectsFocus) {{
-          refreshTaskGroupsAfterComplete();
+          if (state.action === "delete") {{
+            refreshTaskGroupsOnce();
+          }} else {{
+            refreshTaskGroupsAfterComplete();
+          }}
         }}
       }};
 
@@ -7127,6 +7137,7 @@ def _page(
           );
 
           const state = {{
+            action: "complete",
             taskId,
             hiddenNodes,
             focusCard,
@@ -7191,84 +7202,108 @@ def _page(
 
       document.querySelectorAll(".complete-form").forEach(bindCompleteForm);
 
-      const bindDeleteForm = (form) => {{
-        if (form.dataset.aiosDeleteBound === "1") return;
-        form.dataset.aiosDeleteBound = "1";
-        form.addEventListener("submit", async (event) => {{
-          event.preventDefault();
-          if (!window.confirm("Delete this task?")) return;
+      const performOptimisticDelete = async (form, trigger) => {{
+        if (trigger?.dataset.submitting === "1") return;
+        if (!window.confirm("Delete this task?")) return;
 
-          const submitter = event.submitter;
-          if (submitter?.dataset.submitting === "1") return;
-          if (submitter) submitter.dataset.submitting = "1";
+        const taskId =
+          form.dataset.taskId ||
+          form.getAttribute("action")?.split("/tasks/")[1]?.split("/")[0] ||
+          "";
+        if (!taskId) {{
+          showOptimisticErrorToast("Task could not be deleted.");
+          return;
+        }}
 
-          const taskId =
-            form.dataset.taskId ||
-            form.action.split("/tasks/")[1]?.split("/")[0] ||
-            "";
-          if (!taskId) {{
-            form.submit();
-            return;
-          }}
+        if (optimisticCompletion) {{
+          clearOptimisticTimer();
+          finishOptimisticWindow(optimisticCompletion);
+        }}
 
-          const hiddenNodes = Array.from(
-            document.querySelectorAll(
-              `.task-row[data-task-id="${{CSS.escape(taskId)}}"]`
-            )
+        if (trigger) trigger.dataset.submitting = "1";
+
+        const hiddenNodes = Array.from(
+          document.querySelectorAll(
+            `.task-row[data-task-id="${{CSS.escape(taskId)}}"]`
+          )
+        );
+        const projectRow = form.closest(".project-editor-row");
+        if (projectRow && !hiddenNodes.includes(projectRow)) {{
+          hiddenNodes.push(projectRow);
+        }}
+
+        const focusCard = form.closest(".focus-card");
+        const isDashboardFocus = Boolean(focusCard);
+        const state = {{
+          action: "delete",
+          taskId,
+          hiddenNodes,
+          focusCard,
+          focusHtml: focusCard ? focusCard.innerHTML : null,
+          affectsFocus: isDashboardFocus,
+          timer: null,
+        }};
+
+        hiddenNodes.forEach((node) => {{
+          node.classList.add("optimistic-hidden");
+        }});
+
+        if (isDashboardFocus && focusCard) {{
+          focusCard.innerHTML =
+            '<div class="focus-label">⭐ Best Next Action</div>' +
+            '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+        }}
+
+        optimisticCompletion = state;
+        showOptimisticToast(state, "Task deleted");
+
+        try {{
+          const response = await fetch(
+            `/tasks/${{encodeURIComponent(taskId)}}/delete-optimistic`,
+            {{
+              method: "POST",
+              headers: {{ "X-Requested-With": "fetch" }},
+            }}
           );
-          const projectRow = form.closest(".project-editor-row");
-          if (projectRow && !hiddenNodes.includes(projectRow)) {{
-            hiddenNodes.push(projectRow);
-          }}
-
-          const focusCard = form.closest(".focus-card");
-          const focusHtml = focusCard ? focusCard.innerHTML : null;
-          const wasDashboardFocus = Boolean(focusCard);
-
-          hiddenNodes.forEach((node) => {{
-            node.classList.add("optimistic-hidden");
-          }});
-
-          if (wasDashboardFocus) {{
-            focusCard.innerHTML =
-              '<div class="focus-label">⭐ Best Next Action</div>' +
-              '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+          if (!response.ok) throw new Error("Delete failed");
+          if (isDashboardFocus) {{
             startFocusPolling({{
               refreshFocus: true,
               previousFocusId: taskId,
               waitForFocusChange: true,
             }});
           }}
-
-          try {{
-            const response = await fetch(
-              `/tasks/${{encodeURIComponent(taskId)}}/delete-optimistic`,
-              {{
-                method: "POST",
-                headers: {{ "X-Requested-With": "fetch" }},
-              }}
-            );
-            if (!response.ok) throw new Error("Delete failed");
-            if (!wasDashboardFocus) {{
-              refreshTaskGroupsOnce();
-            }}
-          }} catch (_error) {{
-            hiddenNodes.forEach((node) => {{
-              node.classList.remove("optimistic-hidden");
-            }});
-            if (wasDashboardFocus && focusCard && focusHtml !== null) {{
-              focusCard.innerHTML = focusHtml;
-              initFocusCard(focusCard);
-            }}
-            if (submitter) submitter.dataset.submitting = "0";
-            showOptimisticErrorToast("Task could not be deleted.", () => {{
-              form.requestSubmit();
-            }});
-          }}
-        }});
+          state.timer = window.setTimeout(
+            () => finishOptimisticWindow(state),
+            {WEB_TOAST_UNDO_MS}
+          );
+        }} catch (_error) {{
+          clearOptimisticTimer();
+          restoreOptimisticNodes(state);
+          removeOptimisticToast();
+          optimisticCompletion = null;
+          if (trigger) trigger.dataset.submitting = "0";
+          showOptimisticErrorToast("Task could not be deleted.", () => {{
+            void performOptimisticDelete(form, trigger);
+          }});
+        }}
       }};
 
-      document.querySelectorAll(".delete-form").forEach(bindDeleteForm);
+      document.addEventListener(
+        "click",
+        (event) => {{
+          const trigger = event.target.closest(
+            ".delete-form [data-aios-delete]"
+          );
+          if (!trigger) return;
+          const form = trigger.closest(".delete-form");
+          if (!form) return;
+          event.preventDefault();
+          event.stopPropagation();
+          void performOptimisticDelete(form, trigger);
+        }},
+        true
+      );
 
       const bindSnoozeForm = (form) => {{
         if (form.dataset.aiosSnoozeBound === "1") return;
@@ -7414,7 +7449,6 @@ def _page(
         const card = root || document.getElementById("focus-card");
         if (!card) return;
         card.querySelectorAll(".complete-form").forEach(bindCompleteForm);
-        card.querySelectorAll(".delete-form").forEach(bindDeleteForm);
         card.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
         card.querySelectorAll("details.task-snooze, details.focus-snooze").forEach(bindSnoozeMenu);
         card.querySelectorAll(
@@ -7446,7 +7480,6 @@ def _page(
       const initTaskList = (root) => {{
         const scope = root || document.getElementById("dashboard-task-groups") || document;
         scope.querySelectorAll(".complete-form").forEach(bindCompleteForm);
-        scope.querySelectorAll(".delete-form").forEach(bindDeleteForm);
         scope.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
         scope.querySelectorAll("details.task-snooze").forEach(bindSnoozeMenu);
         restoreSectionState();
@@ -9569,6 +9602,22 @@ def snooze_task_web(
         return RedirectResponse(
             url="/?error=Task+could+not+be+snoozed.",
             status_code=303,
+        )
+
+
+@app.post("/tasks/{task_id}/undo-delete-optimistic")
+def undo_delete_optimistic_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    try:
+        result = _task_action(task_id, "undo-delete")
+        return JSONResponse({"ok": True, **result})
+    except Exception as exc:
+        print("[Optimistic Delete] Undo failed:", exc)
+        return JSONResponse(
+            {"ok": False, "detail": "Delete could not be undone."},
+            status_code=502,
         )
 
 
