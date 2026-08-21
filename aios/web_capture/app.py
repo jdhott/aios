@@ -38,7 +38,7 @@ WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
 WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
 WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.3-form-layout-fix"
-WEB_PROJECTS_VERSION = "projects-v1"
+WEB_PROJECTS_VERSION = "projects-v1.1-optimistic-actions"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v2"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
@@ -3452,6 +3452,454 @@ def _project_work_results_view(
     }
 
 
+def _optimistic_task_actions_script(*, surface: str = "dashboard") -> str:
+    """Shared optimistic complete/delete/snooze handlers for dashboard and project pages."""
+    is_dashboard = surface == "dashboard"
+    after_complete_success = (
+        "refreshTaskGroupsAfterComplete();"
+        if is_dashboard
+        else ""
+    )
+    after_delete_focus = (
+        """startFocusPolling({
+              refreshFocus: true,
+              previousFocusId: taskId,
+              waitForFocusChange: true,
+            });"""
+        if is_dashboard
+        else ""
+    )
+    after_snooze_success = (
+        """if (focusCard) {
+              startFocusPolling({
+                refreshFocus: false,
+                previousFocusId: taskId,
+                waitForFocusChange: true,
+              });
+            } else {
+              window.setTimeout(() => refreshTaskGroupsOnce(), 1500);
+            }"""
+        if is_dashboard
+        else ""
+    )
+    finish_non_focus = (
+        """if (state.action === "delete") {
+            refreshTaskGroupsOnce();
+          } else {
+            refreshTaskGroupsAfterComplete();
+          }"""
+        if is_dashboard
+        else "state.hiddenNodes.forEach((node) => node.remove());"
+    )
+    undo_sync = (
+        "await syncDashboardFragments({ refreshFocus: Boolean(state.affectsFocus) });"
+        if is_dashboard
+        else ""
+    )
+    return f"""<script>
+(() => {{
+  const optimisticTaskNodes = (taskId) =>
+    Array.from(
+      document.querySelectorAll(
+        `.task-row[data-task-id="${{CSS.escape(taskId)}}"], .project-editor-row[data-task-id="${{CSS.escape(taskId)}}"]`
+      )
+    );
+
+  let optimisticCompletion = null;
+
+  const clearOptimisticTimer = () => {{
+    if (!optimisticCompletion?.timer) return;
+    window.clearTimeout(optimisticCompletion.timer);
+    optimisticCompletion.timer = null;
+  }};
+
+  const removeOptimisticToast = () => {{
+    document.getElementById("optimisticCompleteToast")?.remove();
+  }};
+
+  const restoreOptimisticNodes = (state) => {{
+    (state?.hiddenNodes || []).forEach((node) => {{
+      node.classList.remove("optimistic-hidden");
+    }});
+    if (state?.focusCard && state.focusHtml !== null) {{
+      state.focusCard.innerHTML = state.focusHtml;
+      window.aiosInitOptimisticTaskActions?.(state.focusCard);
+    }}
+    (state?.hiddenNodes || []).forEach((node) => {{
+      node.querySelectorAll(".complete-checkbox, [data-aios-delete]").forEach((button) => {{
+        button.dataset.submitting = "0";
+      }});
+    }});
+  }};
+
+  const showOptimisticErrorToast = (message, onRetry) => {{
+    removeOptimisticToast();
+    const toast = document.createElement("div");
+    toast.id = "optimisticCompleteToast";
+    toast.className = "optimistic-toast error";
+    if (onRetry) {{
+      toast.innerHTML = `<span>${{message}}</span><button type="button">Try again</button>`;
+      toast.querySelector("button")?.addEventListener("click", () => {{
+        removeOptimisticToast();
+        onRetry();
+      }});
+    }} else {{
+      toast.textContent = message;
+    }}
+    document.body.appendChild(toast);
+    window.setTimeout(removeOptimisticToast, {WEB_TOAST_ACTION_MS});
+  }};
+
+  const showOptimisticToast = (state, message = "Task completed") => {{
+    removeOptimisticToast();
+    const toast = document.createElement("div");
+    toast.id = "optimisticCompleteToast";
+    toast.className = "optimistic-toast";
+    toast.innerHTML = '<span>' + message + '</span><button type="button">Undo</button>';
+    document.body.appendChild(toast);
+
+    toast.querySelector("button")?.addEventListener("click", async () => {{
+      if (!optimisticCompletion || optimisticCompletion.taskId !== state.taskId) return;
+
+      const undoPath =
+        state.action === "delete"
+          ? `/tasks/${{encodeURIComponent(state.taskId)}}/undo-delete-optimistic`
+          : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
+
+      const undoRequest = async () => {{
+        clearOptimisticTimer();
+        restoreOptimisticNodes(state);
+        removeOptimisticToast();
+        optimisticCompletion = null;
+
+        try {{
+          const response = await fetch(undoPath, {{
+            method: "POST",
+            headers: {{ "X-Requested-With": "fetch" }},
+          }});
+          if (!response.ok) throw new Error("Undo failed");
+          {undo_sync}
+        }} catch (_error) {{
+          state.hiddenNodes.forEach((node) => {{
+            node.classList.add("optimistic-hidden");
+          }});
+          if (state.focusCard && state.focusHtml !== null) {{
+            state.focusCard.innerHTML = state.focusHtml;
+            window.aiosInitOptimisticTaskActions?.(state.focusCard);
+          }}
+          optimisticCompletion = state;
+          showOptimisticErrorToast("Undo could not be saved.", undoRequest);
+        }}
+      }};
+
+      await undoRequest();
+    }});
+  }};
+
+  const finishOptimisticWindow = (state) => {{
+    removeOptimisticToast();
+    optimisticCompletion = null;
+    if (!state.affectsFocus) {{
+      {finish_non_focus}
+    }}
+  }};
+
+  const bindCompleteForm = (form) => {{
+    if (form.dataset.aiosCompleteBound === "1") return;
+    form.dataset.aiosCompleteBound = "1";
+    const button = form.querySelector(".complete-checkbox");
+    const taskId = form.dataset.taskId || form.action.split("/tasks/")[1]?.split("/")[0] || "";
+    if (!button || !taskId) return;
+
+    form.addEventListener("submit", async (event) => {{
+      event.preventDefault();
+      if (button.dataset.submitting === "1") return;
+      button.dataset.submitting = "1";
+
+      if (optimisticCompletion) {{
+        clearOptimisticTimer();
+        finishOptimisticWindow(optimisticCompletion);
+      }}
+
+      const focusCard = form.closest(".focus-card");
+      const isFocusParent = form.classList.contains("focus-parent-complete");
+      const isFocusActivation = form.classList.contains("focus-activation-complete");
+      const hiddenNodes = optimisticTaskNodes(taskId);
+      const state = {{
+        action: "complete",
+        taskId,
+        hiddenNodes,
+        focusCard,
+        focusHtml: focusCard ? focusCard.innerHTML : null,
+        affectsFocus: Boolean(isFocusParent || isFocusActivation),
+        timer: null,
+      }};
+
+      hiddenNodes.forEach((node) => node.classList.add("optimistic-hidden"));
+
+      if (isFocusParent && focusCard) {{
+        focusCard.innerHTML =
+          '<div class="focus-label">⭐ Best Next Action</div>' +
+          '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+      }} else if (isFocusActivation && focusCard) {{
+        const start = focusCard.querySelector(".focus-start");
+        if (start) {{
+          start.innerHTML =
+            '<div class="focus-start-heading">Start here</div>' +
+            '<div class="task-title-row">' +
+            '<span class="task-check-placeholder" aria-hidden="true"></span>' +
+            '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next step…</div>' +
+            '</div>';
+        }}
+      }}
+
+      optimisticCompletion = state;
+      showOptimisticToast(state);
+
+      try {{
+        const response = await fetch(`/tasks/${{encodeURIComponent(taskId)}}/complete-optimistic`, {{
+          method: "POST",
+          headers: {{ "X-Requested-With": "fetch" }},
+        }});
+        if (!response.ok) throw new Error("Completion failed");
+        if (state.affectsFocus) {{
+          window.startFocusPollingAfterComplete?.(state, {{
+            isFocusParent,
+            taskId,
+            focusCard,
+          }});
+        }} else {{
+          {after_complete_success}
+        }}
+        state.timer = window.setTimeout(() => finishOptimisticWindow(state), {WEB_TOAST_UNDO_MS});
+      }} catch (_error) {{
+        clearOptimisticTimer();
+        restoreOptimisticNodes(state);
+        removeOptimisticToast();
+        optimisticCompletion = null;
+        button.dataset.submitting = "0";
+        showOptimisticErrorToast("Task could not be completed.");
+      }}
+    }});
+  }};
+
+  const performOptimisticDelete = async (form, trigger) => {{
+    if (trigger?.dataset.submitting === "1") return;
+    if (!window.confirm("Delete this task?")) return;
+
+    const taskId =
+      form.dataset.taskId ||
+      form.getAttribute("action")?.split("/tasks/")[1]?.split("/")[0] ||
+      "";
+    if (!taskId) {{
+      showOptimisticErrorToast("Task could not be deleted.");
+      return;
+    }}
+
+    if (optimisticCompletion) {{
+      clearOptimisticTimer();
+      finishOptimisticWindow(optimisticCompletion);
+    }}
+
+    if (trigger) trigger.dataset.submitting = "1";
+
+    const hiddenNodes = optimisticTaskNodes(taskId);
+    const focusCard = form.closest(".focus-card");
+    const isDashboardFocus = Boolean(focusCard);
+    const state = {{
+      action: "delete",
+      taskId,
+      hiddenNodes,
+      focusCard,
+      focusHtml: focusCard ? focusCard.innerHTML : null,
+      affectsFocus: isDashboardFocus,
+      timer: null,
+    }};
+
+    hiddenNodes.forEach((node) => {{
+      node.classList.add("optimistic-hidden");
+    }});
+
+    if (isDashboardFocus && focusCard) {{
+      focusCard.innerHTML =
+        '<div class="focus-label">⭐ Best Next Action</div>' +
+        '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+    }}
+
+    optimisticCompletion = state;
+    showOptimisticToast(state, "Task deleted");
+
+    try {{
+      const response = await fetch(
+        `/tasks/${{encodeURIComponent(taskId)}}/delete-optimistic`,
+        {{
+          method: "POST",
+          headers: {{ "X-Requested-With": "fetch" }},
+        }}
+      );
+      if (!response.ok) throw new Error("Delete failed");
+      {after_delete_focus}
+      state.timer = window.setTimeout(
+        () => finishOptimisticWindow(state),
+        {WEB_TOAST_UNDO_MS}
+      );
+    }} catch (_error) {{
+      clearOptimisticTimer();
+      restoreOptimisticNodes(state);
+      removeOptimisticToast();
+      optimisticCompletion = null;
+      if (trigger) trigger.dataset.submitting = "0";
+      showOptimisticErrorToast("Task could not be deleted.", () => {{
+        void performOptimisticDelete(form, trigger);
+      }});
+    }}
+  }};
+
+  document.addEventListener(
+    "click",
+    (event) => {{
+      const trigger = event.target.closest(".delete-form [data-aios-delete]");
+      if (!trigger) return;
+      const form = trigger.closest(".delete-form");
+      if (!form) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void performOptimisticDelete(form, trigger);
+    }},
+    true
+  );
+
+  const bindSnoozeForm = (form) => {{
+    if (form.dataset.aiosSnoozeBound === "1") return;
+    form.dataset.aiosSnoozeBound = "1";
+    form.addEventListener("submit", async (event) => {{
+      event.preventDefault();
+
+      const submitter = event.submitter;
+      if (submitter?.dataset.submitting === "1") return;
+      if (submitter) submitter.dataset.submitting = "1";
+
+      const details = form.closest("details");
+      const taskId =
+        details?.closest("[data-task-id]")?.dataset.taskId ||
+        form.action.split("/tasks/")[1]?.split("/")[0] ||
+        "";
+
+      if (!taskId) {{
+        form.submit();
+        return;
+      }}
+
+      const formData = new FormData(form);
+      if (submitter?.name) {{
+        formData.set(submitter.name, submitter.value);
+      }}
+
+      const hiddenNodes = optimisticTaskNodes(taskId);
+      const focusCard = details?.closest(".focus-card");
+      const focusHtml = focusCard ? focusCard.innerHTML : null;
+
+      hiddenNodes.forEach((node) => {{
+        node.classList.add("optimistic-hidden");
+      }});
+
+      if (focusCard) {{
+        focusCard.innerHTML =
+          '<div class="focus-label">⭐ Best Next Action</div>' +
+          '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+      }}
+
+      if (details) details.open = false;
+
+      try {{
+        const response = await fetch(
+          `/tasks/${{encodeURIComponent(taskId)}}/snooze-optimistic`,
+          {{
+            method: "POST",
+            headers: {{ "X-Requested-With": "fetch" }},
+            body: formData,
+          }}
+        );
+
+        if (!response.ok) throw new Error("Snooze failed");
+
+        {after_snooze_success}
+      }} catch (_error) {{
+        hiddenNodes.forEach((node) => {{
+          node.classList.remove("optimistic-hidden");
+        }});
+
+        if (focusCard && focusHtml !== null) {{
+          focusCard.innerHTML = focusHtml;
+          window.aiosInitOptimisticTaskActions?.(focusCard);
+        }}
+
+        if (submitter) submitter.dataset.submitting = "0";
+        showOptimisticErrorToast("Task could not be snoozed.");
+      }}
+    }});
+  }};
+
+  const allSnoozeMenus = () =>
+    Array.from(document.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze"));
+
+  const positionSnoozeMenu = (menu) => {{
+    const panel = menu.querySelector(".task-snooze-menu");
+    if (!panel) return;
+    panel.style.left = "0";
+    panel.style.right = "auto";
+    const margin = 12;
+    const panelRect = panel.getBoundingClientRect();
+    if (panelRect.right > window.innerWidth - margin) {{
+      panel.style.left = `${{window.innerWidth - margin - panelRect.right}}px`;
+    }}
+    const nextRect = panel.getBoundingClientRect();
+    if (nextRect.left < margin) {{
+      panel.style.left = `${{margin - menu.getBoundingClientRect().left}}px`;
+    }}
+  }};
+
+  const bindSnoozeMenu = (menu) => {{
+    if (menu.dataset.aiosSnoozeMenuBound === "1") return;
+    menu.dataset.aiosSnoozeMenuBound = "1";
+    menu.addEventListener("toggle", () => {{
+      if (!menu.open) return;
+      allSnoozeMenus().forEach((other) => {{
+        if (other !== menu) other.open = false;
+      }});
+      positionSnoozeMenu(menu);
+    }});
+  }};
+
+  const initOptimisticTaskActions = (root) => {{
+    const scope = root || document;
+    scope.querySelectorAll(".complete-form").forEach(bindCompleteForm);
+    scope.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
+    scope.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze").forEach(bindSnoozeMenu);
+  }};
+
+  window.aiosInitOptimisticTaskActions = initOptimisticTaskActions;
+  initOptimisticTaskActions(document);
+
+  document.addEventListener("click", (event) => {{
+    allSnoozeMenus().forEach((menu) => {{
+      if (menu.open && !menu.contains(event.target)) menu.open = false;
+    }});
+  }});
+
+  document.addEventListener("keydown", (event) => {{
+    if (event.key !== "Escape") return;
+    allSnoozeMenus().forEach((menu) => {{
+      if (!menu.open) return;
+      menu.open = false;
+      const trigger = menu.querySelector("summary");
+      if (trigger) trigger.focus();
+    }});
+  }});
+}})();
+</script>"""
+
+
 def _project_detail_page(
     payload: dict,
     *,
@@ -3468,7 +3916,6 @@ def _project_detail_page(
     status = str(project.get("status") or "").strip()
 
     task_rows = ""
-    completion_forms = ""
     for task in tasks:
         raw_task_id = str(task.get("id") or "")
         task_id = html.escape(raw_task_id)
@@ -3486,32 +3933,26 @@ def _project_detail_page(
         if task.get("is_quick_win"): meta.append("Quick Win")
         if task.get("is_just_do_it"): meta.append("Just Do It")
         project_return = f"/projects/{project_id}#project-tasks"
-        form_id = f"project-complete-{task_id}"
-        snooze_form_id = f"project-snooze-{task_id}"
-        completion_forms += (
-            f'<form id="{form_id}" method="post" action="/tasks/{task_id}/complete">'
-            f'<input type="hidden" name="return_to" value="{project_return}"></form>'
-            f'<form id="{snooze_form_id}" method="post" action="/tasks/{task_id}/snooze">'
-            f'<input type="hidden" name="return_to" value="{project_return}"></form>'
-        )
         task_rows += (
             f'<div class="project-editor-row" draggable="true" data-task-id="{task_id}">'
             '<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button>'
-            f'<button class="complete-checkbox" type="submit" form="{form_id}" aria-label="Mark task done" title="Mark done"><span aria-hidden="true"></span></button>'
-            '<div class="project-editor-main">'
-            f'<input type="hidden" name="task_id" value="{task_id}">'
-            f'<input class="project-editor-title" name="task_title" type="text" value="{title}" aria-label="Task title">'
-            f'<div class="task-meta">{" · ".join(meta)}</div>'
-            '</div>'
-            f'<a class="project-task-open" href="/tasks/{task_id}?return_to={project_return}" title="Open task">Details</a>'
+            + f'<form class="complete-form" data-task-id="{task_id}" method="post" action="/tasks/{task_id}/complete">'
+            + '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
+            + '<span aria-hidden="true"></span></button></form>'
+            + '<div class="project-editor-main">'
+            + f'<input type="hidden" name="task_id" value="{task_id}">'
+            + f'<input class="project-editor-title" name="task_title" type="text" value="{title}" aria-label="Task title">'
+            + f'<div class="task-meta">{" · ".join(meta)}</div>'
+            + '</div>'
+            + f'<a class="project-task-open" href="/tasks/{task_id}?return_to={html.escape(project_return, quote=True)}" title="Open task">Details</a>'
             + _task_snooze_control_html(
                 raw_task_id,
-                return_to=project_return,
-                external_form_id=snooze_form_id,
                 css_class="project-task-snooze",
             )
-            + '<button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'
-            '</div>'
+            + f'<form class="delete-form" data-task-id="{task_id}">'
+            + '<button class="trash-button" type="button" data-aios-delete="1" aria-label="Delete task" title="Delete task">'
+            + '<span aria-hidden="true">🗑️</span></button></form>'
+            + '</div>'
         )
 
     if not task_rows:
@@ -3619,6 +4060,19 @@ def _project_detail_page(
 .completed-task-spacer {{ width:44px; min-width:44px; }}
 .chevron {{ color:var(--muted); font-size:1.6rem; }}
 .empty-state {{ padding:24px; color:var(--muted); }}
+.optimistic-toast {{
+  position:fixed; left:50%; bottom:calc(16px + env(safe-area-inset-bottom, 0px));
+  transform:translateX(-50%); z-index:1200; display:flex; align-items:center; gap:14px;
+  max-width:min(92vw, 420px); padding:14px 18px; border-radius:999px;
+  background:var(--toast-bg, var(--charcoal)); color:var(--toast-fg, var(--paper));
+  box-shadow:var(--shadow-lg); font-weight:650; font-size:.92rem;
+}}
+.optimistic-toast button {{
+  border:0; border-radius:999px; padding:8px 14px; background:var(--paper);
+  color:var(--charcoal); font:inherit; font-weight:700; cursor:pointer;
+}}
+.optimistic-toast.error {{ background:var(--toast-error, #f5d6d6); color:var(--charcoal); }}
+.optimistic-hidden {{ display:none !important; }}
 .context-card, .proposal-card, .project-task-editor {{
   margin:0 0 24px; padding:28px 24px;
   background:var(--card); border:1px solid var(--border);
@@ -3867,8 +4321,7 @@ def _project_detail_page(
 
   <section class="project-task-editor" id="project-tasks">
     <h2>Project tasks</h2>
-    <p class="proposal-note">Drag to set the project sequence, edit titles inline, remove tasks, or add work. Completion remains immediate; structural changes are saved together.</p>
-    {completion_forms}
+    <p class="proposal-note">Drag to set the project sequence, edit titles inline, remove tasks, or add work. Complete, snooze, and delete apply immediately with undo; structural edits are saved together.</p>
     <form method="post" action="/projects/{project_id}/tasks">
       <div class="project-editor-list" data-project-task-list>{task_rows}</div>
       <div class="project-editor-actions">
@@ -3880,12 +4333,13 @@ def _project_detail_page(
 </main>
 {_bottom_nav_html(active="projects")}
 <script>
-function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
-function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
+function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash && !row.dataset.taskId) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
+function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove unsaved task" aria-label="Remove unsaved task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
 function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
+{_optimistic_task_actions_script(surface="project")}
 {work_results_poll_script}
 {scroll_proposal_script}
 </body>
@@ -7133,7 +7587,9 @@ def _page(
           const isFocusParent = form.classList.contains("focus-parent-complete");
           const isFocusActivation = form.classList.contains("focus-activation-complete");
           const hiddenNodes = Array.from(
-            document.querySelectorAll(`.task-row[data-task-id="${{CSS.escape(taskId)}}"]`)
+            document.querySelectorAll(
+              `.task-row[data-task-id="${{CSS.escape(taskId)}}"], .project-editor-row[data-task-id="${{CSS.escape(taskId)}}"]`
+            )
           );
 
           const state = {{
@@ -7224,13 +7680,9 @@ def _page(
 
         const hiddenNodes = Array.from(
           document.querySelectorAll(
-            `.task-row[data-task-id="${{CSS.escape(taskId)}}"]`
+            `.task-row[data-task-id="${{CSS.escape(taskId)}}"], .project-editor-row[data-task-id="${{CSS.escape(taskId)}}"]`
           )
         );
-        const projectRow = form.closest(".project-editor-row");
-        if (projectRow && !hiddenNodes.includes(projectRow)) {{
-          hiddenNodes.push(projectRow);
-        }}
 
         const focusCard = form.closest(".focus-card");
         const isDashboardFocus = Boolean(focusCard);
@@ -7333,14 +7785,9 @@ def _page(
 
           const hiddenNodes = Array.from(
             document.querySelectorAll(
-              `.task-row[data-task-id="${{CSS.escape(taskId)}}"]`
+              `.task-row[data-task-id="${{CSS.escape(taskId)}}"], .project-editor-row[data-task-id="${{CSS.escape(taskId)}}"]`
             )
           );
-
-          const projectRow = details?.closest(".project-editor-row");
-          if (projectRow && !hiddenNodes.includes(projectRow)) {{
-            hiddenNodes.push(projectRow);
-          }}
 
           const focusCard = details?.closest(".focus-card");
           const focusHtml = focusCard ? focusCard.innerHTML : null;

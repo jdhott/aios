@@ -374,6 +374,7 @@ full Cloud Run processor job when the user action has a narrow, known outcome.
 | Complete **non-focus task** | Completed Today summary in API; task-list fragment poll in web | Skipped |
 | **Delete** task (optimistic UI) | Row hidden immediately; viewport preserved | Skipped unless BNA delete needs new focus |
 | **Delete BNA** | Dashboard focus + Start Here refresh | Skipped |
+| **Project page complete/snooze/delete** | Optimistic UI + undo (complete/delete); row removed after undo window | Skipped |
 | **Not now** on Start Here | Activation refresh | Skipped |
 | **Not useful** | Context coaching LLM | Skipped until user saves context |
 | **Context help / answer** | Context coaching LLM | Skipped |
@@ -386,18 +387,16 @@ Shared modules: `dashboard_focus.py`, `focus_activation_refresh.py`,
 
 **Next fast-path opportunities (priority order):**
 
-1.  **Project page complete/snooze/delete** — reuse dashboard optimistic + fragment
-    patterns on project task lists.
-2.  **Brain dump capture ack** — instant “Captured ✓” in UI; keep full processor for
+1.  **Brain dump capture ack** — instant “Captured ✓” in UI; keep full processor for
     task creation pipeline (do not thin the pipeline itself).
-3.  **Review resolution** — lightweight fragment refresh for review inbox counts/lists
+2.  **Review resolution** — lightweight fragment refresh for review inbox counts/lists
     where a full processor run is only needed for downstream AI re-evaluation.
-4.  **Shared post-action task-list sync** — one helper invoked after any optimistic
+3.  **Shared post-action task-list sync** — one helper invoked after any optimistic
     dashboard mutation (complete, delete, snooze) to reduce duplicated poll logic.
-5.  **Lightweight execution refresh** — only if rank/focus changes need recomputation
+4.  **Lightweight execution refresh** — only if rank/focus changes need recomputation
     beyond `resolve_dashboard_focus_task` (bulk imports, large batch completes).
     Not needed for normal single-task complete/delete/snooze today.
-6.  **SSE (Phase 3)** — replace poll timers when processor can emit typed events;
+5.  **SSE (Phase 3)** — replace poll timers when processor can emit typed events;
     see **Real-time UI updates** below.
 
 **Still requires full processor:**
@@ -416,13 +415,11 @@ the user action cannot affect it.
 
 1.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-2.  **Project page optimistic complete/snooze/delete** — align with dashboard fast
-    paths (see **Dashboard fast paths**).
-3.  **Preserve form data on errors** — create-task failures should keep user input.
-4.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+2.  **Preserve form data on errors** — create-task failures should keep user input.
+3.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices (timing already unified).
-5.  **Hide or collapse BNA Rank/Score** for normal daily use.
-6.  **Service Worker Home shell cache** — see **Dashboard / Home refinements**.
+4.  **Hide or collapse BNA Rank/Score** for normal daily use.
+5.  **Service Worker Home shell cache** — see **Dashboard / Home refinements**.
 
 #### UX principles
 
