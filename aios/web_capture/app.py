@@ -40,6 +40,7 @@ WEB_PROJECTS_VERSION = "projects-v1"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
+WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -349,6 +350,43 @@ def _mobile_shell_css() -> str:
       line-height: var(--line-relaxed);
     }}
     {_bottom_nav_css()}
+    .fragment-poll-timeout {{
+      display:grid;
+      gap:12px;
+      margin-top:16px;
+      color:var(--ink);
+      font-size:.95rem;
+      line-height:var(--line-relaxed);
+    }}
+    .fragment-poll-timeout-actions {{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+    }}
+    .fragment-poll-timeout-actions button {{
+      min-height:0;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:var(--surface);
+      color:var(--charcoal);
+      font:inherit;
+      font-weight:600;
+      cursor:pointer;
+    }}
+    .fragment-poll-timeout-actions button.primary {{
+      background:var(--charcoal);
+      border-color:var(--charcoal);
+      color:var(--paper);
+    }}
+    .fragment-poll-timeout-actions button.link {{
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      text-decoration:underline;
+      padding:10px 0;
+    }}
     """
 
 
@@ -823,6 +861,234 @@ def _breakdown_list_editor_html(*, titles: list[str], form_action: str, return_t
     '''
 
 
+def _fragment_poll_script(
+    *,
+    enabled: bool,
+    url: str,
+    target_id: str,
+    fingerprint: str,
+    session_key: str,
+    init_hook: str = "",
+    initial_delay: int = 2000,
+    max_attempts: int = 45,
+) -> str:
+    config = {
+        "enabled": enabled,
+        "url": url,
+        "targetId": target_id,
+        "initialFingerprint": fingerprint,
+        "sessionKey": session_key,
+        "initHook": init_hook or None,
+        "initialDelay": initial_delay,
+        "maxAttempts": max_attempts,
+    }
+    if not enabled:
+        return (
+            f"<script>window.__AIOS_FRAGMENT_POLL__ = {json.dumps({'enabled': False})};"
+            f"sessionStorage.removeItem({json.dumps(session_key)});</script>"
+        )
+    return (
+        f"<script>window.__AIOS_FRAGMENT_POLL__ = {json.dumps(config)};</script>"
+        + _FRAGMENT_POLL_CLIENT_JS
+    )
+
+
+_FRAGMENT_POLL_CLIENT_JS = """
+<script>
+(() => {
+  const cfg = window.__AIOS_FRAGMENT_POLL__;
+  if (!cfg?.enabled) return;
+
+  let fingerprint = cfg.initialFingerprint || null;
+  let timer = null;
+  let attempt = Number(sessionStorage.getItem(cfg.sessionKey) || "0");
+  let delay = cfg.initialDelay || 2000;
+  const maxDelay = 30000;
+  const maxAttempts = cfg.maxAttempts || 45;
+
+  const runInitHook = (root) => {
+    const hook = cfg.initHook;
+    if (!hook) return;
+    const fn = window[hook];
+    if (typeof fn === "function") fn(root);
+  };
+
+  const replaceTarget = (html) => {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html.trim();
+    const next = wrapper.firstElementChild;
+    if (!next) return null;
+    const existing = document.getElementById(cfg.targetId);
+    if (existing) {
+      existing.replaceWith(next);
+    }
+    runInitHook(next);
+    return next;
+  };
+
+  const showPollTimeout = () => {
+    const target = document.getElementById(cfg.targetId);
+    if (!target) return;
+    target.innerHTML =
+      '<div class="fragment-poll-timeout">' +
+      '<p>Still processing. The update may still be running in the background.</p>' +
+      '<div class="fragment-poll-timeout-actions">' +
+      '<button type="button" class="primary" data-fragment-poll-retry>Try again</button>' +
+      '<button type="button" class="link" data-fragment-poll-reload>Refresh page</button>' +
+      '</div></div>';
+    target.querySelector("[data-fragment-poll-retry]")?.addEventListener("click", () => {
+      sessionStorage.removeItem(cfg.sessionKey);
+      attempt = 0;
+      delay = cfg.initialDelay || 2000;
+      schedulePoll();
+    });
+    target.querySelector("[data-fragment-poll-reload]")?.addEventListener("click", () => {
+      window.location.reload();
+    });
+  };
+
+  const poll = async () => {
+    if (attempt >= maxAttempts) {
+      sessionStorage.removeItem(cfg.sessionKey);
+      timer = null;
+      showPollTimeout();
+      return;
+    }
+
+    attempt += 1;
+    sessionStorage.setItem(cfg.sessionKey, String(attempt));
+
+    try {
+      const response = await fetch(cfg.url, {
+        headers: { "X-Requested-With": "fetch" },
+      });
+      if (!response.ok) throw new Error("Fragment poll failed");
+      const data = await response.json();
+      if (data.html && data.fingerprint !== fingerprint) {
+        replaceTarget(data.html);
+        fingerprint = data.fingerprint;
+      }
+      if (!data.pending) {
+        sessionStorage.removeItem(cfg.sessionKey);
+        timer = null;
+        return;
+      }
+    } catch (_error) {
+      // Keep polling on transient failures.
+    }
+
+    delay = Math.min(Math.round(delay * 1.6), maxDelay);
+    timer = window.setTimeout(poll, delay);
+  };
+
+  const schedulePoll = () => {
+    if (timer) window.clearTimeout(timer);
+    timer = window.setTimeout(poll, delay);
+  };
+
+  schedulePoll();
+})();
+</script>
+"""
+
+
+def _breakdown_panel_fingerprint(task: dict) -> str:
+    breakdown_state = str(task.get("breakdown_state") or "").strip()
+    raw_proposal = task.get("breakdown_proposal") or []
+    proposal_titles = [
+        str(item).strip()
+        for item in raw_proposal
+        if str(item).strip()
+    ] if isinstance(raw_proposal, list) else []
+    children = list(task.get("breakdown_children") or [])
+    parts = [
+        breakdown_state,
+        str(len(proposal_titles)),
+        "|".join(proposal_titles),
+        str(bool(task.get("has_breakdown_children"))),
+        str(task.get("breakdown_request_context") or "")[:120],
+        str(len(children)),
+    ]
+    for child in children:
+        parts.extend(
+            [
+                str(child.get("id") or ""),
+                str(child.get("title") or ""),
+                "1" if child.get("is_done") else "0",
+            ]
+        )
+    return "|".join(parts)
+
+
+def _breakdown_panel_body(task: dict, *, return_to: str) -> str:
+    task_id = html.escape(str(task.get("id") or ""))
+    safe_return_to = html.escape(_safe_return_to(return_to), quote=True)
+    breakdown_state = str(task.get("breakdown_state") or "").strip()
+    has_breakdown_children = bool(task.get("has_breakdown_children"))
+    breakdown_context = html.escape(str(task.get("breakdown_request_context") or ""))
+    raw_proposal = task.get("breakdown_proposal") or []
+    proposal_titles = [
+        str(item).strip() for item in raw_proposal
+        if str(item).strip()
+    ] if isinstance(raw_proposal, list) else []
+
+    if breakdown_state == "pending":
+        return """
+        <p class="readonly-note">AIOS is proposing the smallest useful breakdown using your guidance. Nothing will be created until you accept it.</p>
+        <div class="breakdown-pending"><span class="mini-spinner"></span> Building proposed breakdown…</div>
+        """
+    if breakdown_state == "proposed" and proposal_titles:
+        return f"""
+        <p class="readonly-note">Review the proposed breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task before accepting.</p>
+        {_breakdown_list_editor_html(titles=proposal_titles, form_action=f"/tasks/{task_id}/breakdown/accept", return_to=_safe_return_to(return_to), submit_label="Accept Breakdown", cancel_action=f"/tasks/{task_id}/breakdown/cancel")}
+        """
+    if breakdown_state == "accepted" or has_breakdown_children:
+        children = list(task.get("breakdown_children") or [])
+        completed_children = [c for c in children if c.get("is_done")]
+        open_children = [c for c in children if not c.get("is_done") and c.get("is_open", True)]
+        completed_html = ""
+        if completed_children:
+            items = "".join(
+                f"<li>{html.escape(str(c.get('title') or ''))} <span class='optional'>(completed)</span></li>"
+                for c in completed_children
+            )
+            completed_html = (
+                f"<p class='readonly-note'>Completed subtasks are preserved as history and are not removed by this editor.</p><ul>{items}</ul>"
+            )
+        return f"""
+        <p class="readonly-note">Edit the open breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task.</p>
+        {completed_html}
+        {_breakdown_list_editor_html(titles=[str(c.get("title") or "").strip() for c in open_children], form_action=f"/tasks/{task_id}/breakdown/edit", return_to=_safe_return_to(return_to), submit_label="Save Breakdown")}
+        """
+
+    state_note = ""
+    if breakdown_state == "no_proposal":
+        state_note = '<div class="notice">AIOS did not find a useful breakdown. Add guidance and try again if you want.</div>'
+    elif breakdown_state == "failed":
+        state_note = '<div class="notice error">AIOS could not generate a breakdown. You can try again with more guidance.</div>'
+    return f"""
+        {state_note}
+        <p class="readonly-note">Use this when the task would be easier to execute as a small set of meaningful steps. AIOS will propose first; nothing is created automatically.</p>
+        <form method="post" action="/tasks/{task_id}/breakdown/request">
+          <input type="hidden" name="return_to" value="{safe_return_to}">
+          <label>Anything AIOS should know? <span class="optional">Optional</span>
+            <textarea class="breakdown-editor" name="context" rows="3" placeholder="e.g. I already bought the materials; focus on installation.">{breakdown_context}</textarea>
+          </label>
+          <div class="actions"><button class="secondary-button" type="submit">Break Down Task</button></div>
+        </form>
+        """
+
+
+def _breakdown_panel_view(task: dict, *, return_to: str = "/") -> dict[str, object]:
+    body = _breakdown_panel_body(task, return_to=return_to)
+    pending = str(task.get("breakdown_state") or "").strip() == "pending"
+    return {
+        "html": f'<div id="breakdown-panel">{body}</div>',
+        "fingerprint": _breakdown_panel_fingerprint(task),
+        "pending": pending,
+    }
+
+
 def _task_detail_page(
     task: dict,
     message: str = "",
@@ -869,57 +1135,18 @@ def _task_detail_page(
     surfaced_qw = "Yes" if task.get("surfaced_quick_win") else "No"
     project_id = html.escape(str(task.get("project_id") or "—"))
 
-    breakdown_state = str(task.get("breakdown_state") or "").strip()
-    has_breakdown_children = bool(task.get("has_breakdown_children"))
-    breakdown_context = html.escape(str(task.get("breakdown_request_context") or ""))
-    raw_proposal = task.get("breakdown_proposal") or []
-    proposal_titles = [
-        str(item).strip() for item in raw_proposal
-        if str(item).strip()
-    ] if isinstance(raw_proposal, list) else []
-    proposal_text = html.escape("\n".join(proposal_titles))
-
-    if breakdown_state == "pending":
-        breakdown_body = f"""
-        <p class="readonly-note">AIOS is proposing the smallest useful breakdown using your guidance. Nothing will be created until you accept it.</p>
-        <div class="breakdown-pending"><span class="mini-spinner"></span> Building proposed breakdown…</div>
-        <script>setTimeout(function(){{ window.location.reload(); }}, 2500);</script>
-        """
-    elif breakdown_state == "proposed" and proposal_titles:
-        breakdown_body = f"""
-        <p class="readonly-note">Review the proposed breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task before accepting.</p>
-        {_breakdown_list_editor_html(titles=proposal_titles, form_action=f"/tasks/{task_id}/breakdown/accept", return_to=return_to, submit_label="Accept Breakdown", cancel_action=f"/tasks/{task_id}/breakdown/cancel")}
-        """
-    elif breakdown_state == "accepted" or has_breakdown_children:
-        children = list(task.get("breakdown_children") or [])
-        completed_children = [c for c in children if c.get("is_done")]
-        open_children = [c for c in children if not c.get("is_done") and c.get("is_open", True)]
-        completed_html = ""
-        if completed_children:
-            items = "".join(f"<li>{html.escape(str(c.get('title') or ''))} <span class='optional'>(completed)</span></li>" for c in completed_children)
-            completed_html = f"<p class='readonly-note'>Completed subtasks are preserved as history and are not removed by this editor.</p><ul>{items}</ul>"
-        breakdown_body = f"""
-        <p class="readonly-note">Edit the open breakdown below. Drag to reorder, edit task names, remove tasks, or add a missing task.</p>
-        {completed_html}
-        {_breakdown_list_editor_html(titles=[str(c.get("title") or "").strip() for c in open_children], form_action=f"/tasks/{task_id}/breakdown/edit", return_to=return_to, submit_label="Save Breakdown")}
-        """
-    else:
-        state_note = ''
-        if breakdown_state == "no_proposal":
-            state_note = '<div class="notice">AIOS did not find a useful breakdown. Add guidance and try again if you want.</div>'
-        elif breakdown_state == "failed":
-            state_note = '<div class="notice error">AIOS could not generate a breakdown. You can try again with more guidance.</div>'
-        breakdown_body = f"""
-        {state_note}
-        <p class="readonly-note">Use this when the task would be easier to execute as a small set of meaningful steps. AIOS will propose first; nothing is created automatically.</p>
-        <form method="post" action="/tasks/{task_id}/breakdown/request">
-          <input type="hidden" name="return_to" value="{return_to}">
-          <label>Anything AIOS should know? <span class="optional">Optional</span>
-            <textarea class="breakdown-editor" name="context" rows="3" placeholder="e.g. I already bought the materials; focus on installation.">{breakdown_context}</textarea>
-          </label>
-          <div class="actions"><button class="secondary-button" type="submit">Break Down Task</button></div>
-        </form>
-        """
+    breakdown_view = _breakdown_panel_view(task, return_to=return_to)
+    breakdown_body = str(breakdown_view["html"])
+    raw_task_id = str(task.get("id") or "")
+    breakdown_poll_script = _fragment_poll_script(
+        enabled=bool(breakdown_view["pending"]),
+        url=f"/api/tasks/{quote_plus(raw_task_id)}/breakdown-panel?return_to={quote_plus(_safe_return_to(return_to))}",
+        target_id="breakdown-panel",
+        fingerprint=str(breakdown_view["fingerprint"]),
+        session_key="aios-breakdown-panel-refresh-count",
+        init_hook="aiosInitBreakdownPanel",
+        initial_delay=2500,
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1037,6 +1264,11 @@ input:focus, textarea:focus {{
 @media (max-width:640px) {{ .breakdown-row {{ grid-template-columns:38px minmax(0,1fr) 42px; padding:10px; }} }}
 .optional {{ color:var(--muted); font-weight:500; }}
 .breakdown-pending {{ display:flex; align-items:center; gap:12px; font-weight:700; color:var(--charcoal); line-height:var(--line-relaxed); }}
+.fragment-poll-timeout {{ display:grid; gap:12px; margin-top:16px; color:var(--ink); font-size:.95rem; line-height:var(--line-relaxed); }}
+.fragment-poll-timeout-actions {{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }}
+.fragment-poll-timeout-actions button {{ min-height:0; padding:10px 14px; border-radius:999px; border:1px solid var(--border); background:var(--surface); color:var(--charcoal); font:inherit; font-weight:600; cursor:pointer; }}
+.fragment-poll-timeout-actions button.primary {{ background:var(--charcoal); border-color:var(--charcoal); color:var(--paper); }}
+.fragment-poll-timeout-actions button.link {{ border:0; background:transparent; color:var(--muted); text-decoration:underline; padding:10px 0; }}
 .mini-spinner {{ width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--charcoal); border-radius:50%; animation:spin .8s linear infinite; }}
 @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
 .secondary-link {{
@@ -1224,13 +1456,15 @@ function breakdownRow(title) {{
 function wireBreakdownRow(row) {{ const trash=row.querySelector('.breakdown-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
 function addBreakdownRow(button) {{ const form=button.closest('form'), list=form.querySelector('[data-breakdown-list]'), row=breakdownRow(''); list.appendChild(row); row.querySelector('.breakdown-title').focus(); }}
 function syncBreakdownTitles(form) {{ const titles=Array.from(form.querySelectorAll('.breakdown-title')).map(i=>i.value.trim()).filter(Boolean); form.querySelector('input[name="titles"]').value=titles.join('\\n'); return true; }}
+window.aiosInitBreakdownPanel=function(root){{ const scope=root||document; scope.querySelectorAll('.breakdown-row').forEach(wireBreakdownRow); scope.querySelectorAll('[data-breakdown-list]').forEach(function(list){{ if(list.dataset.aiosBreakdownBound==='1')return; list.dataset.aiosBreakdownBound='1'; list.addEventListener('dragover',function(e){{ e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.breakdown-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging); }}); }}); }};
 function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
 function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
 function addProjectTaskRow(button) {{ const form=button.closest('form'),list=form.querySelector('[data-project-task-list]'); const empty=list.querySelector('.project-empty'); if(empty) empty.remove(); const row=projectTaskRow(''); list.appendChild(row); row.querySelector('.project-editor-title').focus(); }}
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 
-document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.breakdown-row').forEach(wireBreakdownRow); document.querySelectorAll('[data-breakdown-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{ e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.breakdown-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging); }}); }});  document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
+document.addEventListener('DOMContentLoaded',function(){{ window.aiosInitBreakdownPanel(document.getElementById('breakdown-panel')); document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
+{breakdown_poll_script}
 </body>
 </html>"""
 
@@ -1792,6 +2026,168 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
 </html>"""
 
 
+def _project_work_results_fingerprint(
+    payload: dict,
+    *,
+    refresh_proposal: bool = False,
+) -> str:
+    project = dict(payload.get("project") or {})
+    work_proposals = list(payload.get("work_proposals") or [])
+    work_generation_state = str(project.get("work_generation_state") or "").strip().lower()
+    parts = [
+        "1" if refresh_proposal else "0",
+        work_generation_state,
+        str(len(work_proposals)),
+        str(project.get("work_generation_question") or "")[:120],
+        str(project.get("work_generation_context_update") or "")[:120],
+    ]
+    for proposal in work_proposals:
+        parts.extend(
+            [
+                str(proposal.get("id") or ""),
+                str(proposal.get("title") or ""),
+            ]
+        )
+    return "|".join(parts)
+
+
+def _project_work_results_body(
+    payload: dict,
+    *,
+    refresh_proposal: bool = False,
+) -> tuple[str, bool]:
+    project = dict(payload.get("project") or {})
+    work_proposals = list(payload.get("work_proposals") or [])
+    project_id = html.escape(str(project.get("id") or ""))
+    work_generation_state = str(
+        project.get("work_generation_state") or ""
+    ).strip().lower()
+    work_generation_question = str(project.get("work_generation_question") or "").strip()
+    work_generation_context_update = str(project.get("work_generation_context_update") or "").strip()
+
+    proposal_rows = ""
+    for proposal in work_proposals:
+        proposal_id = html.escape(str(proposal.get("id") or ""))
+        proposal_title = html.escape(str(proposal.get("title") or "Untitled proposal"))
+        proposal_rows += (
+            '<div class="proposal-row">'
+            '<div class="proposal-section">'
+            '<div class="proposal-section-label">Suggested task</div>'
+            f'<form class="proposal-accept-form" method="post" '
+            f'action="/projects/{project_id}/work-proposals/{proposal_id}/accept">'
+            f'<textarea class="proposal-title-input" name="title" maxlength="75" required>'
+            f'{proposal_title}</textarea>'
+            '<div class="proposal-primary-actions">'
+            '<span class="proposal-edit-note">Edit the task if needed before accepting.</span>'
+            '<button class="proposal-accept" type="submit">Accept</button>'
+            '</div></form></div>'
+            '<div class="proposal-divider"></div>'
+            '<div class="proposal-section">'
+            '<div class="proposal-section-label">Not quite right?</div>'
+            '<div class="proposal-help">Tell AIOS exactly what should change. '
+            'Your correction will guide the next proposal.</div>'
+            f'<form class="proposal-retry-form" method="post" '
+            f'action="/projects/{project_id}/work-proposals/{proposal_id}/retry">'
+            '<textarea name="feedback" required placeholder="What should AIOS change?"></textarea>'
+            '<div class="proposal-action-row">'
+            '<button class="proposal-retry" type="submit">Try Again</button></form>'
+            f'<form method="post" action="/projects/{project_id}/work-proposals/{proposal_id}/dismiss">'
+            '<button class="proposal-dismiss" type="submit">Dismiss</button></form>'
+            '</div></div></div>'
+        )
+
+    proposal_pending = bool(
+        refresh_proposal
+        and work_generation_state in {"pending", "answer_pending"}
+    )
+
+    pending_html = (
+        '<section class="proposal-card proposal-pending-card">'
+        '<h2>Suggested project work</h2>'
+        '<div class="proposal-pending">'
+        '<span class="proposal-spinner" aria-hidden="true"></span>'
+        '<div><strong>Looking for missing project work…</strong>'
+        '<div class="proposal-pending-note">'
+        'AIOS is reviewing the project outcome, context, open work, and completed work.'
+        '</div></div></div></section>'
+        if proposal_pending
+        else ""
+    )
+
+    generation_result_html = ""
+    if refresh_proposal and not work_proposals:
+        if work_generation_state == "clarification" and work_generation_question:
+            generation_result_html = (
+                '<section class="proposal-card"><h2>AIOS needs one thing from you</h2>'
+                f'<p class="proposal-note"><strong>{html.escape(work_generation_question)}</strong></p>'
+                f'<form method="post" action="/projects/{project_id}/work-proposals/answer">'
+                '<textarea name="answer" required placeholder="Your answer"></textarea>'
+                '<div class="context-actions"><button class="context-save" type="submit">Continue</button></div></form></section>'
+            )
+        elif work_generation_state == "answer_pending":
+            generation_result_html = (
+                '<section class="proposal-card"><h2>Suggested project work</h2>'
+                '<p class="proposal-note">AIOS is turning your answer into reusable project context…</p>'
+                '</section>'
+            )
+        elif work_generation_state == "context_review" and work_generation_context_update:
+            generation_result_html = (
+                '<section class="proposal-card"><h2>Add to Project Context</h2>'
+                '<p class="proposal-note">AIOS summarized your answer into durable project knowledge. Edit it if needed before saving.</p>'
+                f'<form method="post" action="/projects/{project_id}/work-proposals/context">'
+                f'<textarea name="context_update" required>{html.escape(work_generation_context_update)}</textarea>'
+                '<div class="context-actions"><button class="context-save" type="submit">Add &amp; Continue</button></div></form></section>'
+            )
+        elif work_generation_state == "waiting":
+            generation_result_html = (
+                '<section class="proposal-card"><h2>Suggested project work</h2>'
+                '<p class="proposal-note" style="margin-bottom:0">'
+                '<strong>No missing project work found.</strong><br>'
+                'AIOS did not identify additional actionable work beyond what is already planned or completed.'
+                '</p></section>'
+            )
+        elif work_generation_state == "failed":
+            generation_result_html = (
+                '<section class="proposal-card"><h2>Suggested project work</h2>'
+                '<p class="proposal-note" style="margin-bottom:0">'
+                '<strong>Project work could not be generated.</strong><br>'
+                'Check that the project has a clear outcome, then try again.'
+                '</p></section>'
+            )
+
+    proposal_section = ""
+    if proposal_rows and not proposal_pending:
+        proposal_section = (
+            '<section class="proposal-card">'
+            '<h2>Proposed project work</h2>'
+            '<p class="proposal-note">'
+            'AIOS found grounded work that could move this project forward. '
+            'Review it before creating a real task.'
+            '</p>'
+            + proposal_rows
+            + '</section>'
+        )
+
+    body = proposal_section + pending_html + generation_result_html
+    return body, proposal_pending
+
+
+def _project_work_results_view(
+    payload: dict,
+    *,
+    refresh_proposal: bool = False,
+) -> dict[str, object]:
+    body, pending = _project_work_results_body(payload, refresh_proposal=refresh_proposal)
+    return {
+        "html": f'<div id="project-work-results-panel">{body}</div>',
+        "fingerprint": _project_work_results_fingerprint(
+            payload,
+            refresh_proposal=refresh_proposal,
+        ),
+        "pending": pending,
+    }
+
+
 def _project_detail_page(
     payload: dict,
     *,
@@ -1799,7 +2195,6 @@ def _project_detail_page(
 ) -> str:
     project = dict(payload.get("project") or {})
     tasks = list(payload.get("tasks") or [])
-    work_proposals = list(payload.get("work_proposals") or [])
 
     name = html.escape(str(project.get("name") or "Untitled Project"))
     project_id = html.escape(str(project.get("id") or ""))
@@ -1807,11 +2202,6 @@ def _project_detail_page(
     context = html.escape(str(project.get("context") or ""))
     count = int(project.get("open_task_count") or 0)
     status = str(project.get("status") or "").strip()
-    work_generation_state = str(
-        project.get("work_generation_state") or ""
-    ).strip().lower()
-    work_generation_question = str(project.get("work_generation_question") or "").strip()
-    work_generation_context_update = str(project.get("work_generation_context_update") or "").strip()
 
     task_rows = ""
     completion_forms = ""
@@ -1863,151 +2253,28 @@ def _project_detail_page(
     if not task_rows:
         task_rows = '<div class="empty-state project-empty">No open tasks in this project.</div>'
 
-    proposal_rows = ""
-
-    for proposal in work_proposals:
-        proposal_id = html.escape(
-            str(proposal.get("id") or "")
-        )
-        proposal_title = html.escape(
-            str(proposal.get("title") or "Untitled proposal")
-        )
-
-        proposal_rows += (
-            '<div class="proposal-row">'
-
-            '<div class="proposal-section">'
-            '<div class="proposal-section-label">Suggested task</div>'
-            f'<form class="proposal-accept-form" method="post" '
-            f'action="/projects/{project_id}/work-proposals/{proposal_id}/accept">'
-            f'<textarea class="proposal-title-input" '
-            f'name="title" maxlength="75" required>'
-            f'{proposal_title}</textarea>'
-            '<div class="proposal-primary-actions">'
-            '<span class="proposal-edit-note">'
-            'Edit the task if needed before accepting.'
-            '</span>'
-            '<button class="proposal-accept" type="submit">Accept</button>'
-            '</div>'
-            '</form>'
-            '</div>'
-
-            '<div class="proposal-divider"></div>'
-
-            '<div class="proposal-section">'
-            '<div class="proposal-section-label">Not quite right?</div>'
-            '<div class="proposal-help">'
-            'Tell AIOS exactly what should change. '
-            'Your correction will guide the next proposal.'
-            '</div>'
-            f'<form class="proposal-retry-form" method="post" '
-            f'action="/projects/{project_id}/work-proposals/{proposal_id}/retry">'
-            '<textarea name="feedback" required '
-            'placeholder="What should AIOS change?"></textarea>'
-            '<div class="proposal-action-row">'
-            '<button class="proposal-retry" type="submit">Try Again</button>'
-            '</form>'
-            f'<form method="post" '
-            f'action="/projects/{project_id}/work-proposals/{proposal_id}/dismiss">'
-            '<button class="proposal-dismiss" type="submit">Dismiss</button>'
-            '</form>'
-            '</div>'
-            '</div>'
-
-            '</div>'
-        )
-
     status_html = (
         f'<span class="status">{html.escape(status)}</span>'
         if status else ""
     )
 
-    proposal_pending = bool(
-        refresh_proposal
-        and work_generation_state in {"pending", "answer_pending"}
+    work_results_view = _project_work_results_view(
+        payload,
+        refresh_proposal=refresh_proposal,
+    )
+    work_results_body = str(work_results_view["html"])
+    work_results_poll_script = _fragment_poll_script(
+        enabled=bool(work_results_view["pending"]),
+        url=f"/api/projects/{project_id}/work-results?refresh_proposal={'1' if refresh_proposal else '0'}",
+        target_id="project-work-results-panel",
+        fingerprint=str(work_results_view["fingerprint"]),
+        session_key="aios-project-work-results-refresh-count",
+        initial_delay=2000,
     )
 
-    pending_html = (
-        '<section class="proposal-card proposal-pending-card">'
-        '<h2>Suggested project work</h2>'
-        '<div class="proposal-pending">'
-        '<span class="proposal-spinner" aria-hidden="true"></span>'
-        '<div>'
-        '<strong>Looking for missing project work…</strong>'
-        '<div class="proposal-pending-note">'
-        'AIOS is reviewing the project outcome, context, open work, and completed work.'
-        '</div>'
-        '</div>'
-        '</div>'
-        '</section>'
-        if proposal_pending
-        else ""
-    )
-
-    generation_result_html = ""
-    if refresh_proposal and not work_proposals:
-        if work_generation_state == "clarification" and work_generation_question:
-            generation_result_html = (
-                '<section class="proposal-card"><h2>AIOS needs one thing from you</h2>'
-                f'<p class="proposal-note"><strong>{html.escape(work_generation_question)}</strong></p>'
-                f'<form method="post" action="/projects/{project_id}/work-proposals/answer">'
-                '<textarea name="answer" required placeholder="Your answer"></textarea>'
-                '<div class="context-actions"><button class="context-save" type="submit">Continue</button></div></form></section>'
-            )
-        elif work_generation_state == "answer_pending":
-            generation_result_html = '<section class="proposal-card"><h2>Suggested project work</h2><p class="proposal-note">AIOS is turning your answer into reusable project context…</p></section>'
-        elif work_generation_state == "context_review" and work_generation_context_update:
-            generation_result_html = (
-                '<section class="proposal-card"><h2>Add to Project Context</h2>'
-                '<p class="proposal-note">AIOS summarized your answer into durable project knowledge. Edit it if needed before saving.</p>'
-                f'<form method="post" action="/projects/{project_id}/work-proposals/context">'
-                f'<textarea name="context_update" required>{html.escape(work_generation_context_update)}</textarea>'
-                '<div class="context-actions"><button class="context-save" type="submit">Add &amp; Continue</button></div></form></section>'
-            )
-        elif work_generation_state == "waiting":
-            generation_result_html = (
-                '<section class="proposal-card">'
-                '<h2>Suggested project work</h2>'
-                '<p class="proposal-note" style="margin-bottom:0">'
-                '<strong>No missing project work found.</strong><br>'
-                'AIOS did not identify additional actionable work beyond what is already planned or completed.'
-                '</p>'
-                '</section>'
-            )
-        elif work_generation_state == "failed":
-            generation_result_html = (
-                '<section class="proposal-card">'
-                '<h2>Suggested project work</h2>'
-                '<p class="proposal-note" style="margin-bottom:0">'
-                '<strong>Project work could not be generated.</strong><br>'
-                'Check that the project has a clear outcome, then try again.'
-                '</p>'
-                '</section>'
-            )
-
-    if proposal_pending:
-        pending_refresh_script = """
-<script>
-(() => {
-  const key = "aios-project-proposal-refresh-count";
-  const count = Number(sessionStorage.getItem(key) || "0");
-
-  if (count < 45) {
-    sessionStorage.setItem(key, String(count + 1));
-    setTimeout(() => window.location.reload(), 2000);
-  }
-})();
-</script>
-"""
-    else:
-        pending_refresh_script = """
-<script>
-sessionStorage.removeItem("aios-project-proposal-refresh-count");
-</script>
-"""
-
+    scroll_proposal_script = ""
     if refresh_proposal:
-        pending_refresh_script += """
+        scroll_proposal_script = """
 <script>
 (() => {
   const results = document.getElementById("project-work-results");
@@ -2329,23 +2596,7 @@ sessionStorage.removeItem("aios-project-proposal-refresh-count");
   </section>
 
   <div id="project-work-results" class="project-work-results">
-  {
-      (
-          '<section class="proposal-card">'
-          '<h2>Proposed project work</h2>'
-          '<p class="proposal-note">'
-          'AIOS found grounded work that could move this project forward. '
-          'Review it before creating a real task.'
-          '</p>'
-          + proposal_rows
-          + '</section>'
-      )
-      if proposal_rows and not proposal_pending
-      else ''
-  }
-
-  {pending_html}
-  {generation_result_html}
+  {work_results_body}
   </div>
 
   <section class="proposal-card" id="work-patterns"><h2>Work Patterns</h2><p class="proposal-note">Reuse a saved set of tasks, review the steps, then add them to this project.</p><div class="context-actions"><a class="context-save" style="text-decoration:none" href="/projects/{project_id}/work-patterns">Use Work Pattern</a> <a class="secondary-link" href="/work-patterns">Manage Patterns</a></div></section>
@@ -2371,7 +2622,8 @@ function addProjectTaskRow(button) {{ const form=button.closest('form'),list=for
 function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll('.project-editor-row')).map(function(row){{ const input=row.querySelector('.project-editor-title'); const liveTitle=input?input.value:String(row.dataset.editedTitle||''); row.dataset.editedTitle=liveTitle; return {{id:row.dataset.taskId||null,title:liveTitle.trim()}};}}).filter(t=>t.title); form.querySelector('input[name="tasks_json"]').value=JSON.stringify(tasks); return true; }}
 document.addEventListener('DOMContentLoaded',function(){{ document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
-{pending_refresh_script}
+{work_results_poll_script}
+{scroll_proposal_script}
 </body>
 </html>"""
 
@@ -2449,13 +2701,74 @@ def _possible_duplicate_new_task_page(review: dict) -> str:
 </html>'''
 
 
-def _reviews_page(
-    reviews: list[dict],
-    *,
-    notices: list[dict] | None = None,
-    error: str = "",
-) -> str:
-    notices = notices or []
+def _reviews_list_fingerprint(reviews: list[dict]) -> str:
+    parts: list[str] = []
+    for review in reviews:
+        if review.get("state") == "resolved":
+            continue
+        payload = dict(review.get("payload") or {})
+        parts.extend(
+            [
+                str(review.get("id") or ""),
+                str(review.get("review_type") or ""),
+                str(review.get("state") or ""),
+                str(payload.get("requested_action") or ""),
+                str(review.get("subject_text") or "")[:80],
+                str(payload.get("candidate_task_title") or "")[:80],
+                str(payload.get("proposed_text") or "")[:80],
+                str(payload.get("question") or "")[:80],
+            ]
+        )
+    return "|".join(parts)
+
+
+def _enrich_duplicate_reviews(reviews: list[dict]) -> None:
+    for review in reviews:
+        if review.get("review_type") != "possible_duplicate":
+            continue
+
+        payload = dict(review.get("payload") or {})
+        candidate_id = str(payload.get("candidate_task_id") or "").strip()
+        if not candidate_id:
+            continue
+
+        stored_title = str(payload.get("candidate_task_title") or "").strip()
+        try:
+            current_task = _fetch_task_detail(candidate_id)
+            current_title = str(current_task.get("title") or "").strip()
+            if not current_title:
+                continue
+
+            payload["candidate_task_changed"] = (
+                bool(stored_title) and current_title != stored_title
+            )
+            payload["stored_candidate_task_title"] = stored_title
+            payload["candidate_task_title"] = current_title
+
+            source_task_id = str(payload.get("source_task_id") or "").strip()
+            source_stored_title = str(payload.get("source_task_title") or "").strip()
+            source_task_changed = False
+
+            if source_task_id:
+                try:
+                    source_task = _fetch_task_detail(source_task_id)
+                    source_current_title = str(source_task.get("title") or "").strip()
+                    if source_current_title:
+                        source_task_changed = (
+                            bool(source_stored_title)
+                            and source_current_title != source_stored_title
+                        )
+                        payload["current_source_task_title"] = source_current_title
+                except Exception as exc:
+                    print("[Review] Source task refresh failed:", source_task_id, exc)
+
+            payload["source_task_changed"] = source_task_changed
+            review["payload"] = payload
+        except Exception as exc:
+            print("[Review] Candidate task refresh failed:", candidate_id, exc)
+
+
+def _build_review_cards(reviews: list[dict]) -> dict[str, object]:
     possible_duplicates = [
         review
         for review in reviews
@@ -2927,6 +3240,36 @@ def _reviews_page(
             '</div>'
         )
 
+    pending = bool(
+        reevaluation_pending
+        or duplicate_creation_pending
+        or clarification_processing_pending
+    )
+    return {
+        "html": f'<div id="review-list-panel">{cards}</div>',
+        "fingerprint": _reviews_list_fingerprint(reviews),
+        "pending": pending,
+    }
+
+
+def _reviews_page(
+    reviews: list[dict],
+    *,
+    notices: list[dict] | None = None,
+    error: str = "",
+) -> str:
+    notices = notices or []
+    list_view = _build_review_cards(reviews)
+    cards_html = str(list_view["html"])
+    review_poll_script = _fragment_poll_script(
+        enabled=bool(list_view["pending"]),
+        url="/api/reviews/list",
+        target_id="review-list-panel",
+        fingerprint=str(list_view["fingerprint"]),
+        session_key="aios-review-processing-refresh-count",
+        initial_delay=2000,
+    )
+
     auto_notice_html = ""
 
     for auto_notice in notices:
@@ -2971,33 +3314,6 @@ def _reviews_page(
         if error
         else ""
     )
-
-    if (
-        reevaluation_pending
-        or duplicate_creation_pending
-        or clarification_processing_pending
-    ):
-        pending_refresh_script = """
-<script>
-(() => {
-  const key = "aios-review-processing-refresh-count";
-  const count = Number(sessionStorage.getItem(key) || "0");
-
-  if (count < 45) {
-    sessionStorage.setItem(key, String(count + 1));
-    setTimeout(() => window.location.reload(), 2000);
-  }
-})();
-</script>
-"""
-    else:
-        pending_refresh_script = """
-<script>
-sessionStorage.removeItem(
-  "aios-review-processing-refresh-count"
-);
-</script>
-"""
 
     return f'''<!doctype html>
 <html lang="en">
@@ -3201,10 +3517,10 @@ sessionStorage.removeItem(
   </div>
   {notice}
   {auto_notice_html}
-  <div class="review-list">{cards}</div>
+  <div class="review-list">{cards_html}</div>
 </main>
 {_bottom_nav_html(active="reviews")}
-{pending_refresh_script}
+{review_poll_script}
 <script>
 (() => {{
   document
@@ -6270,6 +6586,57 @@ def dashboard_tasks_api(
     )
 
 
+@app.get("/api/tasks/{task_id}/breakdown-panel")
+def breakdown_panel_api(
+    task_id: str,
+    request: Request,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    return_to = request.query_params.get("return_to", "/")
+    try:
+        task = _fetch_task_detail(task_id)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    return JSONResponse(_breakdown_panel_view(task, return_to=return_to))
+
+
+@app.get("/api/projects/{project_id}/work-results")
+def project_work_results_api(
+    project_id: str,
+    request: Request,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    refresh_proposal = request.query_params.get("refresh_proposal") == "1"
+    try:
+        payload = _fetch_project_detail(project_id)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    return JSONResponse(
+        _project_work_results_view(payload, refresh_proposal=refresh_proposal)
+    )
+
+
+@app.get("/api/reviews/list")
+def reviews_list_api(
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    try:
+        reviews = _fetch_reviews()
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    _enrich_duplicate_reviews(reviews)
+    return JSONResponse(_build_review_cards(reviews))
+
+
 
 
 
@@ -6364,98 +6731,7 @@ def reviews_web(
             )
             notices = []
 
-        # A duplicate review stores the candidate title as it existed
-        # when the match was evaluated. Refresh the current task title
-        # and mark the review stale if that title has since changed.
-        for review in reviews:
-            if review.get("review_type") != "possible_duplicate":
-                continue
-
-            payload = dict(review.get("payload") or {})
-
-            candidate_id = str(
-                payload.get("candidate_task_id") or ""
-            ).strip()
-
-            if not candidate_id:
-                continue
-
-            stored_title = str(
-                payload.get("candidate_task_title") or ""
-            ).strip()
-
-            try:
-                current_task = _fetch_task_detail(candidate_id)
-
-                current_title = str(
-                    current_task.get("title") or ""
-                ).strip()
-
-                if current_title:
-                    payload["candidate_task_changed"] = (
-                        bool(stored_title)
-                        and current_title != stored_title
-                    )
-                    payload["stored_candidate_task_title"] = (
-                        stored_title
-                    )
-                    payload["candidate_task_title"] = (
-                        current_title
-                    )
-
-                    source_task_id = str(
-                        payload.get("source_task_id")
-                        or ""
-                    ).strip()
-
-                    source_stored_title = str(
-                        payload.get("source_task_title")
-                        or ""
-                    ).strip()
-
-                    source_task_changed = False
-
-                    if source_task_id:
-                        try:
-                            source_task = _fetch_task_detail(
-                                source_task_id
-                            )
-
-                            source_current_title = str(
-                                source_task.get("title")
-                                or ""
-                            ).strip()
-
-                            if source_current_title:
-                                source_task_changed = (
-                                    bool(source_stored_title)
-                                    and source_current_title
-                                    != source_stored_title
-                                )
-
-                                payload[
-                                    "current_source_task_title"
-                                ] = source_current_title
-
-                        except Exception as exc:
-                            print(
-                                "[Review] Source task refresh failed:",
-                                source_task_id,
-                                exc,
-                            )
-
-                    payload["source_task_changed"] = (
-                        source_task_changed
-                    )
-
-                    review["payload"] = payload
-
-            except Exception as exc:
-                print(
-                    "[Review] Candidate task refresh failed:",
-                    candidate_id,
-                    exc,
-                )
+        _enrich_duplicate_reviews(reviews)
 
         return HTMLResponse(
             _reviews_page(
