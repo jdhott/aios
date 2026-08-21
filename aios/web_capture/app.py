@@ -30,7 +30,7 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2.1"
+WEB_DASHBOARD_UI_VERSION = "home-v2.2"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
@@ -5834,7 +5834,7 @@ def _page(
     home_reveal_html = (
         '<div class="home-tasks-reveal" id="home-tasks-reveal">'
         '<button type="button" class="home-tasks-reveal-button" id="homeTasksCollapse" hidden>'
-        "Show Less"
+        "Focus Only"
         "</button>"
         '<button type="button" class="home-tasks-reveal-button" id="homeTasksReveal">'
         "Show More"
@@ -5981,6 +5981,9 @@ def _page(
     .home-tasks-reveal-button:focus-visible {{
       color:var(--charcoal);
       outline:none;
+    }}
+    .home-tasks-reveal-button[hidden] {{
+      display:none !important;
     }}
     .task-title-row {{
       display:flex;
@@ -7494,13 +7497,13 @@ def _page(
         }}
 
         revealBar.hidden = false;
-        if (collapseBtn) collapseBtn.hidden = homeRevealedCount <= 0;
 
         if (homeRevealedCount <= 0) {{
           shell.classList.remove("home-tasks-open");
           sections.forEach((section) => section.setAttribute("data-progressive-hidden", "true"));
           revealBtn.textContent = "Show More";
           revealBtn.hidden = false;
+          if (collapseBtn) collapseBtn.hidden = true;
           return;
         }}
 
@@ -7515,6 +7518,7 @@ def _page(
 
         revealBtn.textContent = "Show More";
         revealBtn.hidden = homeRevealedCount >= sections.length;
+        if (collapseBtn) collapseBtn.hidden = false;
       }};
 
       const collapseHomeProgressiveTasks = () => {{
