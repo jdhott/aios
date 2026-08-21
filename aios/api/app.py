@@ -47,6 +47,7 @@ from aios.project_work_proposals import (
 )
 from aios.storage.project_lifecycle_writer import get_project_lifecycle_writer
 from aios.text_utils import normalize
+from aios.workspace import default_workspace_id
 from aios.temporal import (
     is_future_task_datetime,
     local_now,
@@ -675,6 +676,7 @@ def list_open_tasks_http(
             summary_rows = (
                 _store().client.table("daily_completion_summaries")
                 .select("fingerprint,summary,completed_count")
+                .eq("workspace_id", default_workspace_id())
                 .eq("summary_date", today.isoformat())
                 .limit(1)
                 .execute().data
@@ -2977,6 +2979,7 @@ def _journal_completion_summary(
             _store().client
             .table("daily_completion_summaries")
             .select("fingerprint,summary,completed_count")
+            .eq("workspace_id", default_workspace_id())
             .eq("summary_date", journal_date)
             .limit(1)
             .execute().data
@@ -3022,6 +3025,7 @@ def get_daily_journal_http(journal_date: str) -> dict:
     rows = (
         _store().client.table("daily_journal")
         .select("journal_date,body,created_at,updated_at")
+        .eq("workspace_id", default_workspace_id())
         .eq("journal_date", day.isoformat())
         .limit(1)
         .execute().data
@@ -3064,7 +3068,17 @@ def save_daily_journal_http(journal_date: str, request: DailyJournalUpdate) -> d
     body = str(request.body or "")
     if len(body) > 50000:
         raise HTTPException(status_code=400, detail="Journal entry is too long.")
-    payload = {"journal_date": day.isoformat(), "body": body, "updated_at": datetime.now(timezone.utc).isoformat()}
-    rows = _store().client.table("daily_journal").upsert(payload, on_conflict="journal_date").execute().data or []
+    payload = {
+        "workspace_id": default_workspace_id(),
+        "journal_date": day.isoformat(),
+        "body": body,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    rows = (
+        _store().client.table("daily_journal")
+        .upsert(payload, on_conflict="workspace_id,journal_date")
+        .execute().data
+        or []
+    )
     return {"saved": True, "journal": dict(rows[0]) if rows else payload}
 # === END DAILY JOURNAL V1 ===

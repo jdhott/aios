@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from zoneinfo import ZoneInfo
 
+from aios.workspace import default_workspace_id
+
 SUMMARY_MODEL = "gpt-4.1-mini"
 SUMMARY_VERSION = "v2.0"
 MIN_TASKS_FOR_AI_SUMMARY = 2
@@ -94,6 +96,7 @@ def get_cached_daily_summary(store, *, summary_date: str, fingerprint: str) -> d
     rows = (
         store.client.table("daily_completion_summaries")
         .select("summary_date,fingerprint,summary,completed_count,generated_at")
+        .eq("workspace_id", default_workspace_id())
         .eq("summary_date", summary_date)
         .limit(1)
         .execute()
@@ -165,11 +168,15 @@ def refresh_daily_completion_summary(store, ai_client, *, timezone_name: str = "
 
     summary = generate_daily_summary(ai_client, tasks)
     payload = {
+        "workspace_id": default_workspace_id(),
         "summary_date": summary_date,
         "fingerprint": fingerprint,
         "summary": summary,
         "completed_count": len(tasks),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
-    store.client.table("daily_completion_summaries").upsert(payload, on_conflict="summary_date").execute()
+    store.client.table("daily_completion_summaries").upsert(
+        payload,
+        on_conflict="workspace_id,summary_date",
+    ).execute()
     return {"status": "updated", **payload}

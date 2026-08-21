@@ -399,6 +399,80 @@ there is a demonstrated need and a clean general model.
 
 ## 5. Later / Strategic
 
+### Workspace tenancy (multi-user foundation)
+
+**Status:** Phase 1 in progress (August 21, 2026) — migration
+`migrations/20260821_workspace_tenancy_phase1_v1.sql` adds `workspaces`,
+`workspace_members`, and `workspace_id` on core tables with default-workspace
+backfill. Apply in Supabase SQL editor; validate with
+`python -m scripts.workspace_tenancy_phase1_v1_validate`. Phase 2 (query
+scoping through API/processor) follows after migration is applied.
+
+AIOS today is effectively **single-user**: one web login, one service identity
+to the API, Supabase service-role access, global processor state, and one global
+Best Next Action. Moving to workspaces is a deliberate migration, not a config
+change.
+
+#### Target model
+
+-   A **workspace** is the primary tenancy boundary for shared AIOS state.
+-   **Members** belong to a workspace (later: roles such as owner / member).
+-   **Tasks, projects, inbox, reviews, journal, summaries, and processor
+    work** are scoped to a workspace.
+-   **Best Next Action / execution ranking** runs **per workspace** (each
+    workspace has its own focus winner).
+-   **Personal vs shared** within a workspace can come later (e.g. private tasks
+    vs workspace-visible projects); do not over-design v1.
+
+#### What is already well positioned
+
+-   Supabase as authoritative datastore (RLS-ready).
+-   API / web / processor separation (workspace context can enter at the API
+    boundary).
+-   Source-neutral inbox queue.
+-   Signed web session (can later carry workspace + user claims).
+
+#### Phased plan
+
+| Phase | Scope | User-visible change |
+|-------|--------|---------------------|
+| **1 — Schema foundation** | `workspaces`, `workspace_members`; `workspace_id` on core tables; backfill one default workspace; optional `AIOS_DEFAULT_WORKSPACE_ID` env | None (single-user behavior unchanged) |
+| **2 — Data access scoping** | Thread `workspace_id` through API, web proxies, processor, and execution engine queries | None if only one workspace exists |
+| **3 — Authentication** | Supabase Auth (or equivalent); replace shared web password; user JWT to API | Real login per person |
+| **4 — Authorization** | RLS policies and/or mandatory workspace filters; membership checks | Members see only their workspaces |
+| **5 — Multi-workspace product** | Workspace switcher, invites, roles, per-workspace timezone and AI budgets | Multi-user / small-team use |
+| **6 — Collaboration (optional)** | Shared project editing rules, assignment, activity — only if demonstrated need | Shared household / team workflows |
+
+#### Phase 1 deliverables (first foundational element)
+
+1.  Migration: `workspaces`, `workspace_members`.
+2.  Add `workspace_id` (not null, indexed, FK) to at minimum:
+    `tasks`, `projects`, `inbox_items`, `daily_journal`,
+    `daily_completion_summaries`, and review-adjacent / cache tables as they
+    are touched.
+3.  Backfill all existing rows into a single default workspace (e.g.
+    slug `default`, name from env or “Personal”).
+4.  Composite uniques where needed (e.g. `(workspace_id, journal_date)` instead
+    of `journal_date` alone).
+5.  Validation script documenting schema expectations; **no** RLS or auth yet.
+
+#### Explicitly defer until Phase 2+
+
+-   Supabase Auth, invites, workspace switcher UI.
+-   Row Level Security (until API uses user-scoped credentials).
+-   Per-workspace processor leases (global job may remain; work units become
+    workspace-scoped).
+-   Per-member AI spend accounting.
+
+#### Principles
+
+-   **Default workspace preserves today’s behavior** — single-user production
+    must keep working throughout Phase 1–2.
+-   **New tables get `workspace_id` from day one** — avoid another retrofit.
+-   **Workspace before collaboration** — get isolation right before shared-edit
+    semantics.
+-   Do not split Notion pathways or add parallel datastores for multi-user.
+
 ### Reusable knowledge / durable learned context
 
 **Parking lot — requires design work.**
@@ -601,6 +675,9 @@ sequence is:
     load problems worth solving, or processor event emission is ready.
 11. Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
+12. When stabilization load allows, begin **workspace tenancy Phase 1**
+    (schema + default workspace backfill) before more feature surface area
+    accumulates without `workspace_id`.
 
 ------------------------------------------------------------------------
 
