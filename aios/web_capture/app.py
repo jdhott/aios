@@ -38,6 +38,7 @@ WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
 WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.1-return-to-list"
 WEB_PROJECTS_VERSION = "projects-v1"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
+WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -3908,178 +3909,221 @@ def _focus_card_view(
     }
 
 
-def _page(
+def _tasks_section_specs(*, search: str = "") -> list[tuple[str, str]]:
+    if search:
+        return [(f'Search Results for “{search}”', "search_results")]
+    return [
+        ("Top 5", "top5"),
+        ("Quick Wins", "quick_wins"),
+        ("Today", "today"),
+        ("Just Do It", "just_do_it"),
+        ("Completed Today", "completed_today"),
+    ]
+
+
+def _tasks_sections_fingerprint(
+    tasks: dict[str, list[dict]] | None,
     *,
-    message: str = "",
-    error: str = "",
-    tasks: dict[str, list[dict]] | None = None,
     search: str = "",
-    focus: dict | None = None,
-    refresh_focus: bool = False,
-    review_count: int = 0,
+    focus_id: str = "",
 ) -> str:
     tasks = tasks or {}
-    focus_id = str(focus.get("id") or "") if focus else ""
-
-    def render_task(task: dict, section_key: str = "") -> str:
-        title = html.escape(
-            str(task.get("title") or "Untitled task")
-        )
-        task_id = html.escape(str(task.get("id") or ""))
-        due_at = str(task.get("effective_due_at") or task.get("due_at") or "").strip()
-        importance = str(task.get("importance") or "").strip()
-        score = task.get("execution_score")
-        rank = task.get("execution_rank")
-
-        meta_parts = []
-
-        if score is not None:
-            meta_parts.append(
-                f"Score {html.escape(str(score))}"
+    parts = [search, focus_id]
+    for _heading, key in _tasks_section_specs(search=search):
+        section_tasks = list(tasks.get(key, []))
+        if focus_id and key not in {"today", "search_results", "completed_today"}:
+            section_tasks = [
+                task
+                for task in section_tasks
+                if str(task.get("id") or "") != focus_id
+            ]
+        parts.extend([key, str(len(section_tasks))])
+        for task in section_tasks:
+            parts.extend(
+                [
+                    str(task.get("id") or ""),
+                    str(task.get("title") or ""),
+                    str(task.get("execution_rank") or ""),
+                    str(task.get("execution_score") or ""),
+                    str(task.get("effective_due_at") or task.get("due_at") or ""),
+                    "1" if task.get("is_done") else "0",
+                ]
             )
-
-        if rank is not None:
-            meta_parts.append(
-                f"Rank {html.escape(str(rank))}"
-            )
-
-        if importance:
-            meta_parts.append(
-                html.escape(importance)
-            )
-
-        if due_at:
-            meta_parts.append(
-                f"Due {html.escape(due_at[:10])}"
-            )
-
-        if task.get("best_next_action"):
-            meta_parts.append("Best Next Action")
-        elif task.get("surfaced_quick_win"):
-            meta_parts.append("Surfaced Quick Win")
-
-        if task.get("is_just_do_it"):
-            meta_parts.append("Just Do It")
-
-        parent_id = str(task.get("parent_task_id") or "").strip()
-        parent_title = str(task.get("parent_title") or "").strip()
-        parent_html = ""
-        if parent_id and parent_title:
-            parent_html = (
-                '<div class="task-parent-meta">Part of: '
-                f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
-                '</div>'
-            )
-
-        meta_html = ""
-        if meta_parts:
-            meta_html = (
-                '<div class="task-meta">'
-                + "".join(
-                    f'<span class="task-meta-tag">{part}</span>'
-                    for part in meta_parts
-                )
-                + "</div>"
-            )
-
-        if search:
-            row_return_to = f"/?search={quote_plus(search)}#search-results"
-        elif section_key:
-            row_return_to = f"/#section-{quote_plus(section_key)}"
-        else:
-            row_return_to = "/"
-        snooze_html = _task_snooze_control_html(
-            str(task.get("id") or ""),
-            return_to=row_return_to,
-        )
-
-        return (
-            f'<article class="task-row" data-task-id="{task_id}">'
-            '<div class="task-title-row">'
-            + f'<form class="complete-form" data-task-id="{task_id}" method="post" action="/tasks/{task_id}/complete">'
-            + '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
-            + '<span aria-hidden="true"></span></button></form>'
-            + f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
-            + '</div>'
-            + '<div class="task-sub">'
-            + parent_html
-            + meta_html
-            + '<div class="task-action-bar">'
-            + snooze_html
-            + f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
-            + 'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
-            + '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
-            + '<span aria-hidden="true">🗑️</span></button></form>'
-            + "</div></div></article>"
-        )
-
-    def render_completed_task(task: dict) -> str:
-        task_id = html.escape(str(task.get("id") or ""), quote=True)
-        title = html.escape(str(task.get("title") or "Untitled"))
-        parent_id = str(task.get("parent_task_id") or "").strip()
-        parent_title = str(task.get("parent_title") or "").strip()
-        parent_html = ""
-        if parent_id and parent_title:
-            parent_html = (
-                '<div class="task-parent-meta">Part of: '
-                f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
-                '</div>'
-            )
-
-        completed_meta = ""
-        raw_completed = str(task.get("completed_at") or "").strip()
-        if raw_completed:
-            try:
-                from datetime import datetime
-                from zoneinfo import ZoneInfo
-                completed_dt = datetime.fromisoformat(raw_completed.replace("Z", "+00:00"))
-                if completed_dt.tzinfo is not None:
-                    completed_dt = completed_dt.astimezone(ZoneInfo("America/Toronto"))
-                completed_meta = completed_dt.strftime("Completed %-I:%M %p")
-            except (TypeError, ValueError):
-                completed_meta = "Completed today"
-        if not completed_meta:
-            completed_meta = "Completed today"
-
-        return (
-            '<article class="task-row completed-task-row">'
-            '<div class="task-title-row">'
-            '<div class="completed-task-icon" aria-hidden="true">✓</div>'
-            f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
-            '</div>'
-            '<div class="task-sub">'
-            + parent_html
-            + f'<div class="task-meta"><span class="task-meta-tag">{html.escape(completed_meta)}</span></div>'
-            + "</div></article>"
-        )
-
-    section_specs = (
-        [(f'Search Results for “{search}”', "search_results")]
-        if search
-        else [
-            ("Top 5", "top5"),
-            ("Quick Wins", "quick_wins"),
-            ("Today", "today"),
-            ("Just Do It", "just_do_it"),
-            ("Completed Today", "completed_today"),
+    parts.extend(
+        [
+            str(tasks.get("_completed_today_summary_state") or "empty"),
+            str(tasks.get("_completed_today_summary") or "")[:200],
         ]
     )
+    return "|".join(parts)
 
+
+def _render_dashboard_task_row(
+    task: dict,
+    *,
+    search: str = "",
+    section_key: str = "",
+) -> str:
+    title = html.escape(
+        str(task.get("title") or "Untitled task")
+    )
+    task_id = html.escape(str(task.get("id") or ""))
+    due_at = str(task.get("effective_due_at") or task.get("due_at") or "").strip()
+    importance = str(task.get("importance") or "").strip()
+    score = task.get("execution_score")
+    rank = task.get("execution_rank")
+
+    meta_parts = []
+
+    if score is not None:
+        meta_parts.append(
+            f"Score {html.escape(str(score))}"
+        )
+
+    if rank is not None:
+        meta_parts.append(
+            f"Rank {html.escape(str(rank))}"
+        )
+
+    if importance:
+        meta_parts.append(
+            html.escape(importance)
+        )
+
+    if due_at:
+        meta_parts.append(
+            f"Due {html.escape(due_at[:10])}"
+        )
+
+    if task.get("best_next_action"):
+        meta_parts.append("Best Next Action")
+    elif task.get("surfaced_quick_win"):
+        meta_parts.append("Surfaced Quick Win")
+
+    if task.get("is_just_do_it"):
+        meta_parts.append("Just Do It")
+
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    parent_title = str(task.get("parent_title") or "").strip()
+    parent_html = ""
+    if parent_id and parent_title:
+        parent_html = (
+            '<div class="task-parent-meta">Part of: '
+            f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
+            '</div>'
+        )
+
+    meta_html = ""
+    if meta_parts:
+        meta_html = (
+            '<div class="task-meta">'
+            + "".join(
+                f'<span class="task-meta-tag">{part}</span>'
+                for part in meta_parts
+            )
+            + "</div>"
+        )
+
+    if search:
+        row_return_to = f"/?search={quote_plus(search)}#search-results"
+    elif section_key:
+        row_return_to = f"/#section-{quote_plus(section_key)}"
+    else:
+        row_return_to = "/"
+    snooze_html = _task_snooze_control_html(
+        str(task.get("id") or ""),
+        return_to=row_return_to,
+    )
+
+    return (
+        f'<article class="task-row" data-task-id="{task_id}">'
+        '<div class="task-title-row">'
+        + f'<form class="complete-form" data-task-id="{task_id}" method="post" action="/tasks/{task_id}/complete">'
+        + '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
+        + '<span aria-hidden="true"></span></button></form>'
+        + f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
+        + '</div>'
+        + '<div class="task-sub">'
+        + parent_html
+        + meta_html
+        + '<div class="task-action-bar">'
+        + snooze_html
+        + f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
+        + 'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
+        + '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
+        + '<span aria-hidden="true">🗑️</span></button></form>'
+        + "</div></div></article>"
+    )
+
+
+def _render_dashboard_completed_task_row(task: dict) -> str:
+    task_id = html.escape(str(task.get("id") or ""), quote=True)
+    title = html.escape(str(task.get("title") or "Untitled"))
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    parent_title = str(task.get("parent_title") or "").strip()
+    parent_html = ""
+    if parent_id and parent_title:
+        parent_html = (
+            '<div class="task-parent-meta">Part of: '
+            f'<a href="/tasks/{html.escape(parent_id, quote=True)}">{html.escape(parent_title)}</a>'
+            '</div>'
+        )
+
+    completed_meta = ""
+    raw_completed = str(task.get("completed_at") or "").strip()
+    if raw_completed:
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            completed_dt = datetime.fromisoformat(raw_completed.replace("Z", "+00:00"))
+            if completed_dt.tzinfo is not None:
+                completed_dt = completed_dt.astimezone(ZoneInfo("America/Toronto"))
+            completed_meta = completed_dt.strftime("Completed %-I:%M %p")
+        except (TypeError, ValueError):
+            completed_meta = "Completed today"
+    if not completed_meta:
+        completed_meta = "Completed today"
+
+    return (
+        '<article class="task-row completed-task-row">'
+        '<div class="task-title-row">'
+        '<div class="completed-task-icon" aria-hidden="true">✓</div>'
+        f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
+        '</div>'
+        + '<div class="task-sub">'
+        + parent_html
+        + f'<div class="task-meta"><span class="task-meta-tag">{html.escape(completed_meta)}</span></div>'
+        + "</div></article>"
+    )
+
+
+def _tasks_sections_view(
+    tasks: dict[str, list[dict]] | None,
+    *,
+    search: str = "",
+    focus_id: str = "",
+) -> dict[str, object]:
+    tasks = tasks or {}
     task_sections = ""
 
-    for heading, key in section_specs:
-        section_tasks = tasks.get(key, [])
+    for heading, key in _tasks_section_specs(search=search):
+        section_tasks = list(tasks.get(key, []))
         # Rank 1 is presented separately as the Best Next Action. Today is
         # intentionally allowed to overlap because it is the complete calendar
         # view of tasks due today or overdue.
         if focus_id and key not in {"today", "search_results", "completed_today"}:
-            section_tasks = [task for task in section_tasks if str(task.get("id") or "") != focus_id]
+            section_tasks = [
+                task
+                for task in section_tasks
+                if str(task.get("id") or "") != focus_id
+            ]
         if not section_tasks:
             continue
 
-        renderer = render_completed_task if key == "completed_today" else render_task
         rows_html = "".join(
-            renderer(task) if key == "completed_today" else renderer(task, key)
+            _render_dashboard_completed_task_row(task)
+            if key == "completed_today"
+            else _render_dashboard_task_row(task, search=search, section_key=key)
             for task in section_tasks
         )
 
@@ -4123,6 +4167,35 @@ def _page(
             '</div>'
         )
 
+    wrapped = f'<div id="dashboard-task-groups">{task_sections}</div>'
+    return {
+        "html": wrapped,
+        "fingerprint": _tasks_sections_fingerprint(
+            tasks,
+            search=search,
+            focus_id=focus_id,
+        ),
+        "summary_pending": str(tasks.get("_completed_today_summary_state") or "empty") == "pending",
+    }
+
+
+def _page(
+    *,
+    message: str = "",
+    error: str = "",
+    tasks: dict[str, list[dict]] | None = None,
+    search: str = "",
+    focus: dict | None = None,
+    refresh_focus: bool = False,
+    review_count: int = 0,
+) -> str:
+    tasks = tasks or {}
+    focus_id = str(focus.get("id") or "") if focus else ""
+
+    tasks_view = _tasks_sections_view(tasks, search=search, focus_id=focus_id)
+    task_sections = str(tasks_view["html"])
+    initial_tasks_fingerprint = str(tasks_view["fingerprint"])
+
     focus_view = _focus_card_view(focus, refresh_focus=refresh_focus)
     focus_card = str(focus_view["html"])
     refresh_needed = bool(focus_view["pending"])
@@ -4164,6 +4237,12 @@ function showFocusUpdating() {
         f"<script>window.__AIOS_FOCUS_POLL__ = {json.dumps(focus_poll_config)};</script>"
         if refresh_needed
         else '<script>window.__AIOS_FOCUS_POLL__ = {"enabled": false};sessionStorage.removeItem("aios-focus-activation-refresh-count");</script>'
+    )
+    dashboard_tasks_config = {
+        "initialFingerprint": initial_tasks_fingerprint,
+    }
+    dashboard_tasks_script = (
+        f"<script>window.__AIOS_DASHBOARD_TASKS__ = {json.dumps(dashboard_tasks_config)};</script>"
     )
 
     return f"""<!doctype html>
@@ -4992,6 +5071,8 @@ function showFocusUpdating() {
         optimisticCompletion = null;
         if (state.affectsFocus) {{
           startFocusPolling({{ refreshFocus: true }});
+        }} else {{
+          refreshTaskGroupsOnce();
         }}
       }};
 
@@ -5159,6 +5240,8 @@ function showFocusUpdating() {
                 previousFocusId: taskId,
                 waitForFocusChange: true,
               }});
+            }} else {{
+              window.setTimeout(() => refreshTaskGroupsOnce(), 1500);
             }}
           }} catch (_error) {{
             hiddenNodes.forEach((node) => {{
@@ -5257,6 +5340,61 @@ function showFocusUpdating() {
         return next;
       }};
 
+      const initTaskList = (root) => {{
+        const scope = root || document.getElementById("dashboard-task-groups") || document;
+        scope.querySelectorAll(".complete-form").forEach(bindCompleteForm);
+        scope.querySelectorAll(".delete-form").forEach(bindDeleteForm);
+        scope.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
+        scope.querySelectorAll("details.task-snooze").forEach(bindSnoozeMenu);
+        restoreSectionState();
+      }};
+
+      const replaceTaskGroups = (html) => {{
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = html.trim();
+        const next = wrapper.firstElementChild;
+        if (!next) return null;
+        const existing = document.getElementById("dashboard-task-groups");
+        if (existing) {{
+          existing.replaceWith(next);
+        }} else {{
+          document.querySelector(".tasks-section")?.appendChild(next);
+        }}
+        initTaskList(next);
+        return next;
+      }};
+
+      const fetchDashboardTasks = async () => {{
+        const url = new URL("/api/dashboard-tasks", window.location.origin);
+        const searchInput = document.querySelector('.task-search input[name="search"]');
+        const searchValue = searchInput?.value?.trim();
+        if (searchValue) {{
+          url.searchParams.set("search", searchValue);
+        }}
+        const response = await fetch(url.toString(), {{
+          headers: {{ "X-Requested-With": "fetch" }},
+        }});
+        if (!response.ok) throw new Error("Tasks poll failed");
+        return response.json();
+      }};
+
+      const applyTasksPollData = (data) => {{
+        if (!data?.html) return false;
+        if (data.fingerprint === tasksPollFingerprint) return false;
+        replaceTaskGroups(data.html);
+        tasksPollFingerprint = data.fingerprint;
+        return true;
+      }};
+
+      const refreshTaskGroupsOnce = async () => {{
+        try {{
+          const tasksData = await fetchDashboardTasks();
+          applyTasksPollData(tasksData);
+        }} catch (_error) {{
+          // Best-effort sync for list-only changes.
+        }}
+      }};
+
       const cleanFocusPollUrl = () => {{
         const url = new URL(window.location.href);
         url.searchParams.delete("refresh_focus");
@@ -5267,6 +5405,7 @@ function showFocusUpdating() {
 
       let focusPollTimer = null;
       let focusPollFingerprint = window.__AIOS_FOCUS_POLL__?.initialFingerprint || null;
+      let tasksPollFingerprint = window.__AIOS_DASHBOARD_TASKS__?.initialFingerprint || null;
 
       const startFocusPolling = (overrides = {{}}) => {{
         const card = document.getElementById("focus-card");
@@ -5314,17 +5453,21 @@ function showFocusUpdating() {
           attempt += 1;
           sessionStorage.setItem(key, String(attempt));
 
-          const url = new URL("/api/focus-card", window.location.origin);
+          const focusUrl = new URL("/api/focus-card", window.location.origin);
           if (config.refreshFocus) {{
-            url.searchParams.set("refresh_focus", "1");
+            focusUrl.searchParams.set("refresh_focus", "1");
           }}
 
           try {{
-            const response = await fetch(url.toString(), {{
-              headers: {{ "X-Requested-With": "fetch" }},
-            }});
-            if (!response.ok) throw new Error("Focus poll failed");
-            const data = await response.json();
+            const [focusResponse, tasksData] = await Promise.all([
+              fetch(focusUrl.toString(), {{
+                headers: {{ "X-Requested-With": "fetch" }},
+              }}),
+              fetchDashboardTasks(),
+            ]);
+            if (!focusResponse.ok) throw new Error("Focus poll failed");
+            const data = await focusResponse.json();
+            applyTasksPollData(tasksData);
 
             const focusChanged = Boolean(
               config.waitForFocusChange
@@ -5340,10 +5483,13 @@ function showFocusUpdating() {
               && data.focus_id !== config.initialFocusId
             ) {{
               sessionStorage.removeItem(key);
-              const url = new URL(window.location.href);
-              url.searchParams.delete("refresh_focus");
-              url.searchParams.delete("message");
-              window.location.replace(url.pathname + url.search + "#focus-card");
+              cleanFocusPollUrl();
+              focusPollTimer = null;
+              if (data.html) {{
+                replaceFocusCard(data.html);
+                focusPollFingerprint = data.fingerprint;
+              }}
+              applyTasksPollData(tasksData);
               return;
             }}
 
@@ -5358,13 +5504,13 @@ function showFocusUpdating() {
               && (!data.focus_id || data.focus_id === config.previousFocusId)
             );
 
-            if (!data.pending && !waitingForFocusChange) {{
+            const tasksPending = Boolean(tasksData?.summary_pending);
+
+            if (!data.pending && !waitingForFocusChange && !tasksPending) {{
               sessionStorage.removeItem(key);
               cleanFocusPollUrl();
               focusPollTimer = null;
-              if (focusChanged) {{
-                window.location.reload();
-              }}
+              applyTasksPollData(tasksData);
               return;
             }}
           }} catch (_error) {{
@@ -5488,6 +5634,7 @@ function showFocusUpdating() {
   </script>
 {focus_submit_feedback_script}
 {focus_poll_script}
+{dashboard_tasks_script}
 <script>
 if ("serviceWorker" in navigator) {{
   window.addEventListener("load", () => {{
@@ -5977,6 +6124,35 @@ def focus_card_api(
             status_code=503,
         )
     return JSONResponse(_focus_card_view(focus, refresh_focus=refresh_focus))
+
+
+@app.get("/api/dashboard-tasks")
+def dashboard_tasks_api(
+    request: Request,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    search = request.query_params.get("search", "").strip()
+    try:
+        tasks = _fetch_open_tasks(search=search, limit=50)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    try:
+        focus = _fetch_focus()
+    except Exception:
+        focus = None
+    focus_id = str(focus.get("id") or "") if focus else ""
+    view = _tasks_sections_view(tasks, search=search, focus_id=focus_id)
+    return JSONResponse(
+        {
+            "html": view["html"],
+            "fingerprint": view["fingerprint"],
+            "focus_id": focus_id or None,
+            "summary_pending": view["summary_pending"],
+        }
+    )
 
 
 
