@@ -39,6 +39,7 @@ WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.1-return-to-list"
 WEB_PROJECTS_VERSION = "projects-v1"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
+WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -4659,6 +4660,43 @@ function showFocusUpdating() {
       font:inherit; font-weight:700; text-decoration:underline; cursor:pointer; min-height:0;
     }}
     .optimistic-toast.error {{ background:#5C3333; }}
+    .focus-poll-timeout {{
+      display:grid;
+      gap:12px;
+      margin-top:4px;
+      color:var(--ink);
+      font-size:.95rem;
+      line-height:var(--line-relaxed);
+    }}
+    .focus-poll-timeout-actions {{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+    }}
+    .focus-poll-timeout-actions button {{
+      min-height:0;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:var(--surface);
+      color:var(--charcoal);
+      font:inherit;
+      font-weight:600;
+      cursor:pointer;
+    }}
+    .focus-poll-timeout-actions button.primary {{
+      background:var(--charcoal);
+      border-color:var(--charcoal);
+      color:var(--paper);
+    }}
+    .focus-poll-timeout-actions button.link {{
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      text-decoration:underline;
+      padding:10px 0;
+    }}
     .optimistic-hidden {{ display:none !important; }}
     .notice {{
       margin:0 0 20px;
@@ -5030,7 +5068,52 @@ function showFocusUpdating() {
         }});
         if (state?.focusCard && state.focusHtml !== null) {{
           state.focusCard.innerHTML = state.focusHtml;
+          initFocusCard(state.focusCard);
         }}
+        (state?.hiddenNodes || []).forEach((node) => {{
+          node.querySelectorAll(".complete-checkbox").forEach((button) => {{
+            button.dataset.submitting = "0";
+          }});
+        }});
+      }};
+
+      const showOptimisticErrorToast = (message, onRetry) => {{
+        removeOptimisticToast();
+        const toast = document.createElement("div");
+        toast.id = "optimisticCompleteToast";
+        toast.className = "optimistic-toast error";
+        if (onRetry) {{
+          toast.innerHTML = `<span>${{message}}</span><button type="button">Try again</button>`;
+          toast.querySelector("button")?.addEventListener("click", () => {{
+            removeOptimisticToast();
+            onRetry();
+          }});
+        }} else {{
+          toast.textContent = message;
+        }}
+        document.body.appendChild(toast);
+        window.setTimeout(removeOptimisticToast, 5000);
+      }};
+
+      const syncDashboardFragments = async ({{ refreshFocus = false }} = {{}}) => {{
+        const focusUrl = new URL("/api/focus-card", window.location.origin);
+        if (refreshFocus) {{
+          focusUrl.searchParams.set("refresh_focus", "1");
+        }}
+        const [focusResponse, tasksData] = await Promise.all([
+          fetch(focusUrl.toString(), {{
+            headers: {{ "X-Requested-With": "fetch" }},
+          }}),
+          fetchDashboardTasks(),
+        ]);
+        if (!focusResponse.ok) throw new Error("Focus sync failed");
+        const focusData = await focusResponse.json();
+        if (focusData.html) {{
+          replaceFocusCard(focusData.html);
+          focusPollFingerprint = focusData.fingerprint;
+        }}
+        applyTasksPollData(tasksData);
+        return {{ focusData, tasksData }};
       }};
 
       const showOptimisticToast = (state, message = "Task completed") => {{
@@ -5043,26 +5126,36 @@ function showFocusUpdating() {
 
         toast.querySelector("button")?.addEventListener("click", async () => {{
           if (!optimisticCompletion || optimisticCompletion.taskId !== state.taskId) return;
-          clearOptimisticTimer();
-          restoreOptimisticNodes(state);
-          removeOptimisticToast();
 
-          try {{
-            const response = await fetch(`/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`, {{
-              method: "POST",
-              headers: {{ "X-Requested-With": "fetch" }},
-            }});
-            if (!response.ok) throw new Error("Undo failed");
-            window.location.reload();
-          }} catch (_error) {{
-            state.hiddenNodes.forEach((node) => node.classList.add("optimistic-hidden"));
-            const failed = document.createElement("div");
-            failed.id = "optimisticCompleteToast";
-            failed.className = "optimistic-toast error";
-            failed.textContent = "Undo could not be saved. Refreshing…";
-            document.body.appendChild(failed);
-            window.setTimeout(() => window.location.reload(), 1200);
-          }}
+          const undoRequest = async () => {{
+            clearOptimisticTimer();
+            restoreOptimisticNodes(state);
+            removeOptimisticToast();
+            optimisticCompletion = null;
+
+            try {{
+              const response = await fetch(`/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`, {{
+                method: "POST",
+                headers: {{ "X-Requested-With": "fetch" }},
+              }});
+              if (!response.ok) throw new Error("Undo failed");
+              await syncDashboardFragments({{
+                refreshFocus: Boolean(state.affectsFocus),
+              }});
+            }} catch (_error) {{
+              state.hiddenNodes.forEach((node) => {{
+                node.classList.add("optimistic-hidden");
+              }});
+              if (state.focusCard && state.focusHtml !== null) {{
+                state.focusCard.innerHTML = state.focusHtml;
+                initFocusCard(state.focusCard);
+              }}
+              optimisticCompletion = state;
+              showOptimisticErrorToast("Undo could not be saved.", undoRequest);
+            }}
+          }};
+
+          await undoRequest();
         }});
       }};
 
@@ -5406,6 +5499,27 @@ function showFocusUpdating() {
       let focusPollTimer = null;
       let focusPollFingerprint = window.__AIOS_FOCUS_POLL__?.initialFingerprint || null;
       let tasksPollFingerprint = window.__AIOS_DASHBOARD_TASKS__?.initialFingerprint || null;
+      let lastFocusPollOverrides = null;
+
+      const showFocusPollTimeout = (retryConfig) => {{
+        const card = document.getElementById("focus-card");
+        if (!card) return;
+        card.innerHTML =
+          '<div class="focus-label">⭐ Best Next Action</div>' +
+          '<div class="focus-poll-timeout">' +
+          '<p>Still updating your focus. The change may still be processing in the background.</p>' +
+          '<div class="focus-poll-timeout-actions">' +
+          '<button type="button" class="primary" data-focus-poll-retry>Try again</button>' +
+          '<button type="button" class="link" data-focus-poll-reload>Refresh page</button>' +
+          '</div></div>';
+        card.querySelector("[data-focus-poll-retry]")?.addEventListener("click", () => {{
+          sessionStorage.removeItem("aios-focus-activation-refresh-count");
+          startFocusPolling(retryConfig || lastFocusPollOverrides || {{ waitForFocusChange: true }});
+        }});
+        card.querySelector("[data-focus-poll-reload]")?.addEventListener("click", () => {{
+          window.location.reload();
+        }});
+      }};
 
       const startFocusPolling = (overrides = {{}}) => {{
         const card = document.getElementById("focus-card");
@@ -5429,6 +5543,7 @@ function showFocusUpdating() {
           refreshFocus: overrides.refreshFocus ?? base.refreshFocus ?? true,
           maxAttempts: overrides.maxAttempts || base.maxAttempts || 15,
         }};
+        lastFocusPollOverrides = {{ ...config }};
         if (focusPollTimer) {{
           window.clearTimeout(focusPollTimer);
           focusPollTimer = null;
@@ -5445,7 +5560,7 @@ function showFocusUpdating() {
             cleanFocusPollUrl();
             focusPollTimer = null;
             if (config.waitForFocusChange) {{
-              window.location.reload();
+              showFocusPollTimeout(config);
             }}
             return;
           }}
