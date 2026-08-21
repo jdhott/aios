@@ -30,7 +30,7 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2.2"
+WEB_DASHBOARD_UI_VERSION = "home-v2.3"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
@@ -7615,7 +7615,33 @@ def _page(
         collapseBtn?.addEventListener("click", collapseHomeProgressiveTasks);
       }};
 
+      const goHomeFocusView = () => {{
+        collapseHomeProgressiveTasks();
+        const url = new URL(window.location.href);
+        if (url.search) {{
+          window.history.replaceState(null, "", url.pathname + url.hash);
+        }}
+      }};
+
+      const bindHomeNavReset = () => {{
+        if (!window.__AIOS_HOME_SHELL__?.progressive) return;
+
+        document.querySelectorAll('.bottom-nav a.bottom-nav-item[href="/"]').forEach((link) => {{
+          if (link.dataset.aiosHomeResetBound === "1") return;
+          link.dataset.aiosHomeResetBound = "1";
+          link.addEventListener("click", (event) => {{
+            if (!document.querySelector("main.home-focus-first")) return;
+            const path = window.location.pathname;
+            if (path !== "/" && path !== "") return;
+            if (new URLSearchParams(window.location.search).has("search")) return;
+            event.preventDefault();
+            goHomeFocusView();
+          }});
+        }});
+      }};
+
       bindHomeProgressiveTasks();
+      bindHomeNavReset();
 
       const sectionStateKey = "aios-dashboard-section-state-v1";
       const taskSections = () =>
