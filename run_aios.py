@@ -8623,27 +8623,6 @@ else:
         f"heavy_ai={'enabled' if _heavy_ai_maintenance else 'skipped (light run)'}"
     )
 
-    # Completed Today reflection is cached by local date + completed-task fingerprint.
-    # Repeated processor runs reuse the cached summary until the completed set changes.
-    if client is not None:
-        try:
-            _completion_summary_store = _FocusSupabaseStore()
-            _completion_summary_result = refresh_daily_completion_summary(
-                _completion_summary_store,
-                client,
-                timezone_name=os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto"),
-            )
-            print(
-                "[Completed Today Summary] "
-                f"{_completion_summary_result.get('status')} "
-                f"count={_completion_summary_result.get('completed_count', 0)}"
-            )
-        except Exception as completion_summary_exc:
-            print(
-                "[Completed Today Summary] Non-fatal refresh failure: "
-                f"{completion_summary_exc}"
-            )
-
     if RUN_TASK_CREATION_PIPELINE and _heavy_ai_maintenance:
         run_project_candidate_detector_safely()
     elif RUN_TASK_CREATION_PIPELINE:
@@ -8709,25 +8688,46 @@ else:
                     _focus_task,
                 )
 
-                # Legacy dashboard guidance remains temporarily available
-                # during the transition to durable activation child tasks.
-                ensure_focus_guidance(
+                # Canonical activation path: ensure exactly one open,
+                # real JDI child exists for the current BNA.
+                activation = ensure_next_focus_activation(
                     _focus_store,
                     client,
                     _focus_task,
                 )
 
-                # Canonical activation path: ensure exactly one open,
-                # real JDI child exists for the current BNA.
-                ensure_next_focus_activation(
-                    _focus_store,
-                    client,
-                    _focus_task,
-                )
+                # Legacy dashboard guidance is a fallback only when durable
+                # activation generation fails. Running both every cycle adds
+                # a redundant LLM call before Start Here appears.
+                if not activation:
+                    ensure_focus_guidance(
+                        _focus_store,
+                        client,
+                        _focus_task,
+                    )
             except Exception as focus_exc:
                 print(f"[Focus Guidance] Non-fatal generation failure: {focus_exc}")
     except Exception as e:
         print(f"Execution Engine V2 failure: {e}")
+
+    if client is not None:
+        try:
+            _completion_summary_store = _FocusSupabaseStore()
+            _completion_summary_result = refresh_daily_completion_summary(
+                _completion_summary_store,
+                client,
+                timezone_name=os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto"),
+            )
+            print(
+                "[Completed Today Summary] "
+                f"{_completion_summary_result.get('status')} "
+                f"count={_completion_summary_result.get('completed_count', 0)}"
+            )
+        except Exception as completion_summary_exc:
+            print(
+                "[Completed Today Summary] Non-fatal refresh failure: "
+                f"{completion_summary_exc}"
+            )
 
     # Project cognition is separate from execution ranking. Active projects
     # with no normal executable work may receive grounded, review-only

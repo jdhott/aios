@@ -172,9 +172,13 @@ def _request_processor_run_after_completion(
     task_id: str,
     completed_at: str,
     *,
-    delay_seconds: int = 10,
+    delay_seconds: int | None = None,
 ) -> None:
     """Debounce expensive reconciliation after an optimistic completion."""
+    if delay_seconds is None:
+        delay_seconds = int(
+            os.getenv("AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS", "5")
+        )
     time.sleep(max(0, int(delay_seconds)))
     try:
         rows = (

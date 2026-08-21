@@ -2,7 +2,7 @@ from pathlib import Path
 api = Path("aios/api/app.py").read_text()
 web = Path("aios/web_capture/app.py").read_text()
 checks = [
-    ("optimistic version marker", 'WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"' in web),
+    ("optimistic version marker", 'WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v2"' in web),
     ("API delayed trigger helper", "def _request_processor_run_after_completion(" in api),
     ("complete uses BackgroundTasks", "def complete_task_http(task_id: str, background_tasks: BackgroundTasks)" in api),
     ("complete defers processor", '"processor_deferred": True' in api),
@@ -15,8 +15,10 @@ checks = [
     ("focus card tagged", 'id="focus-card" data-task-id=' in web),
     ("immediate hide behavior", 'classList.add("optimistic-hidden")' in web),
     ("Undo toast", 'Task completed' in web and 'Undo</button>' in web),
-    ("8 second undo window", "8000" in web),
-    ("10 second backend debounce exceeds 8 second Undo window", "delay_seconds: int = 10" in api),
+    ("4 second undo window", "WEB_TOAST_UNDO_MS = 4000" in web),
+    ("5 second backend debounce exceeds 4 second Undo window", "AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS" in api),
+    ("immediate focus polling after complete", "startFocusPollingAfterComplete" in web),
+    ("stale spinner refresh", "focusCardHasPendingSpinner" in web),
     ("BNA pending feedback", "Finding your next focus…" in web),
     ("activation pending feedback", "Finding your next step…" in web),
     ("failure restores UI", "restoreOptimisticNodes(state)" in web),

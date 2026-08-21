@@ -27,7 +27,7 @@ WEB_CAPTURE_MULTILINE_VERSION = "aios-web-capture-v1.1"
 WEB_TASKS_VERSION = "aios-web-tasks-v1-read-only"
 WEB_TASK_ACTION_UI_VERSION = "aios-web-tasks-v1.2-checkbox-trash"
 WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
-WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
+WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v2"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
 WEB_DASHBOARD_UI_VERSION = "home-v2.5"
@@ -50,9 +50,10 @@ WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 WEB_DAILY_JOURNAL_VERSION = "daily-journal-v1.2"
-WEB_TOAST_TIMING_VERSION = "toast-timing-v1"
+WEB_TOAST_TIMING_VERSION = "toast-timing-v2"
 WEB_TOAST_SUCCESS_MS = 4500
 WEB_TOAST_ACTION_MS = 5000
+WEB_TOAST_UNDO_MS = 4000
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -7083,11 +7084,22 @@ def _page(
       const finishOptimisticWindow = (state) => {{
         removeOptimisticToast();
         optimisticCompletion = null;
-        if (state.affectsFocus) {{
-          startFocusPolling({{ refreshFocus: true }});
-        }} else {{
+        if (!state.affectsFocus) {{
           refreshTaskGroupsOnce();
         }}
+      }};
+
+      const startFocusPollingAfterComplete = (state, {{ isFocusParent, taskId, focusCard }}) => {{
+        const config = {{
+          refreshFocus: true,
+          initialFocusId: focusCard?.dataset?.taskId || null,
+          maxAttempts: isFocusParent ? 20 : 18,
+        }};
+        if (isFocusParent) {{
+          config.previousFocusId = taskId;
+          config.waitForFocusChange = true;
+        }}
+        startFocusPolling(config);
       }};
 
       const bindCompleteForm = (form) => {{
@@ -7150,7 +7162,14 @@ def _page(
               headers: {{ "X-Requested-With": "fetch" }},
             }});
             if (!response.ok) throw new Error("Completion failed");
-            state.timer = window.setTimeout(() => finishOptimisticWindow(state), {WEB_TOAST_ACTION_MS});
+            if (state.affectsFocus) {{
+              startFocusPollingAfterComplete(state, {{
+                isFocusParent,
+                taskId,
+                focusCard,
+              }});
+            }}
+            state.timer = window.setTimeout(() => finishOptimisticWindow(state), {WEB_TOAST_UNDO_MS});
           }} catch (_error) {{
             clearOptimisticTimer();
             restoreOptimisticNodes(state);
@@ -7426,6 +7445,19 @@ def _page(
       let tasksPollFingerprint = window.__AIOS_DASHBOARD_TASKS__?.initialFingerprint || null;
       let lastFocusPollOverrides = null;
 
+      const focusCardHasPendingSpinner = () => {{
+        const card = document.getElementById("focus-card");
+        if (!card) return false;
+        return Boolean(card.querySelector(".focus-pending"));
+      }};
+
+      const shouldReplaceFocusCard = (data, focusChanged) => {{
+        if (!data?.html) return false;
+        if (data.fingerprint !== focusPollFingerprint || focusChanged) return true;
+        if (!data.pending && focusCardHasPendingSpinner()) return true;
+        return false;
+      }};
+
       const showFocusPollTimeout = (retryConfig) => {{
         const card = document.getElementById("focus-card");
         if (!card) return;
@@ -7476,7 +7508,7 @@ def _page(
 
         const key = "aios-focus-activation-refresh-count";
         let attempt = Number(sessionStorage.getItem(key) || "0");
-        let delay = config.waitForFocusChange ? 800 : 2000;
+        let delay = (config.waitForFocusChange || config.refreshFocus) ? 800 : 2000;
         const maxDelay = 30000;
 
         const poll = async () => {{
@@ -7533,7 +7565,7 @@ def _page(
               return;
             }}
 
-            if (data.html && (data.fingerprint !== focusPollFingerprint || focusChanged)) {{
+            if (shouldReplaceFocusCard(data, focusChanged)) {{
               replaceFocusCard(data.html);
               focusPollFingerprint = data.fingerprint;
             }}
@@ -7547,6 +7579,10 @@ def _page(
             const tasksPending = Boolean(tasksData?.summary_pending);
 
             if (!data.pending && !waitingForFocusChange && !tasksPending) {{
+              if (data.html && focusCardHasPendingSpinner()) {{
+                replaceFocusCard(data.html);
+                focusPollFingerprint = data.fingerprint;
+              }}
               sessionStorage.removeItem(key);
               cleanFocusPollUrl();
               focusPollTimer = null;
