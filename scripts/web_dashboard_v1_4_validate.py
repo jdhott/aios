@@ -5,7 +5,7 @@ root = Path(__file__).resolve().parents[1]
 web = (root / "aios/web_capture/app.py").read_text()
 ast.parse(web)
 checks = [
-    ("home shell marker", 'WEB_DASHBOARD_UI_VERSION = "home-v2"' in web),
+    ("home shell marker", 'WEB_DASHBOARD_UI_VERSION = "home-v2.1"' in web),
     ("home subtitle", 'class="home-subtitle"' in web and "Do the next thing." in web),
     ("no dashboard title", '<h1 class="brand">Dashboard</h1>' not in web),
     ("progressive home shell", 'class="home-shell' in web and "home-focus-first" in web),

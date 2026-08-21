@@ -30,7 +30,7 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2"
+WEB_DASHBOARD_UI_VERSION = "home-v2.1"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
@@ -44,7 +44,7 @@ WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.4"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.5"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -939,11 +939,14 @@ def _brain_dump_sheet_css() -> str:
         display: none;
       }
       .brain-dump-fab {
-        width: 44px;
-        height: 44px;
+        width: 48px;
+        height: 48px;
         padding: 0;
         justify-content: center;
         border-radius: 999px;
+      }
+      .brain-dump-fab .fab-icon {
+        font-size: 1.2rem;
       }
     }
     """
@@ -5765,6 +5768,9 @@ def _page(
     home_shell_class = "home-search-mode" if search.strip() else "home-focus-first"
     home_reveal_html = (
         '<div class="home-tasks-reveal" id="home-tasks-reveal">'
+        '<button type="button" class="home-tasks-reveal-button" id="homeTasksCollapse" hidden>'
+        "Show Less"
+        "</button>"
         '<button type="button" class="home-tasks-reveal-button" id="homeTasksReveal">'
         "Show More"
         "</button></div>"
@@ -5874,7 +5880,11 @@ def _page(
     .home-tasks-reveal {{
       margin:0;
       padding:6px 0 0;
-      text-align:center;
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:center;
+      align-items:center;
+      gap:4px 18px;
     }}
     .home-focus-first.home-tasks-open .home-tasks-reveal {{
       margin-top:12px;
@@ -7406,6 +7416,7 @@ def _page(
         const shell = document.querySelector("main.home-focus-first");
         const revealBar = document.getElementById("home-tasks-reveal");
         const revealBtn = document.getElementById("homeTasksReveal");
+        const collapseBtn = document.getElementById("homeTasksCollapse");
         const panel = document.getElementById("home-tasks-panel");
         if (!shell || !revealBar || !revealBtn || !panel) return;
 
@@ -7417,11 +7428,14 @@ def _page(
           return;
         }}
 
+        revealBar.hidden = false;
+        if (collapseBtn) collapseBtn.hidden = homeRevealedCount <= 0;
+
         if (homeRevealedCount <= 0) {{
           shell.classList.remove("home-tasks-open");
           sections.forEach((section) => section.setAttribute("data-progressive-hidden", "true"));
           revealBtn.textContent = "Show More";
-          revealBar.hidden = false;
+          revealBtn.hidden = false;
           return;
         }}
 
@@ -7435,13 +7449,27 @@ def _page(
         }});
 
         revealBtn.textContent = "Show More";
-        revealBar.hidden = homeRevealedCount >= sections.length;
+        revealBtn.hidden = homeRevealedCount >= sections.length;
+      }};
+
+      const collapseHomeProgressiveTasks = () => {{
+        homeRevealedCount = 0;
+        orderedHomeTaskSections().forEach((section) => {{
+          section.setAttribute("data-progressive-hidden", "true");
+          section.open = false;
+        }});
+        syncHomeProgressiveTasks();
+        document.getElementById("focus-card")?.scrollIntoView({{
+          behavior: "smooth",
+          block: "start",
+        }});
       }};
 
       const bindHomeProgressiveTasks = () => {{
         if (!window.__AIOS_HOME_SHELL__?.progressive) return;
 
         const revealBtn = document.getElementById("homeTasksReveal");
+        const collapseBtn = document.getElementById("homeTasksCollapse");
         if (!revealBtn || revealBtn.dataset.bound === "1") return;
         revealBtn.dataset.bound = "1";
 
@@ -7455,6 +7483,8 @@ def _page(
           syncHomeProgressiveTasks();
           latest.scrollIntoView({{ behavior: "smooth", block: "start" }});
         }});
+
+        collapseBtn?.addEventListener("click", collapseHomeProgressiveTasks);
       }};
 
       bindHomeProgressiveTasks();
