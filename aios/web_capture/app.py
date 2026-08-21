@@ -44,6 +44,7 @@ WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
+WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
 WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.5"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
@@ -344,6 +345,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Focus context loading", "version": WEB_FOCUS_CONTEXT_LOADING_VERSION},
                 {"label": "Empty-state copy", "version": WEB_EMPTY_STATE_COPY_VERSION},
                 {"label": "Brain Dump sheet", "version": WEB_BRAIN_DUMP_SHEET_VERSION},
+                {"label": "Review toast", "version": WEB_REVIEW_TOAST_VERSION},
             ],
         },
         {
@@ -4699,6 +4701,28 @@ def _reviews_page(
   line-height:var(--line-relaxed);
   box-shadow:var(--shadow);
 }}
+.review-toast {{
+  position:fixed;
+  left:50%;
+  bottom:calc(var(--nav-offset) + 8px);
+  z-index:80;
+  transform:translateX(-50%);
+  min-width:260px;
+  max-width:min(520px,calc(100vw - 28px));
+  padding:14px 16px;
+  border-radius:var(--radius-2xl);
+  background:var(--charcoal);
+  color:var(--paper);
+  box-shadow:var(--shadow-lg);
+  font-size:.92rem;
+  font-weight:600;
+  line-height:var(--line-relaxed);
+  text-align:center;
+}}
+.notice.error {{
+  background:var(--error);
+  color:var(--charcoal);
+}}
 </style>
 </head>
 <body>
@@ -4732,7 +4756,31 @@ def _reviews_page(
       sessionStorage.setItem(key, "seen");
     }});
 }})();
+(() => {{
+  const params = new URLSearchParams(window.location.search);
+  const toastMessage = (params.get("message") || "").trim();
+  if (!toastMessage) return;
+
+  const toast = document.createElement("div");
+  toast.className = "review-toast";
+  toast.setAttribute("role", "status");
+  toast.textContent = toastMessage;
+  document.body.appendChild(toast);
+
+  params.delete("message");
+  const clean = params.toString();
+  const next =
+    window.location.pathname +
+    (clean ? "?" + clean : "") +
+    window.location.hash;
+  window.history.replaceState({{}}, "", next);
+
+  window.setTimeout(() => {{
+    toast.remove();
+  }}, 4500);
+}})();
 </script>
+{_client_flash_script()}
 </body>
 </html>'''
 
@@ -4753,6 +4801,23 @@ def _fetch_reviews() -> list[dict]:
         )
 
     return list(response.json() or [])
+
+
+def _reviews_redirect(
+    *,
+    message: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    params: list[str] = []
+    if message.strip():
+        params.append(f"message={quote_plus(message.strip())}")
+    if error.strip():
+        params.append(f"error={quote_plus(error.strip())}")
+    suffix = f"?{'&'.join(params)}" if params else ""
+    return RedirectResponse(
+        url=f"/reviews{suffix}",
+        status_code=303,
+    )
 
 
 def _fetch_review_notices() -> list[dict]:
@@ -8369,9 +8434,8 @@ def possible_duplicate_reevaluate_web(
             review_id
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Re-evaluating match.",
         )
 
     except Exception as exc:
@@ -8380,12 +8444,8 @@ def possible_duplicate_reevaluate_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Duplicate+match+could+not+be+re-evaluated."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Duplicate match could not be re-evaluated.",
         )
 
 
@@ -8408,9 +8468,13 @@ def possible_duplicate_use_existing_web(
             title_choice=title_choice.strip() or "existing",
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        resolved_message = (
+            "Task wording updated."
+            if (title_choice.strip() or "existing") == "new"
+            else "Linked to existing task."
+        )
+        return _reviews_redirect(
+            message=resolved_message,
         )
 
     except Exception as exc:
@@ -8419,9 +8483,8 @@ def possible_duplicate_use_existing_web(
             exc,
         )
 
-        return RedirectResponse(
-            url="/reviews?error=Duplicate+review+could+not+be+resolved.",
-            status_code=303,
+        return _reviews_redirect(
+            error="Duplicate review could not be resolved.",
         )
 
 
@@ -8437,9 +8500,8 @@ def possible_duplicate_create_new_web(
             review_id
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Creating separate task.",
         )
 
     except Exception as exc:
@@ -8448,12 +8510,8 @@ def possible_duplicate_create_new_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=New+task+could+not+be+requested."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="New task could not be requested.",
         )
 
 
@@ -8469,9 +8527,8 @@ def clarification_delete_task_web(
             review_id
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Task deleted.",
         )
 
     except Exception as exc:
@@ -8481,12 +8538,8 @@ def clarification_delete_task_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+task+could+not+be+deleted."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification task could not be deleted.",
         )
 
 
@@ -8502,9 +8555,8 @@ def clarification_request_question_web(
             review_id
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Generating clarification question.",
         )
 
     except Exception as exc:
@@ -8514,12 +8566,8 @@ def clarification_request_question_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+question+could+not+be+generated."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification question could not be generated.",
         )
 
 
@@ -8534,12 +8582,8 @@ def clarification_answer_web(
     clean_answer = answer.strip()
 
     if not clean_answer:
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+answer+cannot+be+blank."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification answer cannot be blank.",
         )
 
     try:
@@ -8548,9 +8592,8 @@ def clarification_answer_web(
             answer=clean_answer,
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Answer submitted.",
         )
 
     except Exception as exc:
@@ -8560,12 +8603,8 @@ def clarification_answer_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+answer+could+not+be+processed."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification answer could not be processed.",
         )
 
 
@@ -8582,12 +8621,8 @@ def clarification_use_web(
     accepted = accepted_text.strip()
 
     if not accepted:
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+cannot+be+blank."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification cannot be blank.",
         )
 
     try:
@@ -8597,9 +8632,8 @@ def clarification_use_web(
             accepted_text=accepted,
         )
 
-        return RedirectResponse(
-            url="/reviews",
-            status_code=303,
+        return _reviews_redirect(
+            message="Clarification accepted.",
         )
 
     except Exception as exc:
@@ -8608,12 +8642,8 @@ def clarification_use_web(
             exc,
         )
 
-        return RedirectResponse(
-            url=(
-                "/reviews?"
-                "error=Clarification+could+not+be+accepted."
-            ),
-            status_code=303,
+        return _reviews_redirect(
+            error="Clarification could not be accepted.",
         )
 
 

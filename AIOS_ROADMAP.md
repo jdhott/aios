@@ -325,20 +325,20 @@ interaction, and human-readable labels.
 -   **Empty-state copy (v1)** — context-aware Home empty state (“You're all
     caught up…”) vs search (“No tasks match your search.”); Reviews **All caught
     up** when both queues are empty.
+-   **Review resolution confirmation (v1)** — brief bottom toast after accepting,
+    linking, dismissing, or submitting a review action.
 
 #### Next opportunities (priority order)
 
-1.  **Review resolution confirmation** — brief success toast/banner after
-    accepting or dismissing a review card.
-2.  **Journal summary polling** — auto-refresh pending daily summary on today’s
+1.  **Journal summary polling** — auto-refresh pending daily summary on today’s
     journal page.
-3.  **Project name on task detail** — replace raw Project ID; optional project
+2.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-4.  **Project page optimistic complete/snooze** — align with dashboard patterns.
-5.  **Preserve form data on errors** — create-task failures should keep user input.
-6.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+3.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+4.  **Preserve form data on errors** — create-task failures should keep user input.
+5.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices.
-7.  **Hide or collapse BNA Rank/Score** for normal daily use.
+6.  **Hide or collapse BNA Rank/Score** for normal daily use.
 
 #### UX principles
 
@@ -346,6 +346,26 @@ interaction, and human-readable labels.
 -   Optimistic interaction wherever the user acts frequently.
 -   Progressive disclosure for technical metadata (rank, score, raw IDs).
 -   Do not wait for SSE to fix silent failures or misleading empty states.
+
+### User documentation
+
+**Status:** Started — first guide drafted August 21, 2026; expand only from
+real repeated questions.
+
+Keep user docs **light and task-oriented** while the UI is still moving quickly.
+Separate from dev docs (`AIOS_ROADMAP.md`, `docs/DATASTORE_AUTHORITY.md`).
+
+#### Started
+
+-   **`docs/AIOS_GUIDE.md`** — single “Using AIOS day to day” page: capture,
+    Home/focus, Show More/Less, tasks, projects, reviews, journal.
+
+#### Next (when needed)
+
+-   Split into focused pages only after the same “how do I…?” question comes up
+    twice in normal use.
+-   Optional in-app **Help** link (More menu → `/help`) serving markdown.
+-   Defer screenshots, video, and public-facing marketing copy until UI stabilizes.
 
 ### Real-time UI updates (Server-Sent Events)
 
@@ -700,7 +720,7 @@ sequence is:
 8.  Design Recurring Tasks before implementation.
 9.  Observe AI spend optimizations in normal use for a few days; revisit
     **AI usage / credit efficiency** next opportunities if needed.
-10. Continue **UX polish** — review resolution confirmation is next.
+10. Continue **UX polish** — journal summary polling is next.
 11. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
 12. When stabilization load allows, begin **workspace tenancy Phase 2**
@@ -739,6 +759,8 @@ Recent milestones that materially changed the architecture:
     (August 21, 2026).
 -   Workspace tenancy Phase 1 schema and default-workspace wiring
     (August 21, 2026).
+-   User guide starter (`docs/AIOS_GUIDE.md`) and review resolution confirmation
+    toast (August 21, 2026).
 
 ------------------------------------------------------------------------
 
