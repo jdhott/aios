@@ -71,6 +71,10 @@ from aios.temporal import is_future_task_datetime, local_date_for_task_datetime,
 from aios.project_work_processor import (
     refresh_project_work_proposals,
 )
+from aios.processing.maintenance_policy import (
+    PROCESSOR_LIGHT_MAINTENANCE_VERSION,
+    should_run_heavy_ai_maintenance,
+)
 from aios.focus_guidance import ensure_focus_guidance
 from aios.focus_context import ensure_focus_context_help
 from aios.focus_activation import ensure_next_focus_activation
@@ -8607,6 +8611,18 @@ if TEST_MODE:
 if TEST_MODE:
     print("TEST_MODE is enabled → skipping Quick Win maintenance.")
 else:
+    _maintenance_store = _FocusSupabaseStore()
+    _heavy_ai_maintenance = should_run_heavy_ai_maintenance(
+        inbox_items=inbox_items if RUN_TASK_CREATION_PIPELINE else [],
+        store=_maintenance_store,
+        run_summary=RUN_SUMMARY,
+    )
+    print(
+        "[Maintenance] "
+        f"policy={PROCESSOR_LIGHT_MAINTENANCE_VERSION} "
+        f"heavy_ai={'enabled' if _heavy_ai_maintenance else 'skipped (light run)'}"
+    )
+
     # Completed Today reflection is cached by local date + completed-task fingerprint.
     # Repeated processor runs reuse the cached summary until the completed set changes.
     if client is not None:
@@ -8628,8 +8644,12 @@ else:
                 f"{completion_summary_exc}"
             )
 
-    if RUN_TASK_CREATION_PIPELINE:
+    if RUN_TASK_CREATION_PIPELINE and _heavy_ai_maintenance:
         run_project_candidate_detector_safely()
+    elif RUN_TASK_CREATION_PIPELINE:
+        print(
+            "[Maintenance] Skipping project candidate detector on light run."
+        )
 
     # New execution engine (authoritative)
     execution_engine_success = False
@@ -8712,7 +8732,7 @@ else:
     # Project cognition is separate from execution ranking. Active projects
     # with no normal executable work may receive grounded, review-only
     # project-work proposals. This pass never creates real tasks.
-    if AIOS_DATASTORE == "supabase":
+    if AIOS_DATASTORE == "supabase" and _heavy_ai_maintenance:
         try:
             _project_work_store = _FocusSupabaseStore()
 
@@ -8730,6 +8750,10 @@ else:
                 "[Project Work] Non-fatal proposal refresh failure: "
                 f"{project_work_exc}"
             )
+    elif AIOS_DATASTORE == "supabase":
+        print(
+            "[Maintenance] Skipping project work refresh on light run."
+        )
 
     if RUN_TASK_CREATION_PIPELINE:
         if execution_engine_success:

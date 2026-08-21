@@ -18,7 +18,7 @@ echo "Service:    $SERVICE"
 echo "Timezone:   $TIME_ZONE"
 echo "Caller:     $SCHEDULER_SA_EMAIL"
 echo "Schedules:"
-echo "  */15 5-20 * * *"
+echo "  */30 5-20 * * *"
 echo "  0 21 * * *"
 
 gcloud services enable \
@@ -97,7 +97,7 @@ create_or_update() {
   fi
 }
 
-create_or_update "$QUARTER_HOUR_JOB" "*/15 5-20 * * *"
+create_or_update "$QUARTER_HOUR_JOB" "*/30 5-20 * * *"
 create_or_update "$FINAL_JOB" "0 21 * * *"
 
 echo

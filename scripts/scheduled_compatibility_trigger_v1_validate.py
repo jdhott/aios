@@ -24,7 +24,7 @@ checks = [
     ("scheduler uses OIDC",
      "--oidc-service-account-email" in scheduler and "--oidc-token-audience" in scheduler),
     ("scheduler targets private API endpoint", '${SERVICE_URL}/processing/request' in scheduler),
-    ("quarter-hour daytime schedule", '*/15 5-20 * * *' in scheduler),
+    ("half-hour daytime schedule", '*/30 5-20 * * *' in scheduler),
     ("exact 21:00 final schedule", '0 21 * * *' in scheduler),
     ("Toronto timezone", 'America/Toronto' in scheduler),
     ("scheduler service account gets API invoker", "roles/run.invoker" in scheduler),

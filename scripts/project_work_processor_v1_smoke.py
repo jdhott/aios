@@ -366,3 +366,14 @@ print(
     "RESULT: PROJECT WORK PROCESSOR V1 "
     "SMOKE TEST PASSED"
 )
+
+cached_result = refresh_project_work_proposals(
+    store,
+    client,
+)
+
+assert len(cached_result) == 2
+assert len(client.responses.calls) == 4
+assert all(item.get("cached") for item in cached_result)
+
+print("Repeated refresh reuses cached project work without extra AI calls: PASS")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,10 +8,13 @@ from aios.focus_activation import list_focus_activation_children
 from aios.project_work import generate_project_work, summarize_project_work_answer
 from aios.project_work_proposals import (
     list_project_work_feedback,
+    list_proposed_project_work,
     replace_project_work_proposals,
 )
 from aios.storage.supabase_store import SupabaseStore
 
+
+PROJECT_WORK_GENERATION_CACHE_VERSION = "project-work-generation-cache-v1"
 
 MANUAL_STATE_PENDING = "pending"
 MANUAL_STATE_ACTIONABLE = "actionable"
@@ -26,6 +30,66 @@ def _manual_generation_requested(project: dict[str, Any]) -> bool:
         str(project.get("work_generation_state") or "").strip().lower()
         == MANUAL_STATE_PENDING
         and bool(str(project.get("work_generation_requested_at") or "").strip())
+    )
+
+
+def project_work_generation_key(
+    *,
+    project_name: str,
+    project_outcome: str,
+    project_context: str,
+    project_anchor_title: str,
+    open_work: list[str],
+    completed_work: list[str],
+    completed_activation_steps: list[str],
+    proposal_feedback: list[dict[str, Any]],
+) -> str:
+    feedback_parts = []
+    for item in sorted(
+        proposal_feedback,
+        key=lambda row: (
+            str(row.get("id") or ""),
+            str(row.get("title") or ""),
+        ),
+    ):
+        feedback_parts.append(
+            "|".join(
+                [
+                    str(item.get("title") or "").strip(),
+                    str(item.get("feedback") or "").strip(),
+                ]
+            )
+        )
+
+    material = "\n".join(
+        [
+            PROJECT_WORK_GENERATION_CACHE_VERSION,
+            project_name.strip(),
+            project_outcome.strip(),
+            project_context.strip(),
+            project_anchor_title.strip(),
+            "|".join(sorted(open_work)),
+            "|".join(sorted(completed_work)),
+            "|".join(sorted(completed_activation_steps)),
+            "\n".join(feedback_parts),
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _persist_generation_key(
+    store: SupabaseStore,
+    project_id: str,
+    generation_key: str,
+) -> None:
+    (
+        store.client
+        .table("projects")
+        .update({
+            "work_proposals_generation_key": generation_key,
+        })
+        .eq("id", project_id)
+        .execute()
     )
 
 
@@ -74,7 +138,8 @@ def refresh_project_work_proposals(
             "id,name,status,is_active,outcome,context,"
             "work_generation_requested_at,work_generation_completed_at,"
             "work_generation_state,work_generation_question,work_generation_answer,"
-            "work_generation_context_update,work_generation_round"
+            "work_generation_context_update,work_generation_round,"
+            "work_proposals_generation_key"
         )
         .eq("is_active", True)
         .execute()
@@ -203,6 +268,44 @@ def refresh_project_work_proposals(
             limit=5,
         )
 
+        generation_key = project_work_generation_key(
+            project_name=project_name,
+            project_outcome=project_outcome,
+            project_context=str(project.get("context") or ""),
+            project_anchor_title=anchor_title,
+            open_work=open_work,
+            completed_work=completed_work,
+            completed_activation_steps=completed_activation_steps,
+            proposal_feedback=proposal_feedback,
+        )
+
+        if not manual_requested:
+            stored_key = str(
+                project.get("work_proposals_generation_key") or ""
+            ).strip()
+            if stored_key and stored_key == generation_key:
+                existing_proposals = list_proposed_project_work(
+                    store,
+                    project_id,
+                )
+                print(
+                    "[Project Work] Reusing cached proposals for: "
+                    f"{project_name}"
+                )
+                results.append({
+                    "project_id": project_id,
+                    "project_name": project_name,
+                    "state": (
+                        MANUAL_STATE_ACTIONABLE
+                        if existing_proposals
+                        else MANUAL_STATE_WAITING
+                    ),
+                    "proposals": existing_proposals,
+                    "manual": False,
+                    "cached": True,
+                })
+                continue
+
         generated = generate_project_work(
             client,
             project_name=project_name,
@@ -255,6 +358,12 @@ def refresh_project_work_proposals(
             store,
             project_id=project_id,
             titles=titles,
+        )
+
+        _persist_generation_key(
+            store,
+            project_id,
+            generation_key,
         )
 
         if manual_requested:
