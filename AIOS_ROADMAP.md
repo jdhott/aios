@@ -260,21 +260,46 @@ accumulating prompt rules for individual project types.
 
 ### Dashboard / Home refinements
 
+**Status:** Home shell v2 shipped August 21, 2026 — focus-first layout with
+progressive task-list disclosure.
+
 Recent UI work:
 
--   Compact application header with AIOS/Home, Projects, Reviews, New Task, and a
-    secondary menu.
--   Work Patterns, Journal, and Sign Out moved into the secondary menu.
--   Header and snooze menus dismiss on outside click and Escape.
--   Snooze no longer needs an explicit Cancel option.
+-   **Home rename** — removed “Dashboard” page title; bottom nav **Home** is the
+    orientation label. Subtitle: **Do the next thing.**
+-   **Focus-first Home (v2)** — default view shows only the Best Next Action
+    focus card. Task lists, search, and toolbar are hidden until the user opts in.
+-   **Progressive disclosure** — **Show More** at the bottom of the task panel
+    reveals ranked sections one at a time: Top 5 → Quick Wins → Today → Just Do It
+    → Completed Today. Search mode (`?search=`) still shows the full task panel.
+-   Compact bottom navigation with Projects, Reviews, New Task, and a secondary
+    menu (Capture, Work Patterns, Journal, Appearance, Sign Out).
+-   Brain Dump as a global bottom-sheet action rather than a permanent Home
+    section. **Shipped** — see **Brain Dump everywhere**.
 -   Today list default sort is Importance, then Due Date ascending.
 
-Possible later refinements:
+#### Planned Home customization (design before implementation)
+
+Use normal Home v2 for a while first. If the progressive model proves useful,
+consider:
+
+1.  **User-ordered task sections** — drag section headers to reorder Top 5,
+    Quick Wins, Today, Just Do It, Completed Today (and future sections).
+    Persist order per user/workspace in Supabase or localStorage initially.
+2.  **Custom Home views** — named presets such as “Doing” (focus + Top 5 only)
+    or “Planning” (Today + Projects link) built from the same section primitives.
+    Avoid a complex view builder in v1; start with 2–3 curated presets plus
+    reorder.
+3.  **Section visibility defaults** — remember how far the user typically expands
+    **Show More** (optional; only if repeated manual expansion becomes annoying).
+
+Do not implement until Home v2 usage shows whether reorder or custom views are
+worth the complexity.
+
+Other possible later refinements:
 
 -   User-selectable task sorting only if normal use demonstrates a real need;
     avoid a complex custom-sort builder.
--   Consider Brain Dump as a global bottom-sheet action rather than a permanent
-    dashboard section. **Shipped** — see **Brain Dump everywhere**.
 
 Search is considered complete for now.
 
@@ -297,23 +322,23 @@ interaction, and human-readable labels.
     and answer forms submit via fetch with immediate loading UI (**Saving…**,
     **Updating your focus…**, **Improving your context…**), then poll the focus
     card until processor work completes. Errors show a retry toast.
+-   **Empty-state copy (v1)** — context-aware Home empty state (“You're all
+    caught up…”) vs search (“No tasks match your search.”); Reviews **All caught
+    up** when both queues are empty.
 
 #### Next opportunities (priority order)
 
-1.  **Empty-state copy fixes** — dashboard “No matching tasks” when no search;
-    reviews “All caught up” when both queues are empty.
-2.  **Review resolution confirmation** — brief success toast/banner after
+1.  **Review resolution confirmation** — brief success toast/banner after
     accepting or dismissing a review card.
-3.  **Journal summary polling** — auto-refresh pending daily summary on today’s
+2.  **Journal summary polling** — auto-refresh pending daily summary on today’s
     journal page.
-4.  **Project name on task detail** — replace raw Project ID; optional project
+3.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-5.  **Project page optimistic complete/snooze** — align with dashboard patterns.
-6.  **Preserve form data on errors** — create-task and dashboard Brain Dump
-    failures should keep user input.
-7.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+4.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+5.  **Preserve form data on errors** — create-task failures should keep user input.
+6.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices.
-8.  **Hide or collapse BNA Rank/Score** for normal daily use.
+7.  **Hide or collapse BNA Rank/Score** for normal daily use.
 
 #### UX principles
 
@@ -403,12 +428,13 @@ there is a demonstrated need and a clean general model.
 
 ### Workspace tenancy (multi-user foundation)
 
-**Status:** Phase 1 in progress (August 21, 2026) — migration
+**Status:** Phase 1 complete (August 21, 2026) — migration
 `migrations/20260821_workspace_tenancy_phase1_v1.sql` adds `workspaces`,
 `workspace_members`, and `workspace_id` on core tables with default-workspace
-backfill. Apply in Supabase SQL editor; validate with
-`python -m scripts.workspace_tenancy_phase1_v1_validate`. Phase 2 (query
-scoping through API/processor) follows after migration is applied.
+backfill; deployed with default-workspace wiring in API/web. Validate with
+`python -m scripts.workspace_tenancy_phase1_v1_validate`. **Phase 2** (thread
+`workspace_id` through API/processor queries) is next when stabilization load
+allows.
 
 AIOS today is effectively **single-user**: one web login, one service identity
 to the API, Supabase service-role access, global processor state, and one global
@@ -665,21 +691,22 @@ sequence is:
     use.
 4.  Clean up obsolete Notion review/runtime pathways after parity is
     confirmed.
-5.  Advance source-neutral Brain Dump / capture.
+5.  Advance source-neutral Brain Dump / capture. **Mostly shipped** — global
+    sheet + PWA; optional Share Target remains open.
 6.  Validate async UI polling (dashboard, breakdown, project work,
     reviews) in normal use.
-7.  Design Recurring Tasks before implementation.
-8.  Observe AI spend optimizations in normal use for a few days; revisit
+7.  Use **Home v2** (focus-first + progressive disclosure) in normal daily
+    work; note whether section reorder or custom views are worth designing.
+8.  Design Recurring Tasks before implementation.
+9.  Observe AI spend optimizations in normal use for a few days; revisit
     **AI usage / credit efficiency** next opportunities if needed.
-9.  Continue **UX polish and feedback consistency** — empty-state copy fixes are
-    next after focus context loading feedback.
-10. Consider SSE (Phase 3) only if polling validation shows latency or
+10. Continue **UX polish** — review resolution confirmation is next.
+11. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
-11. Choose subsequent improvements based on actual AIOS usage rather
+12. When stabilization load allows, begin **workspace tenancy Phase 2**
+    (query scoping through API/processor).
+13. Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
-12. When stabilization load allows, begin **workspace tenancy Phase 1**
-    (schema + default workspace backfill) before more feature surface area
-    accumulates without `workspace_id`.
 
 ------------------------------------------------------------------------
 
@@ -707,6 +734,11 @@ Recent milestones that materially changed the architecture:
 -   AI spend optimizations: project-work generation fingerprint cache,
     processor light-maintenance gating, and 30-minute scheduled processor
     cadence (August 21, 2026).
+-   Global Brain Dump bottom sheet + Home shell polish: empty-state copy,
+    focus card hierarchy, Home rename, focus-first progressive disclosure
+    (August 21, 2026).
+-   Workspace tenancy Phase 1 schema and default-workspace wiring
+    (August 21, 2026).
 
 ------------------------------------------------------------------------
 
