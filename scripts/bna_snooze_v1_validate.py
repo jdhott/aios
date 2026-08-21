@@ -14,7 +14,8 @@ checks = [
     ("execution engine supports timestamp defer", 'if "T" in text:' in engine and 'target > current' in engine),
     ("main runtime supports timestamp defer", 'if "T" in text:' in runtime and 'target > current' in runtime),
     ("BNA card renders Snooze control", 'aria-label="Snooze task"' in web),
-    ("BNA has snooze choices", all(label in web for label in ('1 hour', '3 hours', 'Tomorrow', '3 days', '1 week', 'Pick date'))),
+    ("BNA has snooze choices", all(label in web for label in ('1 hour', '3 hours', 'Tomorrow', '3 days', '1 week'))),
+    ("BNA has calendar date snooze", 'task-snooze-date-icon' in web and 'task-snooze-date-submit' in web),
     ("web snooze requests focus refresh", 'Best+Next+Action+snoozed.&refresh_focus=1' in web),
     ("focus API skips future-deferred stale winner", '_is_future_defer_value(candidate_task.get("defer_until"))' in api),
 ]

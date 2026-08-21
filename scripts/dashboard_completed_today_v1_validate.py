@@ -11,7 +11,7 @@ checks = [
     ('completed tasks sorted newest first', '.order("completed_at", desc=True)' in api),
     ('completed today section returned', '"completed_today": completed_today' in api),
     ('web exposes completed today', '("Completed Today", "completed_today")' in web),
-    ('completed rows are non-actionable', 'def render_completed_task' in web and 'completed-task-icon' in web),
+    ('completed rows support actions', 'data-aios-uncomplete' in web and 'completed-task-row' in web),
     ('completed titles link to task detail', 'href="/tasks/{task_id}"' in web),
 ]
 failed = []

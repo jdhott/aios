@@ -270,10 +270,13 @@ Recent UI work:
     orientation label. Subtitle: **Do the next thing.**
 -   **Focus-first Home (v2)** — default view shows only the Best Next Action
     focus card. Task lists, search, and toolbar are hidden until the user opts in.
--   **Progressive disclosure** — **Show More** reveals ranked sections one at a
-    time; **Show All** expands every section at once; **Focus Only** collapses
-    back to the focus card. Section order: Top 5 → Quick Wins → Today → Just Do It
-    → Completed Today. Search mode (`?search=`) still shows the full task panel.
+-   **Progressive disclosure** — **Show More** reveals open-task sections one at a
+    time (Top 5 → Quick Wins → Today → Just Do It). **Show All** expands every
+    open section and reveals **Completed Today** as a separate, collapsed panel
+    below the task lists (not part of Show More). **Focus Only** collapses back
+    to the focus card. Completed Today supports uncomplete and delete with undo
+    toasts; the day summary lives in Daily Journal only. Search mode (`?search=`)
+    still shows the full task panel.
 -   **Fast Home navigation (v1)** — bottom nav **Home** from other pages uses
     `/?fast=1` for an instant HTML shell, restores the last Home snapshot from
     `sessionStorage`, then hydrates focus + tasks via existing JSON polling.
@@ -371,7 +374,7 @@ full Cloud Run processor job when the user action has a narrow, known outcome.
 |--------|-----------|----------------|
 | Complete **Start Here** | Activation LLM in API (after undo window) | Skipped |
 | Complete **BNA (rank 1)** | New focus + Start Here + Completed Today summary | Skipped |
-| Complete **non-focus task** | Completed Today summary in API; task-list fragment poll in web | Skipped |
+| Complete **non-focus task** | Task-list fragment poll in web (incl. Completed Today panel) | Skipped |
 | **Delete** task (optimistic UI) | Row hidden immediately; viewport preserved | Skipped unless BNA delete needs new focus |
 | **Delete BNA** | Dashboard focus + Start Here refresh | Skipped |
 | **Project page complete/snooze/delete** | Optimistic UI + undo (complete/delete); row removed after undo window | Skipped |
@@ -382,8 +385,8 @@ full Cloud Run processor job when the user action has a narrow, known outcome.
 | **Snooze** task | Re-resolve dashboard focus + Start Here | Skipped |
 
 Shared modules: `dashboard_focus.py`, `focus_activation_refresh.py`,
-`focus_context_refresh.py`. Web uses `/api/dashboard-tasks` fragment polling with
-`summary_pending` follow-up after non-focus completes.
+`focus_context_refresh.py`. Web uses `/api/dashboard-tasks` fragment polling
+(`html` + `completed_html`).
 
 **Next fast-path opportunities (priority order):**
 

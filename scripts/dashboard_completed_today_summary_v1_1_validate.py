@@ -9,7 +9,7 @@ checks = [
     ("summary helper exists", "refresh_daily_completion_summary" in helper),
     ("processor refresh wired", "[Completed Today Summary]" in run),
     ("API exposes cached summary", '"completed_today_summary"' in api),
-    ("web renders Today's focus", "completed-today-summary-label" in web and "Today\\'s focus" in web),
+    ("web renders journal summary", "_journal_summary_html" in web and "completion_summary" in web),
     ("Notion archive runtime not reintroduced", "from aios.notion import archive as archive_helpers" not in run),
     ("legacy clarification runtime not reintroduced", "from aios import clarification as clarification_helpers" not in run),
     ("legacy duplicate UI not reintroduced", "from aios.notion import duplicate_review as duplicate_review_ui" not in run),

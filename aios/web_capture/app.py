@@ -31,7 +31,7 @@ WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v3"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_OPTIMISTIC_DELETE_VERSION = "optimistic-delete-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2.5"
+WEB_DASHBOARD_UI_VERSION = "home-v2.6-completed-today-actions"
 WEB_HOME_FAST_NAV_VERSION = "home-fast-nav-v1"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
@@ -1669,8 +1669,9 @@ def _task_snooze_control_html(
         )
         custom_controls = (
             f'<div class="task-snooze-date">'
-            f'<input type="date" name="custom_date" form="{form_id}" required>'
-            f'<button class="menu-button" type="submit" form="{form_id}" name="preset" value="pick_date">Pick date</button>'
+            f'<input type="date" name="custom_date" form="{form_id}" required aria-label="Pick a date">'
+            f'<button class="menu-button task-snooze-date-submit" type="submit" form="{form_id}" name="preset" value="pick_date">'
+            f'<span class="task-snooze-date-icon" aria-hidden="true">📅</span>Snooze</button>'
             f'</div>'
         )
     else:
@@ -1685,8 +1686,12 @@ def _task_snooze_control_html(
             f'<form class="task-snooze-date menu-form" method="post" action="/tasks/{safe_id}/snooze">'
             f'<input type="hidden" name="preset" value="pick_date">'
             + (f'<input type="hidden" name="return_to" value="{safe_return}">' if safe_return else '')
-            + '<input type="date" name="custom_date" required>'
-            + '<button class="menu-button" type="submit">Pick date</button></form>'
+            + '<label class="task-snooze-date-field">'
+            + '<span class="task-snooze-date-icon" aria-hidden="true">📅</span>'
+            + '<input type="date" name="custom_date" required aria-label="Pick a date">'
+            + '</label>'
+            + '<button class="menu-button task-snooze-date-submit" type="submit">Snooze</button>'
+            + '</form>'
         )
 
     return (
@@ -3526,7 +3531,7 @@ def _optimistic_task_actions_script(*, surface: str = "dashboard") -> str:
       window.aiosInitOptimisticTaskActions?.(state.focusCard);
     }}
     (state?.hiddenNodes || []).forEach((node) => {{
-      node.querySelectorAll(".complete-checkbox, [data-aios-delete]").forEach((button) => {{
+      node.querySelectorAll(".complete-checkbox, [data-aios-delete], [data-aios-uncomplete]").forEach((button) => {{
         button.dataset.submitting = "0";
       }});
     }});
@@ -3564,7 +3569,9 @@ def _optimistic_task_actions_script(*, surface: str = "dashboard") -> str:
       const undoPath =
         state.action === "delete"
           ? `/tasks/${{encodeURIComponent(state.taskId)}}/undo-delete-optimistic`
-          : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
+          : state.action === "uncomplete"
+            ? `/tasks/${{encodeURIComponent(state.taskId)}}/complete-optimistic`
+            : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
 
       const undoRequest = async () => {{
         clearOptimisticTimer();
@@ -4045,9 +4052,13 @@ def _project_detail_page(
 .task-snooze-menu form {{ display:block; margin:0; }}
 .task-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
 .task-snooze-menu button:hover {{ background:var(--menu-hover); }}
-.task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
-.task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:.8rem; }}
-.task-snooze-date button {{ width:auto; white-space:nowrap; }}
+.task-snooze-date {{ display:flex; flex-direction:column; gap:8px; padding:10px 8px 6px; margin-top:4px; border-top:1px solid var(--border); }}
+.task-snooze-date-field {{ display:flex; align-items:center; gap:10px; min-width:0; padding:4px 10px; border:1px solid var(--border); border-radius:10px; background:var(--surface); cursor:pointer; }}
+.task-snooze-date-field input[type="date"] {{ flex:1; min-width:0; width:100%; border:0; background:transparent; padding:8px 0; font:inherit; font-size:.84rem; color:var(--ink); }}
+.task-snooze-date:not(.menu-form) {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; }}
+.task-snooze-date:not(.menu-form) input[type="date"] {{ border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--surface); }}
+.task-snooze-date-submit {{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; text-align:center; }}
+.task-snooze-date-icon {{ font-size:1rem; line-height:1; opacity:.88; flex:0 0 auto; }}
 .task-row:last-child {{ border-bottom:0; }}
 .task-row:hover {{ background:var(--row-hover); }}
 .task-title {{ font-weight:700; }}
@@ -6019,7 +6030,9 @@ def _tasks_section_specs(*, search: str = "") -> list[tuple[str, str]]:
     ]
 
 
-_HOME_TASK_SECTION_ORDER = [key for _label, key in _tasks_section_specs()]
+_HOME_OPEN_TASK_SECTION_KEYS = ["top5", "quick_wins", "today", "just_do_it"]
+_HOME_COMPLETED_TODAY_KEY = "completed_today"
+_HOME_TASK_SECTION_ORDER = list(_HOME_OPEN_TASK_SECTION_KEYS)
 
 
 def _dashboard_tasks_empty_message(*, search: str = "") -> str:
@@ -6060,12 +6073,16 @@ def _tasks_sections_fingerprint(
                     "1" if task.get("is_done") else "0",
                 ]
             )
-    parts.extend(
-        [
-            str(tasks.get("_completed_today_summary_state") or "empty"),
-            str(tasks.get("_completed_today_summary") or "")[:200],
-        ]
-    )
+    completed_tasks = list(tasks.get(_HOME_COMPLETED_TODAY_KEY, []))
+    parts.extend([_HOME_COMPLETED_TODAY_KEY, str(len(completed_tasks))])
+    for task in completed_tasks:
+        parts.extend(
+            [
+                str(task.get("id") or ""),
+                str(task.get("title") or ""),
+                str(task.get("completed_at") or ""),
+            ]
+        )
     return "|".join(parts)
 
 
@@ -6195,15 +6212,44 @@ def _render_dashboard_completed_task_row(task: dict) -> str:
         completed_meta = "Completed today"
 
     return (
-        '<article class="task-row completed-task-row">'
+        f'<article class="task-row completed-task-row" data-task-id="{task_id}">'
         '<div class="task-title-row">'
-        '<div class="completed-task-icon" aria-hidden="true">✓</div>'
+        f'<button type="button" class="completed-undo-button" data-aios-uncomplete="1" '
+        f'aria-label="Mark task not done" title="Mark not done">'
+        '<span aria-hidden="true">✓</span></button>'
         f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
         '</div>'
         + '<div class="task-sub">'
         + parent_html
         + f'<div class="task-meta"><span class="task-meta-tag">{html.escape(completed_meta)}</span></div>'
-        + "</div></article>"
+        + '<div class="task-action-bar">'
+        + f'<form class="delete-form" data-task-id="{task_id}">'
+        + '<button class="trash-button" type="button" data-aios-delete="1" '
+        + 'aria-label="Delete task" title="Delete task">'
+        + '<span aria-hidden="true">🗑️</span></button></form>'
+        + "</div></div></article>"
+    )
+
+
+def _render_completed_today_panel(tasks: dict[str, list[dict]] | None) -> str:
+    tasks = tasks or {}
+    section_tasks = list(tasks.get(_HOME_COMPLETED_TODAY_KEY, []))
+    if not section_tasks:
+        return ""
+
+    rows_html = "".join(
+        _render_dashboard_completed_task_row(task) for task in section_tasks
+    )
+    return (
+        '<section class="home-completed-panel" id="completed-today-panel" hidden>'
+        f'<details class="task-group completed-today-group" data-section="{_HOME_COMPLETED_TODAY_KEY}" '
+        'id="section-completed_today">'
+        '<summary class="task-group-heading completed-today-heading">'
+        '<span class="task-group-label">Completed Today</span>'
+        f'<span class="section-count">{len(section_tasks)}</span>'
+        "</summary>"
+        f'<div class="task-list completed-today-list">{rows_html}</div>'
+        "</details></section>"
     )
 
 
@@ -6217,6 +6263,8 @@ def _tasks_sections_view(
     task_sections = ""
 
     for heading, key in _tasks_section_specs(search=search):
+        if key == _HOME_COMPLETED_TODAY_KEY:
+            continue
         section_tasks = list(tasks.get(key, []))
         # Rank 1 is presented separately as the Best Next Action. Today is
         # intentionally allowed to overlap because it is the complete calendar
@@ -6231,32 +6279,11 @@ def _tasks_sections_view(
             continue
 
         rows_html = "".join(
-            _render_dashboard_completed_task_row(task)
-            if key == "completed_today"
-            else _render_dashboard_task_row(task, search=search, section_key=key)
+            _render_dashboard_task_row(task, search=search, section_key=key)
             for task in section_tasks
         )
 
         search_open = ' open' if key == "search_results" else ''
-        completed_summary_html = ""
-        if key == "completed_today":
-            completed_summary = str(tasks.get("_completed_today_summary") or "").strip()
-            completed_summary_state = str(tasks.get("_completed_today_summary_state") or "empty")
-            if completed_summary:
-                completed_summary_html = (
-                    '<div class="completed-today-summary">'
-                    '<div class="completed-today-summary-label">Today\'s summary</div>'
-                    f'<div class="completed-today-summary-text">{html.escape(completed_summary)}</div>'
-                    '</div>'
-                )
-            elif completed_summary_state == "pending":
-                completed_summary_html = (
-                    '<div class="completed-today-summary pending">'
-                    '<div class="completed-today-summary-label">Today\'s summary</div>'
-                    '<div class="completed-today-summary-text">Updating the day\'s summary…</div>'
-                    '</div>'
-                )
-
         task_sections += (
             f'<details class="task-group" data-section="{html.escape(key)}"'
             + (f' id="search-results"' if key == "search_results" else f' id="section-{html.escape(key, quote=True)}"')
@@ -6265,7 +6292,6 @@ def _tasks_sections_view(
             f'<span class="task-group-label">{html.escape(heading)}</span>'
             f'<span class="section-count">{len(section_tasks)}</span>'
             f'</summary>'
-            + completed_summary_html
             + f'<div class="task-list">{rows_html}</div>'
             + "</details>"
         )
@@ -6278,14 +6304,19 @@ def _tasks_sections_view(
         )
 
     wrapped = f'<div id="dashboard-task-groups">{task_sections}</div>'
+    completed_html = (
+        _render_completed_today_panel(tasks)
+        if not search.strip()
+        else ""
+    )
     return {
         "html": wrapped,
+        "completed_html": completed_html,
         "fingerprint": _tasks_sections_fingerprint(
             tasks,
             search=search,
             focus_id=focus_id,
         ),
-        "summary_pending": str(tasks.get("_completed_today_summary_state") or "empty") == "pending",
     }
 
 
@@ -6309,11 +6340,13 @@ def _page(
             '<div class="focus-pending"><span class="mini-spinner"></span> Loading tasks…</div>'
             '</div>'
         )
+        completed_today_html = ""
         initial_tasks_fingerprint = "fast-shell"
         tasks_view = {"summary_pending": False}
     else:
         tasks_view = _tasks_sections_view(tasks, search=search, focus_id=focus_id)
         task_sections = str(tasks_view["html"])
+        completed_today_html = str(tasks_view.get("completed_html") or "")
         initial_tasks_fingerprint = str(tasks_view["fingerprint"])
 
     focus_view = _focus_card_view(focus, refresh_focus=refresh_focus or fast_shell)
@@ -6375,6 +6408,7 @@ def _page(
             {
                 "progressive": not bool(search.strip()),
                 "sectionOrder": _HOME_TASK_SECTION_ORDER,
+                "completedSectionKey": _HOME_COMPLETED_TODAY_KEY,
             }
         )
         + ";</script>"
@@ -6472,10 +6506,12 @@ def _page(
       margin:0;
       padding:6px 0 0;
       display:flex;
-      flex-wrap:wrap;
+      flex-wrap:nowrap;
       justify-content:center;
       align-items:center;
-      gap:4px 18px;
+      gap:4px 12px;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
     }}
     .home-focus-first.home-tasks-open .home-tasks-reveal {{
       margin-top:12px;
@@ -6493,11 +6529,13 @@ def _page(
       background:transparent;
       color:var(--muted);
       font:inherit;
-      font-size:.92rem;
+      font-size:.88rem;
       font-weight:600;
       line-height:var(--line-relaxed);
       cursor:pointer;
-      padding:12px 10px;
+      padding:10px 6px;
+      white-space:nowrap;
+      flex:0 0 auto;
       text-decoration:underline;
       text-underline-offset:3px;
       border-radius:0;
@@ -6739,9 +6777,6 @@ def _page(
     .task-snooze-menu form {{ display:block; margin:0; }}
     .task-snooze-menu button {{ width:100%; min-height:0; border:0; border-radius:10px; background:transparent; color:var(--ink); font:inherit; font-size:.88rem; font-weight:600; text-align:left; cursor:pointer; padding:10px 12px; line-height:var(--line-body); }}
     .task-snooze-menu button:hover {{ background:var(--accent-soft); }}
-    .task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
-    .task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font:inherit; font-size:.84rem; }}
-    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
     .focus-start {{
       margin:20px 0 0;
       padding-top:18px;
@@ -6809,7 +6844,7 @@ def _page(
     @keyframes focus-context-spin {{ to {{ transform:rotate(360deg); }} }}
     .focus-context-pending {{ display:flex; align-items:center; gap:8px; margin:10px 0; color:var(--muted); font-size:.8125rem; line-height:1.4; }}
     .focus-rejected-note {{ color:var(--muted); font-weight:650; font-size:.8125rem; white-space:nowrap; }}
-    form:not(.complete-form):not(.delete-form):not(.focus-not-now-form):not(.focus-not-useful-form):not(.menu-form) {{
+    form:not(.complete-form):not(.delete-form):not(.focus-not-now-form):not(.focus-not-useful-form):not(.menu-form):not(.task-snooze-date) {{
       display:grid;
       gap:16px;
     }}
@@ -6829,7 +6864,7 @@ def _page(
       box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
     }}
     textarea:focus {{ outline:3px solid var(--focus-ring-shadow); border-color:var(--focus-ring); }}
-    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-clear):not(.brain-dump-sheet-backdrop):not(.home-tasks-reveal-button) {{
+    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.task-snooze-date-submit):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-clear):not(.brain-dump-sheet-backdrop):not(.home-tasks-reveal-button) {{
       min-height:54px;
       border:0;
       border-radius:var(--radius-2xl);
@@ -6846,8 +6881,7 @@ def _page(
       margin:0;
     }}
     .menu-button,
-    .task-snooze-menu .menu-button,
-    .task-snooze-date .menu-button {{
+    .task-snooze-menu .menu-button {{
       width:100%;
       min-height:0;
       border:0;
@@ -6862,12 +6896,37 @@ def _page(
       padding:10px 12px;
       line-height:var(--line-body);
     }}
-    .menu-button:hover {{
+    .task-snooze-date .menu-button,
+    .task-snooze-date-submit {{
+      width:100%;
+      min-height:0;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      color:var(--ink);
+      font:inherit;
+      font-size:.86rem;
+      font-weight:600;
+      text-align:center;
+      cursor:pointer;
+      padding:10px 12px;
+      line-height:var(--line-body);
+    }}
+    .menu-button:hover,
+    .task-snooze-date-submit:hover {{
       background:var(--accent-soft);
     }}
-    .task-snooze-date .menu-button {{
-      width:auto;
-      white-space:nowrap;
+    .task-snooze-date-submit {{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }}
+    .task-snooze-date-icon {{
+      font-size:1rem;
+      line-height:1;
+      opacity:.88;
+      flex:0 0 auto;
     }}
     button:disabled {{ opacity:.65; cursor:wait; }}
     .optimistic-toast {{
@@ -7144,12 +7203,42 @@ def _page(
     }}
     .task-snooze-menu button:hover {{ background:var(--accent-soft); }}
     .task-snooze-date {{
-      display:grid !important;
-      grid-template-columns:minmax(130px,1fr) auto;
-      gap:8px !important;
-      padding:8px 4px 4px;
+      display:flex !important;
+      flex-direction:column;
+      gap:8px;
+      padding:10px 8px 6px;
+      margin-top:4px;
+      border-top:1px solid var(--border);
     }}
-    .task-snooze-date input[type="date"] {{
+    .task-snooze-date-field {{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+      padding:4px 10px;
+      border:1px solid var(--border);
+      border-radius:10px;
+      background:var(--surface);
+      cursor:pointer;
+    }}
+    .task-snooze-date-field input[type="date"] {{
+      flex:1;
+      min-width:0;
+      width:100%;
+      border:0;
+      background:transparent;
+      padding:8px 0;
+      font:inherit;
+      font-size:.84rem;
+      color:var(--ink);
+    }}
+    .task-snooze-date:not(.menu-form) {{
+      display:grid !important;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:10px !important;
+      align-items:center;
+    }}
+    .task-snooze-date:not(.menu-form) input[type="date"] {{
       width:100%;
       min-width:0;
       border:1px solid var(--border);
@@ -7157,24 +7246,56 @@ def _page(
       padding:8px 10px;
       font:inherit;
       font-size:.82rem;
+      background:var(--surface);
     }}
-    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
-    .completed-task-icon {{
+    .task-snooze-date:not(.menu-form) .task-snooze-date-submit {{
+      width:auto;
+      white-space:nowrap;
+      padding:8px 12px;
+    }}
+    .completed-undo-button {{
       flex:0 0 var(--task-check);
       width:var(--task-check);
       min-width:var(--task-check);
       height:var(--task-check);
       margin:1px 0 0;
+      padding:0;
+      border:0;
+      background:transparent;
+      cursor:pointer;
       display:flex;
       align-items:center;
       justify-content:center;
-      border-radius:50%;
-      background:rgba(38, 65, 85, 0.12);
-      color:var(--muted);
-      font-size:11px;
+    }}
+    .completed-undo-button span {{
+      width:22px;
+      height:22px;
+      border:2px solid var(--navy);
+      border-radius:7px;
+      background:var(--navy);
+      color:var(--paper);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
       font-weight:700;
+      line-height:1;
+    }}
+    .completed-undo-button:disabled span {{
+      opacity:.55;
     }}
     .completed-task-row .task-link {{
+      color:var(--muted);
+    }}
+    .home-completed-panel {{
+      margin-top:18px;
+      padding-top:16px;
+      border-top:1px solid var(--border);
+    }}
+    .home-completed-panel[hidden] {{
+      display:none !important;
+    }}
+    .completed-today-heading .task-group-label {{
       color:var(--muted);
     }}
     @media (max-width:560px) {{
@@ -7185,10 +7306,6 @@ def _page(
       .task-search button {{ width:100%; }}
     }}
     .empty-state {{ padding:24px 0; color:var(--muted); line-height:var(--line-relaxed); }}
-    .completed-today-summary {{ margin:0 0 14px; padding:14px 16px; border:1px solid var(--border); border-radius:12px; background:var(--highlight); }}
-    .completed-today-summary-label {{ font-size:.76rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }}
-    .completed-today-summary-text {{ font-size:.94rem; line-height:var(--line-relaxed); color:var(--ink); }}
-    .completed-today-summary.pending .completed-today-summary-text {{ color:var(--muted); font-style:italic; }}
   </style>
 </head>
 <body>
@@ -7213,6 +7330,7 @@ def _page(
         {('<a class="search-clear" href="/">Clear search</a>' if search else '')}
       </form>
       {task_sections}
+      {completed_today_html}
       </div>
       {home_reveal_html}
     </section>
@@ -7278,7 +7396,7 @@ def _page(
           initFocusCard(state.focusCard);
         }}
         (state?.hiddenNodes || []).forEach((node) => {{
-          node.querySelectorAll(".complete-checkbox, [data-aios-delete]").forEach((button) => {{
+          node.querySelectorAll(".complete-checkbox, [data-aios-delete], [data-aios-uncomplete]").forEach((button) => {{
             button.dataset.submitting = "0";
           }});
         }});
@@ -7507,7 +7625,9 @@ def _page(
           const undoPath =
             state.action === "delete"
               ? `/tasks/${{encodeURIComponent(state.taskId)}}/undo-delete-optimistic`
-              : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
+              : state.action === "uncomplete"
+                ? `/tasks/${{encodeURIComponent(state.taskId)}}/complete-optimistic`
+                : `/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`;
 
           const undoRequest = async () => {{
             clearOptimisticTimer();
@@ -7545,7 +7665,7 @@ def _page(
         removeOptimisticToast();
         optimisticCompletion = null;
         if (!state.affectsFocus) {{
-          if (state.action === "delete") {{
+          if (state.action === "delete" || state.action === "uncomplete") {{
             refreshTaskGroupsOnce();
           }} else {{
             refreshTaskGroupsAfterComplete();
@@ -7744,6 +7864,14 @@ def _page(
       document.addEventListener(
         "click",
         (event) => {{
+          const uncompleteTrigger = event.target.closest("[data-aios-uncomplete]");
+          if (uncompleteTrigger) {{
+            event.preventDefault();
+            event.stopPropagation();
+            void performOptimisticUncomplete(uncompleteTrigger);
+            return;
+          }}
+
           const trigger = event.target.closest(
             ".delete-form [data-aios-delete]"
           );
@@ -7756,6 +7884,68 @@ def _page(
         }},
         true
       );
+
+      const performOptimisticUncomplete = async (button) => {{
+        if (button?.dataset.submitting === "1") return;
+
+        const row = button.closest(".completed-task-row");
+        const taskId = row?.dataset.taskId || "";
+        if (!taskId) {{
+          showOptimisticErrorToast("Task could not be reopened.");
+          return;
+        }}
+
+        if (optimisticCompletion) {{
+          clearOptimisticTimer();
+          finishOptimisticWindow(optimisticCompletion);
+        }}
+
+        button.dataset.submitting = "1";
+
+        const hiddenNodes = Array.from(
+          document.querySelectorAll(
+            `.completed-task-row[data-task-id="${{CSS.escape(taskId)}}"]`
+          )
+        );
+
+        const state = {{
+          action: "uncomplete",
+          taskId,
+          hiddenNodes,
+          focusCard: null,
+          focusHtml: null,
+          affectsFocus: false,
+          timer: null,
+        }};
+
+        hiddenNodes.forEach((node) => node.classList.add("optimistic-hidden"));
+        optimisticCompletion = state;
+        showOptimisticToast(state, "Task reopened");
+
+        try {{
+          const response = await fetch(
+            `/tasks/${{encodeURIComponent(taskId)}}/undo-complete-optimistic`,
+            {{
+              method: "POST",
+              headers: {{ "X-Requested-With": "fetch" }},
+            }}
+          );
+          if (!response.ok) throw new Error("Uncomplete failed");
+          state.timer = window.setTimeout(
+            () => finishOptimisticWindow(state),
+            {WEB_TOAST_UNDO_MS}
+          );
+        }} catch (_error) {{
+          clearOptimisticTimer();
+          restoreOptimisticNodes(state);
+          removeOptimisticToast();
+          optimisticCompletion = null;
+          button.dataset.submitting = "0";
+          showOptimisticErrorToast("Task could not be reopened.", () => {{
+            void performOptimisticUncomplete(button);
+          }});
+        }}
+      }};
 
       const bindSnoozeForm = (form) => {{
         if (form.dataset.aiosSnoozeBound === "1") return;
@@ -7933,6 +8123,47 @@ def _page(
         syncHomeProgressiveTasks();
       }};
 
+      const initCompletedTodayPanel = (root) => {{
+        const panel = root || document.getElementById("completed-today-panel");
+        if (!panel) return;
+        panel.querySelectorAll("details.task-group").forEach((section) => {{
+          if (section.dataset.aiosToggleBound === "1") return;
+          section.dataset.aiosToggleBound = "1";
+          section.addEventListener("toggle", saveSectionState);
+        }});
+      }};
+
+      const replaceCompletedTodayPanel = (html) => {{
+        const existing = document.getElementById("completed-today-panel");
+        const content = document.querySelector(".home-tasks-panel-content");
+        if (!html?.trim()) {{
+          existing?.remove();
+          return null;
+        }}
+
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = html.trim();
+        const next = wrapper.firstElementChild;
+        if (!next) return null;
+
+        if (existing) {{
+          existing.replaceWith(next);
+        }} else if (content) {{
+          content.appendChild(next);
+        }} else {{
+          return null;
+        }}
+
+        if (homeCompletedVisible) {{
+          next.removeAttribute("hidden");
+        }} else {{
+          next.setAttribute("hidden", "");
+        }}
+
+        initCompletedTodayPanel(next);
+        return next;
+      }};
+
       const replaceTaskGroups = (html) => {{
         const wrapper = document.createElement("div");
         wrapper.innerHTML = html.trim();
@@ -7966,6 +8197,9 @@ def _page(
         if (!data?.html) return false;
         if (data.fingerprint === tasksPollFingerprint) return false;
         replaceTaskGroups(data.html);
+        if (Object.prototype.hasOwnProperty.call(data, "completed_html")) {{
+          replaceCompletedTodayPanel(data.completed_html || "");
+        }}
         tasksPollFingerprint = data.fingerprint;
         return true;
       }};
@@ -7982,15 +8216,7 @@ def _page(
       }};
 
       const refreshTaskGroupsAfterComplete = async () => {{
-        let delay = 800;
-        for (let attempt = 0; attempt < 10; attempt += 1) {{
-          const tasksData = await refreshTaskGroupsOnce();
-          if (!tasksData?.summary_pending) {{
-            return;
-          }}
-          await new Promise((resolve) => window.setTimeout(resolve, delay));
-          delay = Math.min(Math.round(delay * 1.5), 5000);
-        }}
+        await refreshTaskGroupsOnce();
       }};
 
       const cleanFocusPollUrl = () => {{
@@ -8137,9 +8363,7 @@ def _page(
               && (!data.focus_id || data.focus_id === config.previousFocusId)
             );
 
-            const tasksPending = Boolean(tasksData?.summary_pending);
-
-            if (!data.pending && !waitingForFocusChange && !tasksPending) {{
+            if (!data.pending && !waitingForFocusChange) {{
               if (data.html && focusCardHasPendingSpinner()) {{
                 replaceFocusCard(data.html);
                 focusPollFingerprint = data.fingerprint;
@@ -8180,6 +8404,22 @@ def _page(
       }});
 
       let homeRevealedCount = 0;
+      let homeCompletedVisible = false;
+
+      const completedTodayPanel = () =>
+        document.getElementById("completed-today-panel");
+
+      const syncCompletedTodayPanelVisibility = () => {{
+        const panel = completedTodayPanel();
+        if (!panel) return;
+        if (homeCompletedVisible) {{
+          panel.removeAttribute("hidden");
+        }} else {{
+          panel.setAttribute("hidden", "");
+          const details = panel.querySelector("details.task-group");
+          if (details) details.open = false;
+        }}
+      }};
 
       const orderedHomeTaskSections = () => {{
         const panel = document.getElementById("home-tasks-panel");
@@ -8218,6 +8458,7 @@ def _page(
           revealBtn.hidden = false;
           if (showAllBtn) showAllBtn.hidden = false;
           if (collapseBtn) collapseBtn.hidden = true;
+          syncCompletedTodayPanelVisibility();
           return;
         }}
 
@@ -8230,9 +8471,13 @@ def _page(
           }}
         }});
 
+        syncCompletedTodayPanelVisibility();
         revealBtn.textContent = "Show More";
         revealBtn.hidden = homeRevealedCount >= sections.length;
-        if (showAllBtn) showAllBtn.hidden = homeRevealedCount >= sections.length;
+        const allOpenShown = homeRevealedCount >= sections.length;
+        if (showAllBtn) {{
+          showAllBtn.hidden = allOpenShown && (!completedTodayPanel() || homeCompletedVisible);
+        }}
         if (collapseBtn) collapseBtn.hidden = false;
       }};
 
@@ -8241,16 +8486,20 @@ def _page(
         if (!sections.length) return;
 
         homeRevealedCount = sections.length;
+        homeCompletedVisible = Boolean(completedTodayPanel());
         sections.forEach((section) => {{
           section.removeAttribute("data-progressive-hidden");
           section.open = true;
         }});
+        const completedDetails = completedTodayPanel()?.querySelector("details.task-group");
+        if (completedDetails) completedDetails.open = false;
         syncHomeProgressiveTasks();
         sections[0]?.scrollIntoView({{ behavior: "smooth", block: "start" }});
       }};
 
       const collapseHomeProgressiveTasks = () => {{
         homeRevealedCount = 0;
+        homeCompletedVisible = false;
         orderedHomeTaskSections().forEach((section) => {{
           section.setAttribute("data-progressive-hidden", "true");
           section.open = false;
@@ -8367,6 +8616,7 @@ def _page(
       }}
 
       restoreSectionState();
+      initCompletedTodayPanel();
       syncHomeProgressiveTasks();
 
       const activeSearchResults = document.getElementById("search-results");
@@ -8970,9 +9220,9 @@ def dashboard_tasks_api(
     return JSONResponse(
         {
             "html": view["html"],
+            "completed_html": view.get("completed_html") or "",
             "fingerprint": view["fingerprint"],
             "focus_id": focus_id or None,
-            "summary_pending": view["summary_pending"],
         }
     )
 
