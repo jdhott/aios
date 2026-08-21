@@ -30,7 +30,7 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v1"
+WEB_DASHBOARD_UI_VERSION = "home-v2"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
@@ -5427,6 +5427,9 @@ def _tasks_section_specs(*, search: str = "") -> list[tuple[str, str]]:
     ]
 
 
+_HOME_TASK_SECTION_ORDER = [key for _label, key in _tasks_section_specs()]
+
+
 def _dashboard_tasks_empty_message(*, search: str = "") -> str:
     if search.strip():
         return "No tasks match your search."
@@ -5759,6 +5762,26 @@ def _page(
     dashboard_tasks_script = (
         f"<script>window.__AIOS_DASHBOARD_TASKS__ = {json.dumps(dashboard_tasks_config)};</script>"
     )
+    home_shell_class = "home-search-mode" if search.strip() else "home-focus-first"
+    home_reveal_html = (
+        '<div class="home-tasks-reveal" id="home-tasks-reveal">'
+        '<button type="button" class="home-tasks-reveal-button" id="homeTasksReveal">'
+        "Show More"
+        "</button></div>"
+        if not search.strip()
+        else ""
+    )
+    home_panel_attrs = "" if not search.strip() else ""
+    home_shell_script = (
+        "<script>window.__AIOS_HOME_SHELL__ = "
+        + json.dumps(
+            {
+                "progressive": not bool(search.strip()),
+                "sectionOrder": _HOME_TASK_SECTION_ORDER,
+            }
+        )
+        + ";</script>"
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -5808,6 +5831,81 @@ def _page(
       --task-check:20px;
       --task-check-gap:12px;
       margin-top:0;
+    }}
+    .home-focus-first .home-page-heading {{
+      display:none;
+    }}
+    .home-focus-first .home-tasks-panel {{
+      display:block;
+      margin-top:0;
+      background:transparent;
+      border:0;
+      box-shadow:none;
+      padding:0;
+    }}
+    .home-focus-first:not(.home-tasks-open) .home-tasks-panel-content {{
+      display:none;
+    }}
+    .home-focus-first.home-tasks-open .home-tasks-panel {{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      padding:28px 24px;
+      margin-bottom:24px;
+      box-shadow:var(--shadow);
+    }}
+    .home-focus-first .home-tasks-toolbar,
+    .home-focus-first .task-search {{
+      display:none;
+    }}
+    .home-focus-first.home-tasks-open .home-tasks-toolbar,
+    .home-focus-first.home-tasks-open .task-search {{
+      display:flex;
+    }}
+    .home-focus-first.home-tasks-open .task-search {{
+      display:grid;
+    }}
+    .home-focus-first .task-group[data-progressive-hidden="true"] {{
+      display:none;
+    }}
+    .home-focus-first:not(.home-tasks-open) .focus-card {{
+      margin-bottom:0;
+    }}
+    .home-tasks-reveal {{
+      margin:0;
+      padding:6px 0 0;
+      text-align:center;
+    }}
+    .home-focus-first.home-tasks-open .home-tasks-reveal {{
+      margin-top:12px;
+      padding-top:14px;
+      border-top:1px solid var(--border);
+    }}
+    .home-search-mode .home-tasks-reveal {{
+      display:none;
+    }}
+    .home-tasks-reveal-button {{
+      display:inline;
+      width:auto;
+      min-height:0;
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      font:inherit;
+      font-size:.92rem;
+      font-weight:600;
+      line-height:var(--line-relaxed);
+      cursor:pointer;
+      padding:12px 10px;
+      text-decoration:underline;
+      text-underline-offset:3px;
+      border-radius:0;
+      box-shadow:none;
+    }}
+    .home-tasks-reveal-button:hover,
+    .home-tasks-reveal-button:focus-visible {{
+      color:var(--charcoal);
+      outline:none;
     }}
     .task-title-row {{
       display:flex;
@@ -6127,7 +6225,7 @@ def _page(
       box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
     }}
     textarea:focus {{ outline:3px solid var(--focus-ring-shadow); border-color:var(--focus-ring); }}
-    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-backdrop) {{
+    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-backdrop):not(.home-tasks-reveal-button) {{
       min-height:54px;
       border:0;
       border-radius:var(--radius-2xl);
@@ -6490,14 +6588,15 @@ def _page(
   </style>
 </head>
 <body>
-  <main>
+  <main class="home-shell {home_shell_class}">
     <div class="page-heading home-page-heading">
       <p class="home-subtitle">Do the next thing.<span class="keyboard-hint"> Press ⌘⇧B to capture anything.</span></p>
     </div>
     {notice}
     {focus_card}
-    <section class="surface-card tasks-section">
-      <div class="tasks-toolbar">
+    <section class="surface-card tasks-section home-tasks-panel" id="home-tasks-panel"{home_panel_attrs}>
+      <div class="home-tasks-panel-content">
+      <div class="tasks-toolbar home-tasks-toolbar">
         <h2 class="tasks-heading">Tasks</h2>
         <div class="section-toggle-controls">
           <button type="button" class="toolbar-button" id="expandAllSections">Expand all</button>
@@ -6510,9 +6609,14 @@ def _page(
         {('<a class="search-clear" href="/">Clear search</a>' if search else '')}
       </form>
       {task_sections}
+      </div>
+      {home_reveal_html}
     </section>
   </main>
   {_bottom_nav_html(active="home", review_count=review_count)}
+  {home_shell_script}
+  {dashboard_tasks_script}
+  {focus_poll_script}
   <script>
     (() => {{
       function resizeFocusTextarea(el) {{
@@ -7067,6 +7171,7 @@ def _page(
         scope.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
         scope.querySelectorAll("details.task-snooze").forEach(bindSnoozeMenu);
         restoreSectionState();
+        syncHomeProgressiveTasks();
       }};
 
       const replaceTaskGroups = (html) => {{
@@ -7284,6 +7389,76 @@ def _page(
         }});
       }});
 
+      let homeRevealedCount = 0;
+
+      const orderedHomeTaskSections = () => {{
+        const panel = document.getElementById("home-tasks-panel");
+        if (!panel) return [];
+        const order = window.__AIOS_HOME_SHELL__?.sectionOrder || [];
+        return order
+          .map((key) => panel.querySelector(`details.task-group[data-section="${{key}}"]`))
+          .filter(Boolean);
+      }};
+
+      const syncHomeProgressiveTasks = () => {{
+        if (!window.__AIOS_HOME_SHELL__?.progressive) return;
+
+        const shell = document.querySelector("main.home-focus-first");
+        const revealBar = document.getElementById("home-tasks-reveal");
+        const revealBtn = document.getElementById("homeTasksReveal");
+        const panel = document.getElementById("home-tasks-panel");
+        if (!shell || !revealBar || !revealBtn || !panel) return;
+
+        const sections = orderedHomeTaskSections();
+        panel.dataset.revealedCount = String(homeRevealedCount);
+
+        if (!sections.length) {{
+          revealBar.hidden = true;
+          return;
+        }}
+
+        if (homeRevealedCount <= 0) {{
+          shell.classList.remove("home-tasks-open");
+          sections.forEach((section) => section.setAttribute("data-progressive-hidden", "true"));
+          revealBtn.textContent = "Show More";
+          revealBar.hidden = false;
+          return;
+        }}
+
+        shell.classList.add("home-tasks-open");
+        sections.forEach((section, index) => {{
+          if (index < homeRevealedCount) {{
+            section.removeAttribute("data-progressive-hidden");
+          }} else {{
+            section.setAttribute("data-progressive-hidden", "true");
+          }}
+        }});
+
+        revealBtn.textContent = "Show More";
+        revealBar.hidden = homeRevealedCount >= sections.length;
+      }};
+
+      const bindHomeProgressiveTasks = () => {{
+        if (!window.__AIOS_HOME_SHELL__?.progressive) return;
+
+        const revealBtn = document.getElementById("homeTasksReveal");
+        if (!revealBtn || revealBtn.dataset.bound === "1") return;
+        revealBtn.dataset.bound = "1";
+
+        revealBtn.addEventListener("click", () => {{
+          const sections = orderedHomeTaskSections();
+          if (!sections.length || homeRevealedCount >= sections.length) return;
+
+          homeRevealedCount += 1;
+          const latest = sections[homeRevealedCount - 1];
+          latest.open = true;
+          syncHomeProgressiveTasks();
+          latest.scrollIntoView({{ behavior: "smooth", block: "start" }});
+        }});
+      }};
+
+      bindHomeProgressiveTasks();
+
       const sectionStateKey = "aios-dashboard-section-state-v1";
       const taskSections = () =>
         Array.from(document.querySelectorAll("details.task-group"));
@@ -7336,6 +7511,7 @@ def _page(
       }}
 
       restoreSectionState();
+      syncHomeProgressiveTasks();
 
       const activeSearchResults = document.getElementById("search-results");
       if (activeSearchResults) {{
@@ -7363,8 +7539,6 @@ def _page(
       }}
     }})();
   </script>
-{focus_poll_script}
-{dashboard_tasks_script}
 <script>
 if ("serviceWorker" in navigator) {{
   window.addEventListener("load", () => {{
