@@ -43,7 +43,7 @@ WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.1"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.2"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -653,12 +653,21 @@ def _bottom_nav_css() -> str:
       background: var(--card);
       box-shadow: var(--shadow-lg);
     }
-    .bottom-nav-sheet a,
-    .bottom-nav-sheet button {
+    .bottom-nav-sheet-label {
+      margin: 2px 14px 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .bottom-nav-sheet-item {
       width: 100%;
-      min-height: 44px;
+      min-height: 42px;
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       padding: 0 14px;
       border: 0;
       border-radius: 12px;
@@ -673,13 +682,15 @@ def _bottom_nav_css() -> str:
       appearance: none;
       text-align: left;
     }
-    .bottom-nav-sheet .theme-toggle-row {
+    .bottom-nav-sheet-item.theme-toggle-row {
       justify-content: space-between;
       gap: 16px;
     }
+    .bottom-nav-sheet-meta,
     .bottom-nav-sheet .theme-toggle-value {
       color: var(--muted);
       font-weight: 600;
+      font-size: 0.82rem;
       white-space: nowrap;
     }
     .bottom-nav-sheet-divider {
@@ -697,9 +708,10 @@ def _bottom_nav_css() -> str:
     .bottom-nav-sheet .sign-out-button:focus-visible {
       color: var(--ink);
     }
-    .bottom-nav-sheet a:hover,
-    .bottom-nav-sheet button:hover {
+    .bottom-nav-sheet-item:hover,
+    .bottom-nav-sheet-item:focus-visible {
       background: var(--accent-soft);
+      outline: none;
     }
     """
 
@@ -754,8 +766,26 @@ def _brain_dump_sheet_css() -> str:
       border: 0;
       margin: 0;
       padding: 0;
-      background: rgba(18, 24, 32, 0.42);
+      background: transparent;
       cursor: pointer;
+    }
+    .brain-dump-sheet-scrim {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(720px, 100%);
+      background: rgba(44, 44, 44, 0.06);
+      pointer-events: none;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .brain-dump-sheet-scrim {
+        background: rgba(0, 0, 0, 0.22);
+      }
+    }
+    :root[data-theme="dark"] .brain-dump-sheet-scrim {
+      background: rgba(0, 0, 0, 0.22);
     }
     .brain-dump-sheet {
       position: absolute;
@@ -921,6 +951,7 @@ def _brain_dump_sheet_html() -> str:
     return """
   <div class="brain-dump-sheet-root" id="brain-dump-sheet-root" hidden aria-hidden="true">
     <button type="button" class="brain-dump-sheet-backdrop" id="brain-dump-sheet-backdrop" aria-label="Close Brain Dump"></button>
+    <div class="brain-dump-sheet-scrim" aria-hidden="true"></div>
     <section class="brain-dump-sheet" role="dialog" aria-modal="true" aria-labelledby="brain-dump-sheet-title">
       <div class="brain-dump-sheet-handle" aria-hidden="true"></div>
       <div class="brain-dump-sheet-header">
@@ -1244,18 +1275,25 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
         <span class="nav-label">More</span>
       </summary>
       <div class="bottom-nav-sheet">
-        <button type="button" class="theme-toggle-row" data-theme-toggle aria-label="Cycle appearance">
-          <span>Appearance</span>
-          <span class="theme-toggle-value">System</span>
+        <p class="bottom-nav-sheet-label">Capture</p>
+        <button type="button" class="bottom-nav-sheet-item" data-brain-dump-open>
+          <span>Quick capture</span>
+          <span class="bottom-nav-sheet-meta">⌘⇧B</span>
         </button>
-        <button type="button" data-brain-dump-open>Brain Dump</button>
-        <a href="/capture">Brain Dump app</a>
-        <a href="/about">About</a>
-        <a href="/work-patterns">Work Patterns</a>
-        <a href="/journal">Journal</a>
+        <a class="bottom-nav-sheet-item" href="/capture">
+          <span>Capture app</span>
+        </a>
         <div class="bottom-nav-sheet-divider" role="presentation"></div>
+        <a class="bottom-nav-sheet-item" href="/work-patterns">Work Patterns</a>
+        <a class="bottom-nav-sheet-item" href="/journal">Journal</a>
+        <a class="bottom-nav-sheet-item" href="/about">About</a>
+        <div class="bottom-nav-sheet-divider" role="presentation"></div>
+        <button type="button" class="bottom-nav-sheet-item theme-toggle-row" data-theme-toggle aria-label="Cycle appearance">
+          <span>Appearance</span>
+          <span class="bottom-nav-sheet-meta theme-toggle-value">System</span>
+        </button>
         <form class="sign-out-form" method="post" action="/logout">
-          <button class="sign-out-button" type="submit">Sign Out</button>
+          <button class="bottom-nav-sheet-item sign-out-button" type="submit">Sign Out</button>
         </form>
       </div>
     </details>
@@ -6035,7 +6073,7 @@ def _page(
       box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
     }}
     textarea:focus {{ outline:3px solid var(--focus-ring-shadow); border-color:var(--focus-ring); }}
-    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button) {{
+    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-backdrop) {{
       min-height:54px;
       border:0;
       border-radius:var(--radius-2xl);
