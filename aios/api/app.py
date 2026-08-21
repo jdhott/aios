@@ -893,15 +893,12 @@ def _resolve_task_snooze_until(
     current = local_now(now=now, timezone_name=timezone_name)
     preset = str(request.preset or "").strip().lower()
 
-    if preset == "later_today":
-        target = current.replace(hour=17, minute=0, second=0, microsecond=0)
-        if target <= current:
-            target = current + timedelta(hours=3)
-            end_of_day = current.replace(hour=23, minute=59, second=0, microsecond=0)
-            if target > end_of_day:
-                target = end_of_day
-        if target <= current:
-            raise HTTPException(status_code=409, detail="Later today is no longer available")
+    if preset == "one_hour":
+        target = current + timedelta(hours=1)
+        return serialize_task_datetime(target, timezone_name=timezone_name)
+
+    if preset == "three_hours":
+        target = current + timedelta(hours=3)
         return serialize_task_datetime(target, timezone_name=timezone_name)
 
     if preset == "tomorrow":

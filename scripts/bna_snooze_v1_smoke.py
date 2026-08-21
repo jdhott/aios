@@ -7,16 +7,20 @@ from execution_engine_v2 import is_deferred_until_future
 TORONTO = ZoneInfo("America/Toronto")
 now = datetime(2026, 8, 17, 13, 30, tzinfo=TORONTO)
 
-later = _resolve_task_snooze_until(TaskSnoozeRequest(preset="later_today"), now=now)
-assert later.startswith("2026-08-17T17:00:00")
-print("Later today resolves to same-day timestamp: PASS")
+one_hour = _resolve_task_snooze_until(TaskSnoozeRequest(preset="one_hour"), now=now)
+assert one_hour == "2026-08-17T18:30:00+00:00"
+print("1 hour resolves to timestamp one hour ahead: PASS")
+
+three_hours = _resolve_task_snooze_until(TaskSnoozeRequest(preset="three_hours"), now=now)
+assert three_hours == "2026-08-17T20:30:00+00:00"
+print("3 hours resolves to timestamp three hours ahead: PASS")
 
 tomorrow = _resolve_task_snooze_until(TaskSnoozeRequest(preset="tomorrow"), now=now)
-assert tomorrow == "2026-08-18"
-print("Tomorrow preserves date-only defer semantics: PASS")
+assert tomorrow == "2026-08-18T04:00:00+00:00"
+print("Tomorrow resolves to start of next local day: PASS")
 
 three_days = _resolve_task_snooze_until(TaskSnoozeRequest(preset="three_days"), now=now)
-assert three_days == "2026-08-20"
+assert three_days == "2026-08-20T04:00:00+00:00"
 print("Three-day snooze resolves correctly: PASS")
 
 future_timestamp_task = {

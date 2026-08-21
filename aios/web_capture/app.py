@@ -28,7 +28,7 @@ WEB_TASKS_VERSION = "aios-web-tasks-v1-read-only"
 WEB_TASK_ACTION_UI_VERSION = "aios-web-tasks-v1.2-checkbox-trash"
 WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
-WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
+WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
 WEB_DASHBOARD_UI_VERSION = "home-v2.2"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
@@ -1683,7 +1683,8 @@ def _task_snooze_control_html(
         '<summary class="snooze-icon-button" aria-label="Snooze task" title="Snooze task">'
         '<span aria-hidden="true">⏰</span></summary>'
         '<div class="task-snooze-menu">'
-        + preset_button('later_today', 'Later today')
+        + preset_button('one_hour', '1 hour')
+        + preset_button('three_hours', '3 hours')
         + preset_button('tomorrow', 'Tomorrow')
         + preset_button('three_days', '3 days')
         + preset_button('one_week', '1 week')

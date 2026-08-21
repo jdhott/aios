@@ -3,7 +3,7 @@ from pathlib import Path
 s = Path("aios/web_capture/app.py").read_text()
 
 checks = [
-    ("version marker", 'WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"' in s),
+    ("version marker", 'WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"' in s),
     ("JSON snooze endpoint", '@app.post("/tasks/{task_id}/snooze-optimistic")' in s),
     ("uses existing snooze helper", "_snooze_task(task_id, preset, custom_date)" in s),
     ("async snooze interception", 'form.addEventListener("submit", async (event)' in s),

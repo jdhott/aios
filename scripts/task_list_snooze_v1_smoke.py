@@ -4,7 +4,8 @@ web = Path('aios/web_capture/app.py').read_text()
 start = web.index('def _task_snooze_control_html')
 end = web.index('class BreakdownActionError', start)
 helper = web[start:end]
-assert "later_today" in helper
+assert "one_hour" in helper
+assert "three_hours" in helper
 assert "tomorrow" in helper
 assert "three_days" in helper
 assert "one_week" in helper
