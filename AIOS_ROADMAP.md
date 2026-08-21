@@ -261,7 +261,8 @@ accumulating prompt rules for individual project types.
 ### Dashboard / Home refinements
 
 **Status:** Home shell v2 shipped August 21, 2026 — focus-first layout with
-progressive task-list disclosure.
+progressive task-list disclosure. Fast Home navigation and **Show All** added
+August 21, 2026.
 
 Recent UI work:
 
@@ -269,14 +270,40 @@ Recent UI work:
     orientation label. Subtitle: **Do the next thing.**
 -   **Focus-first Home (v2)** — default view shows only the Best Next Action
     focus card. Task lists, search, and toolbar are hidden until the user opts in.
--   **Progressive disclosure** — **Show More** at the bottom of the task panel
-    reveals ranked sections one at a time: Top 5 → Quick Wins → Today → Just Do It
+-   **Progressive disclosure** — **Show More** reveals ranked sections one at a
+    time; **Show All** expands every section at once; **Focus Only** collapses
+    back to the focus card. Section order: Top 5 → Quick Wins → Today → Just Do It
     → Completed Today. Search mode (`?search=`) still shows the full task panel.
+-   **Fast Home navigation (v1)** — bottom nav **Home** from other pages uses
+    `/?fast=1` for an instant HTML shell, restores the last Home snapshot from
+    `sessionStorage`, then hydrates focus + tasks via existing JSON polling.
+    Tapping **Home** while already on the dashboard reuses **Focus Only**
+    client-side (no reload).
 -   Compact bottom navigation with Projects, Reviews, New Task, and a secondary
     menu (Capture, Work Patterns, Journal, Appearance, Sign Out).
 -   Brain Dump as a global bottom-sheet action rather than a permanent Home
     section. **Shipped** — see **Brain Dump everywhere**.
 -   Today list default sort is Importance, then Due Date ascending.
+
+#### Planned Home / PWA performance (design before implementation)
+
+The current fast-nav model uses **`/?fast=1` + sessionStorage stale-while-revalidate**.
+Next step for even snappier cross-page **Home**:
+
+1.  **Service Worker Home shell cache** — extend the main PWA service worker to
+    cache the authenticated Home document shell (or a dedicated `/home-shell`
+    route) with a network-first or stale-while-revalidate strategy so Projects →
+    Home can paint from SW before the network round-trip. Keep task/focus data
+    network-authoritative via existing `/api/focus-card` and
+    `/api/dashboard-tasks` hydration (do not cache personalized JSON in SW long-term
+    without a version/fingerprint strategy).
+2.  **Optional prefetch** — when the user opens the bottom nav or hovers **Home**,
+    prefetch `/?fast=1` or warm the SW cache entry.
+3.  **Offline fallback** — show last cached Home shell + last sessionStorage snapshot
+    with a clear “offline / may be stale” state if the network is unavailable.
+
+Prerequisites: respect HTTP Basic Auth and per-user data boundaries; bump SW cache
+keys on shell HTML changes (same pattern as `aios-main-shell-v1` today).
 
 #### Planned Home customization (design before implementation)
 
@@ -327,18 +354,22 @@ interaction, and human-readable labels.
     up** when both queues are empty.
 -   **Review resolution confirmation (v1)** — brief bottom toast after accepting,
     linking, dismissing, or submitting a review action.
+-   **Journal summary polling (v1.2)** — today's journal page polls
+    `/api/journal/{date}/day-panel` while the shared Completed Today summary is
+    pending, then patches summary + completed-work list without reload.
+-   **Unified toast timing (v1)** — consistent dismiss durations across review,
+    Brain Dump, flash banners, and task-complete feedback.
 
 #### Next opportunities (priority order)
 
-1.  **Journal summary polling** — auto-refresh pending daily summary on today’s
-    journal page.
-2.  **Project name on task detail** — replace raw Project ID; optional project
+1.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-3.  **Project page optimistic complete/snooze** — align with dashboard patterns.
-4.  **Preserve form data on errors** — create-task failures should keep user input.
-5.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
-    query-param notices.
-6.  **Hide or collapse BNA Rank/Score** for normal daily use.
+2.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+3.  **Preserve form data on errors** — create-task failures should keep user input.
+4.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+    query-param notices (timing already unified).
+5.  **Hide or collapse BNA Rank/Score** for normal daily use.
+6.  **Service Worker Home shell cache** — see **Dashboard / Home refinements**.
 
 #### UX principles
 
@@ -720,12 +751,14 @@ sequence is:
 8.  Design Recurring Tasks before implementation.
 9.  Observe AI spend optimizations in normal use for a few days; revisit
     **AI usage / credit efficiency** next opportunities if needed.
-10. Continue **UX polish** — journal summary polling is next.
-11. Consider SSE (Phase 3) only if polling validation shows latency or
+10. Continue **UX polish** — project name on task detail is next.
+11. **Service Worker Home shell cache** — after fast-nav + sessionStorage prove
+    useful in daily use.
+12. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
-12. When stabilization load allows, begin **workspace tenancy Phase 2**
+13. When stabilization load allows, begin **workspace tenancy Phase 2**
     (query scoping through API/processor).
-13. Choose subsequent improvements based on actual AIOS usage rather
+14. Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
 
 ------------------------------------------------------------------------
@@ -761,6 +794,8 @@ Recent milestones that materially changed the architecture:
     (August 21, 2026).
 -   User guide starter (`docs/AIOS_GUIDE.md`) and review resolution confirmation
     toast (August 21, 2026).
+-   Journal summary polling, Home fast navigation (`/?fast=1` +
+    sessionStorage), and **Show All** on progressive Home (August 21, 2026).
 
 ------------------------------------------------------------------------
 

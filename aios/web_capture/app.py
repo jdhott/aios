@@ -30,7 +30,8 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2.3"
+WEB_DASHBOARD_UI_VERSION = "home-v2.5"
+WEB_HOME_FAST_NAV_VERSION = "home-fast-nav-v1"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
@@ -48,6 +49,7 @@ WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
 WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
+WEB_DAILY_JOURNAL_VERSION = "daily-journal-v1.2"
 WEB_TOAST_TIMING_VERSION = "toast-timing-v1"
 WEB_TOAST_SUCCESS_MS = 4500
 WEB_TOAST_ACTION_MS = 5000
@@ -339,6 +341,7 @@ def _web_version_groups() -> list[dict[str, object]]:
             "title": "Home",
             "items": [
                 {"label": "UI", "version": WEB_DASHBOARD_UI_VERSION},
+                {"label": "Fast Home nav", "version": WEB_HOME_FAST_NAV_VERSION},
                 {"label": "Focus card", "version": WEB_DASHBOARD_FOCUS_VERSION},
                 {"label": "Task list polling", "version": WEB_DASHBOARD_TASKS_POLL_VERSION},
                 {"label": "Async actions", "version": WEB_DASHBOARD_ASYNC_V2A_VERSION},
@@ -365,6 +368,7 @@ def _web_version_groups() -> list[dict[str, object]]:
             "title": "Experience",
             "items": [
                 {"label": "Dark mode", "version": WEB_DARK_MODE_VERSION},
+                {"label": "Daily Journal", "version": WEB_DAILY_JOURNAL_VERSION},
                 {"label": "Projects", "version": WEB_PROJECTS_VERSION},
             ],
         },
@@ -544,7 +548,7 @@ def _about_page(payload: dict[str, object]) -> str:
     <h2 class="about-group-title">Links</h2>
     <div class="about-links">
       <a href="/capture">Brain Dump</a>
-      <a href="/">Home</a>
+      <a href="/?fast=1">Home</a>
     </div>
   </section>
 </main>
@@ -1356,6 +1360,7 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
     more_cls = "bottom-nav-item active" if more_active else "bottom-nav-item"
     reviews_badge = str(review_count) if review_count else ""
     add_cls = "bottom-nav-add active" if active == "new" else "bottom-nav-add"
+    home_href = "/" if active == "home" else "/?fast=1"
 
     return f"""
   <button type="button" class="brain-dump-fab" id="brain-dump-open" aria-label="Brain Dump (⌘⇧B)">
@@ -1364,7 +1369,10 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
   </button>
   {_brain_dump_sheet_html()}
   <nav class="bottom-nav" aria-label="Primary">
-    {item("/", "Home", "⌂", "home")}
+    <a class="{"bottom-nav-item active" if active == "home" else "bottom-nav-item"}" href="{home_href}" data-home-nav="1"{(' aria-current="page"' if active == "home" else "")}>
+      <span class="nav-icon" aria-hidden="true">⌂</span>
+      <span class="nav-label">Home</span>
+    </a>
     {item("/projects", "Projects", "▦", "projects")}
     <a class="{add_cls}" href="/tasks/new" aria-label="New task"{(' aria-current="page"' if active == 'new' else '')}>
       <span class="nav-icon" aria-hidden="true">+</span>
@@ -5880,7 +5888,7 @@ def _page(
     }
     focus_poll_script = (
         f"<script>window.__AIOS_FOCUS_POLL__ = {json.dumps(focus_poll_config)};</script>"
-        if refresh_needed
+        if refresh_needed or fast_shell
         else '<script>window.__AIOS_FOCUS_POLL__ = {"enabled": false};sessionStorage.removeItem("aios-focus-activation-refresh-count");</script>'
     )
     dashboard_tasks_config = {
@@ -5897,6 +5905,9 @@ def _page(
         "</button>"
         '<button type="button" class="home-tasks-reveal-button" id="homeTasksReveal">'
         "Show More"
+        "</button>"
+        '<button type="button" class="home-tasks-reveal-button" id="homeTasksShowAll">'
+        "Show All"
         "</button></div>"
         if not search.strip()
         else ""
@@ -6978,7 +6989,52 @@ def _page(
           focusPollFingerprint = focusData.fingerprint;
         }}
         applyTasksPollData(tasksData);
+        persistHomeShellCache();
         return {{ focusData, tasksData }};
+      }};
+
+      const HOME_SHELL_CACHE_KEY = "aios-home-shell-cache-v1";
+      const HOME_SHELL_CACHE_TTL_MS = 30 * 60 * 1000;
+
+      const persistHomeShellCache = () => {{
+        if (!document.querySelector("main.home-focus-first")) return;
+        const focusCard = document.getElementById("focus-card");
+        const taskGroups = document.getElementById("dashboard-task-groups");
+        if (!focusCard || !taskGroups) return;
+        try {{
+          sessionStorage.setItem(
+            HOME_SHELL_CACHE_KEY,
+            JSON.stringify({{
+              focusHtml: focusCard.outerHTML,
+              tasksHtml: taskGroups.outerHTML,
+              focusFingerprint: focusPollFingerprint,
+              tasksFingerprint: tasksPollFingerprint,
+              cachedAt: Date.now(),
+            }})
+          );
+        }} catch (_error) {{
+          // Best-effort cache for fast Home navigation.
+        }}
+      }};
+
+      const restoreHomeShellCache = () => {{
+        if (!document.querySelector("main.home-focus-first")) return false;
+        try {{
+          const raw = sessionStorage.getItem(HOME_SHELL_CACHE_KEY);
+          if (!raw) return false;
+          const cache = JSON.parse(raw);
+          if (!cache?.focusHtml || !cache?.tasksHtml) return false;
+          if (Date.now() - Number(cache.cachedAt || 0) > HOME_SHELL_CACHE_TTL_MS) return false;
+          replaceFocusCard(cache.focusHtml);
+          replaceTaskGroups(cache.tasksHtml);
+          if (cache.focusFingerprint) focusPollFingerprint = cache.focusFingerprint;
+          if (cache.tasksFingerprint) tasksPollFingerprint = cache.tasksFingerprint;
+          initTaskList(document.getElementById("dashboard-task-groups"));
+          syncHomeProgressiveTasks();
+          return true;
+        }} catch (_error) {{
+          return false;
+        }}
       }};
 
       const showOptimisticToast = (state, message = "Task completed") => {{
@@ -7543,6 +7599,7 @@ def _page(
         const shell = document.querySelector("main.home-focus-first");
         const revealBar = document.getElementById("home-tasks-reveal");
         const revealBtn = document.getElementById("homeTasksReveal");
+        const showAllBtn = document.getElementById("homeTasksShowAll");
         const collapseBtn = document.getElementById("homeTasksCollapse");
         const panel = document.getElementById("home-tasks-panel");
         if (!shell || !revealBar || !revealBtn || !panel) return;
@@ -7562,6 +7619,7 @@ def _page(
           sections.forEach((section) => section.setAttribute("data-progressive-hidden", "true"));
           revealBtn.textContent = "Show More";
           revealBtn.hidden = false;
+          if (showAllBtn) showAllBtn.hidden = false;
           if (collapseBtn) collapseBtn.hidden = true;
           return;
         }}
@@ -7577,7 +7635,21 @@ def _page(
 
         revealBtn.textContent = "Show More";
         revealBtn.hidden = homeRevealedCount >= sections.length;
+        if (showAllBtn) showAllBtn.hidden = homeRevealedCount >= sections.length;
         if (collapseBtn) collapseBtn.hidden = false;
+      }};
+
+      const showAllHomeProgressiveTasks = () => {{
+        const sections = orderedHomeTaskSections();
+        if (!sections.length) return;
+
+        homeRevealedCount = sections.length;
+        sections.forEach((section) => {{
+          section.removeAttribute("data-progressive-hidden");
+          section.open = true;
+        }});
+        syncHomeProgressiveTasks();
+        sections[0]?.scrollIntoView({{ behavior: "smooth", block: "start" }});
       }};
 
       const collapseHomeProgressiveTasks = () => {{
@@ -7596,12 +7668,14 @@ def _page(
       const bindHomeProgressiveTasks = () => {{
         if (!window.__AIOS_HOME_SHELL__?.progressive) return;
 
+        const revealBar = document.getElementById("home-tasks-reveal");
         const revealBtn = document.getElementById("homeTasksReveal");
+        const showAllBtn = document.getElementById("homeTasksShowAll");
         const collapseBtn = document.getElementById("homeTasksCollapse");
-        if (!revealBtn || revealBtn.dataset.bound === "1") return;
-        revealBtn.dataset.bound = "1";
+        if (!revealBar || revealBar.dataset.bound === "1") return;
+        revealBar.dataset.bound = "1";
 
-        revealBtn.addEventListener("click", () => {{
+        revealBtn?.addEventListener("click", () => {{
           const sections = orderedHomeTaskSections();
           if (!sections.length || homeRevealedCount >= sections.length) return;
 
@@ -7612,6 +7686,7 @@ def _page(
           latest.scrollIntoView({{ behavior: "smooth", block: "start" }});
         }});
 
+        showAllBtn?.addEventListener("click", showAllHomeProgressiveTasks);
         collapseBtn?.addEventListener("click", collapseHomeProgressiveTasks);
       }};
 
@@ -7626,7 +7701,7 @@ def _page(
       const bindHomeNavReset = () => {{
         if (!window.__AIOS_HOME_SHELL__?.progressive) return;
 
-        document.querySelectorAll('.bottom-nav a.bottom-nav-item[href="/"]').forEach((link) => {{
+        document.querySelectorAll('[data-home-nav="1"]').forEach((link) => {{
           if (link.dataset.aiosHomeResetBound === "1") return;
           link.dataset.aiosHomeResetBound = "1";
           link.addEventListener("click", (event) => {{
@@ -7714,12 +7789,15 @@ def _page(
       }}
 
       if (new URL(window.location.href).searchParams.get("fast") === "1") {{
+        restoreHomeShellCache();
         syncDashboardFragments({{ refreshFocus: true }}).finally(() => {{
           const url = new URL(window.location.href);
           url.searchParams.delete("fast");
           const next = url.pathname + (url.search ? url.search : "") + url.hash;
           window.history.replaceState(null, "", next);
         }});
+      }} else if (document.querySelector("main.home-focus-first")) {{
+        persistHomeShellCache();
       }}
     }})();
   </script>
@@ -9455,9 +9533,220 @@ def _journal_today_iso() -> str:
     return datetime.now(zone).date().isoformat()
 
 
-def _journal_page(journal_date: str, payload: dict) -> str:
-    from datetime import date, datetime, timedelta
+def _journal_local_zone():
     from zoneinfo import ZoneInfo
+
+    zone_name = os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto").strip()
+    try:
+        return ZoneInfo(zone_name)
+    except Exception:
+        return ZoneInfo("America/Toronto")
+
+
+def _journal_completed_work_html(completed: list[dict]) -> str:
+    from datetime import datetime
+
+    zone = _journal_local_zone()
+    rows = []
+
+    for task in completed:
+        title = html.escape(str(task.get("title") or "Untitled"))
+        project = html.escape(str(task.get("project_name") or ""))
+        raw = str(task.get("completed_at") or "")
+        when = "Completed"
+
+        if raw:
+            try:
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if dt.tzinfo:
+                    dt = dt.astimezone(zone)
+                when = dt.strftime("%-I:%M %p")
+            except (TypeError, ValueError):
+                pass
+
+        meta = (
+            (f'<span class="project">{project}</span>' if project else "")
+            + f"<span>{html.escape(when)}</span>"
+        )
+        rows.append(
+            "<li>"
+            '<span class="check">✓</span>'
+            "<div>"
+            f"<strong>{title}</strong>"
+            f'<div class="meta">{meta}</div>'
+            "</div>"
+            "</li>"
+        )
+
+    if rows:
+        return "<ul>" + "".join(rows) + "</ul>"
+    return '<p class="empty">No completed tasks recorded for this day.</p>'
+
+
+def _journal_summary_html(
+    completion_summary: str,
+    completion_summary_state: str,
+) -> str:
+    if completion_summary:
+        return (
+            '<div class="summary-text">'
+            f"{html.escape(completion_summary)}"
+            "</div>"
+        )
+    if completion_summary_state == "pending":
+        return (
+            '<div class="summary-text pending">'
+            "Updating the day's summary…"
+            "</div>"
+        )
+    return (
+        '<div class="summary-text empty">'
+        "No daily summary yet."
+        "</div>"
+    )
+
+
+def _journal_completed_label(completed_count: int) -> str:
+    if completed_count:
+        return f"Completed work · {completed_count}"
+    return "Completed work"
+
+
+def _journal_day_panel_fingerprint(payload: dict) -> str:
+    completed = list(payload.get("completed_work") or [])
+    parts = [
+        str(payload.get("completion_summary_state") or "empty"),
+        str(payload.get("completion_summary") or "")[:240],
+        str(payload.get("completed_count") or len(completed)),
+    ]
+    for task in completed:
+        parts.append(
+            "|".join(
+                [
+                    str(task.get("id") or ""),
+                    str(task.get("completed_at") or ""),
+                    str(task.get("title") or "")[:120],
+                ]
+            )
+        )
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    return digest[:24]
+
+
+def _journal_day_panel_view(journal_date: str, payload: dict) -> dict:
+    completed = list(payload.get("completed_work") or [])
+    completion_summary = str(payload.get("completion_summary") or "").strip()
+    completion_summary_state = (
+        str(payload.get("completion_summary_state") or "empty").strip().lower()
+    )
+    completed_count = int(payload.get("completed_count") or len(completed))
+    is_today = journal_date == _journal_today_iso()
+
+    return {
+        "journal_date": journal_date,
+        "summary_html": _journal_summary_html(
+            completion_summary,
+            completion_summary_state,
+        ),
+        "completed_html": _journal_completed_work_html(completed),
+        "completed_label": _journal_completed_label(completed_count),
+        "completion_summary_state": completion_summary_state,
+        "fingerprint": _journal_day_panel_fingerprint(payload),
+        "pending": is_today and completion_summary_state == "pending",
+    }
+
+
+def _journal_poll_script(*, journal_date: str, panel_view: dict) -> str:
+    if not panel_view.get("pending"):
+        return ""
+
+    config = {
+        "enabled": True,
+        "url": f"/api/journal/{journal_date}/day-panel",
+        "initialFingerprint": panel_view["fingerprint"],
+        "journalDate": journal_date,
+    }
+    return f"""
+<script>
+(() => {{
+  const cfg = {json.dumps(config)};
+  if (!cfg?.enabled) return;
+
+  let fingerprint = cfg.initialFingerprint || "";
+  let timer = null;
+  let attempt = 0;
+  let delay = 2000;
+  const maxDelay = 30000;
+  const maxAttempts = 45;
+
+  const applyPanel = (data) => {{
+    const summaryRoot = document.getElementById("journal-summary-root");
+    const completedRoot = document.getElementById("journal-completed-root");
+    const completedSummary = document.querySelector("#journal-day-panel .completed-details summary");
+    if (summaryRoot && data.summary_html) {{
+      summaryRoot.innerHTML = data.summary_html;
+    }}
+    if (completedRoot && data.completed_html) {{
+      completedRoot.innerHTML = data.completed_html;
+    }}
+    if (completedSummary && data.completed_label) {{
+      completedSummary.textContent = data.completed_label;
+    }}
+  }};
+
+  const showTimeout = () => {{
+    const summaryRoot = document.getElementById("journal-summary-root");
+    if (!summaryRoot) return;
+    summaryRoot.innerHTML =
+      '<div class="summary-text pending">' +
+      "Summary is taking longer than expected." +
+      ' <button type="button" class="link" id="journalSummaryRetry">Try again</button>' +
+      "</div>";
+    document.getElementById("journalSummaryRetry")?.addEventListener("click", () => {{
+      attempt = 0;
+      delay = 2000;
+      poll();
+    }});
+  }};
+
+  const poll = async () => {{
+    attempt += 1;
+    if (attempt > maxAttempts) {{
+      showTimeout();
+      timer = null;
+      return;
+    }}
+
+    try {{
+      const response = await fetch(cfg.url, {{
+        headers: {{ "X-Requested-With": "fetch" }},
+      }});
+      if (!response.ok) throw new Error("Journal poll failed");
+      const data = await response.json();
+      if (data.fingerprint && data.fingerprint !== fingerprint) {{
+        applyPanel(data);
+        fingerprint = data.fingerprint;
+      }}
+      if (!data.pending) {{
+        timer = null;
+        return;
+      }}
+    }} catch (_error) {{
+      // Keep polling on transient failures.
+    }}
+
+    delay = Math.min(Math.round(delay * 1.6), maxDelay);
+    timer = window.setTimeout(poll, delay);
+  }};
+
+  poll();
+}})();
+</script>
+"""
+
+
+def _journal_page(journal_date: str, payload: dict) -> str:
+    from datetime import date, timedelta
 
     day = date.fromisoformat(journal_date)
     today = date.fromisoformat(_journal_today_iso())
@@ -9475,105 +9764,10 @@ def _journal_page(journal_date: str, payload: dict) -> str:
         str((payload.get("journal") or {}).get("body") or "")
     )
 
-    completed = list(payload.get("completed_work") or [])
-
-    completion_summary = str(
-        payload.get("completion_summary") or ""
-    ).strip()
-
-    completion_summary_state = str(
-        payload.get("completion_summary_state") or "empty"
-    ).strip().lower()
-
-    completed_count = int(
-        payload.get("completed_count") or len(completed)
-    )
-
-    try:
-        zone = ZoneInfo(
-            os.getenv(
-                "AIOS_LOCAL_TIMEZONE",
-                "America/Toronto",
-            ).strip()
-        )
-    except Exception:
-        zone = ZoneInfo("America/Toronto")
-
-    rows = []
-
-    for task in completed:
-        title = html.escape(
-            str(task.get("title") or "Untitled")
-        )
-
-        project = html.escape(
-            str(task.get("project_name") or "")
-        )
-
-        raw = str(task.get("completed_at") or "")
-        when = "Completed"
-
-        if raw:
-            try:
-                dt = datetime.fromisoformat(
-                    raw.replace("Z", "+00:00")
-                )
-                if dt.tzinfo:
-                    dt = dt.astimezone(zone)
-                when = dt.strftime("%-I:%M %p")
-            except (TypeError, ValueError):
-                pass
-
-        meta = (
-            (
-                f'<span class="project">{project}</span>'
-                if project
-                else ""
-            )
-            + f'<span>{html.escape(when)}</span>'
-        )
-
-        rows.append(
-            '<li>'
-            '<span class="check">✓</span>'
-            '<div>'
-            f'<strong>{title}</strong>'
-            f'<div class="meta">{meta}</div>'
-            '</div>'
-            '</li>'
-        )
-
-    completed_html = (
-        "<ul>" + "".join(rows) + "</ul>"
-        if rows
-        else '<p class="empty">No completed tasks recorded for this day.</p>'
-    )
-
-    if completion_summary:
-        summary_html = (
-            '<div class="summary-text">'
-            f'{html.escape(completion_summary)}'
-            '</div>'
-        )
-    elif completion_summary_state == "pending":
-        summary_html = (
-            '<div class="summary-text pending">'
-            "Updating the day's summary…"
-            '</div>'
-        )
-    else:
-        summary_html = (
-            '<div class="summary-text empty">'
-            "No daily summary yet."
-            '</div>'
-        )
-
-    detail_label = (
-        f"Completed work · {completed_count}"
-        if completed_count
-        else "Completed work"
-    )
-
+    panel_view = _journal_day_panel_view(journal_date, payload)
+    summary_html = panel_view["summary_html"]
+    completed_html = panel_view["completed_html"]
+    detail_label = panel_view["completed_label"]
     focus_label = (
         "Today's summary"
         if day == today
@@ -9726,13 +9920,13 @@ textarea:focus {{
     <a href="/journal/{nxt}" aria-label="Next day">Next →</a>
   </nav>
 
-<section class="card">
+<section class="card" id="journal-day-panel">
   <div class="summary-label">{html.escape(focus_label)}</div>
-  {summary_html}
+  <div id="journal-summary-root">{summary_html}</div>
 
   <details class="completed-details">
     <summary>{html.escape(detail_label)}</summary>
-    {completed_html}
+    <div id="journal-completed-root">{completed_html}</div>
   </details>
 </section>
 
@@ -9790,6 +9984,7 @@ textarea:focus {{
   }});
 }})();
 </script>
+{_journal_poll_script(journal_date=journal_date, panel_view=panel_view)}
 {_bottom_nav_html(active="journal")}
 </body>
 </html>"""
@@ -9818,6 +10013,27 @@ def journal_day_web(journal_date: str, _user: Annotated[str, Depends(_check_basi
             "completed_work": [],
         }
     return HTMLResponse(_journal_page(journal_date, payload))
+
+
+@app.get("/api/journal/{journal_date}/day-panel")
+def journal_day_panel_api(
+    journal_date: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    from datetime import date
+
+    try:
+        date.fromisoformat(journal_date)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid journal date") from None
+    try:
+        payload = _journal_api("GET", f"/journal/{journal_date}")
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    return JSONResponse(_journal_day_panel_view(journal_date, payload))
 
 
 @app.post("/journal/{journal_date}/save")

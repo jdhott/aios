@@ -8,10 +8,13 @@ from pathlib import Path
 WEB = (Path(__file__).resolve().parents[1] / "aios" / "web_capture" / "app.py").read_text()
 
 checks = [
-    ("home v2 marker", 'WEB_DASHBOARD_UI_VERSION = "home-v2.3"' in WEB),
+    ("home v2 marker", 'WEB_DASHBOARD_UI_VERSION = "home-v2.5"' in WEB),
     ("focus only control", 'id="homeTasksCollapse"' in WEB and "Focus Only" in WEB),
+    ("show all control", 'id="homeTasksShowAll"' in WEB and "Show All" in WEB),
     ("collapse helper", "collapseHomeProgressiveTasks" in WEB),
+    ("show all helper", "showAllHomeProgressiveTasks" in WEB),
     ("home nav reset", "goHomeFocusView" in WEB and "bindHomeNavReset" in WEB),
+    ("fast home nav", 'data-home-nav="1"' in WEB and "/?fast=1" in WEB),
     ("section order constant", "_HOME_TASK_SECTION_ORDER" in WEB),
     ("focus-first shell class", "home-focus-first" in WEB),
     ("search mode shell class", "home-search-mode" in WEB),
