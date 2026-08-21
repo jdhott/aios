@@ -13,9 +13,12 @@ final class CaptureModel: ObservableObject {
     @Published var setupPassword = ""
 
     private let settingsStore: any CaptureSettingsStore
+    private let captureService: CaptureService
 
     init(settingsStore: (any CaptureSettingsStore)? = nil) {
-        self.settingsStore = settingsStore ?? KeychainCaptureSettingsStore()
+        let store = settingsStore ?? KeychainCaptureSettingsStore()
+        self.settingsStore = store
+        self.captureService = CaptureService(settingsStore: store)
         refreshSetupState()
     }
 
@@ -60,26 +63,17 @@ final class CaptureModel: ObservableObject {
         let normalized = BrainDumpFormatter.normalizedDraft(draftText)
         draftText = normalized
 
-        guard BrainDumpFormatter.hasMeaningfulCaptureText(normalized) else {
-            statusMessage = CaptureClientError.emptyInput.localizedDescription
-            return
-        }
-
-        guard let settings = try? settingsStore.load(), settings.isConfigured else {
-            needsSetup = true
-            statusMessage = "Set up AIOS sign-in first."
-            return
-        }
-
         isSending = true
         statusMessage = "Sending…"
         defer { isSending = false }
 
         do {
-            let client = CaptureClient(configuration: settings.makeConfiguration())
-            let result = try await client.submit(text: normalized)
+            let result = try await captureService.submit(text: normalized)
             draftText = "• "
             statusMessage = result.sent == 1 ? "1 item sent." : "\(result.sent) items sent."
+        } catch let error as CaptureClientError where error == .notConfigured {
+            needsSetup = true
+            statusMessage = error.localizedDescription
         } catch {
             statusMessage = error.localizedDescription
         }

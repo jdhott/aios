@@ -16,11 +16,12 @@ public struct CaptureSettings: Sendable, Equatable {
         !username.isEmpty && !password.isEmpty
     }
 
-    public func makeConfiguration() -> CaptureConfiguration {
+    public func makeConfiguration(captureInterface: String = "watchos_v1") -> CaptureConfiguration {
         CaptureConfiguration(
             baseURL: baseURL,
             username: username,
-            password: password
+            password: password,
+            captureInterface: captureInterface
         )
     }
 }

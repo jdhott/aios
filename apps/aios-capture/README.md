@@ -27,7 +27,7 @@ You do not rewrite capture logic when adding the companion — you add targets a
 ## Create the watch app in Xcode
 
 1. Open Xcode → **File → New → Project**.
-2. Choose **watchOS → App**. Name it `AIOS Capture`, organization identifier e.g. `com.yourname.aios`.
+2. Choose **watchOS → App**. Name the target `Brain Dump` (or `AIOS Capture` internally — see step 7).
 3. Save the project inside this folder: `apps/aios-capture/AIOSCapture.xcodeproj` (or adjacent — your choice).
 4. **File → Add Package Dependencies → Add Local…** and select this directory (`apps/aios-capture`).
 5. Add `AIOSCaptureCore` to the Watch app target.
@@ -35,8 +35,29 @@ You do not rewrite capture logic when adding the companion — you add targets a
    - `AIOSCaptureWatchApp.swift`
    - `CaptureModel.swift`
    - `CaptureView.swift`
-7. Watch target → **Signing & Capabilities** → set your Team.
-8. Watch target → **Info** → add App Transport Security only if you test against non-HTTPS (production URL is HTTPS).
+   - `BrainDumpAppIntents.swift`
+7. Set the Watch app **Display Name** to **Brain Dump** (target → General → Display Name). Siri phrases then read naturally: **“Add buy milk to Brain Dump.”**
+8. Watch target → **Signing & Capabilities** → set your Team.
+9. Watch target → **Info** → add App Transport Security only if you test against non-HTTPS (production URL is HTTPS).
+
+## Siri / App Intents
+
+The app registers two shortcuts via `BrainDumpAppIntents.swift`:
+
+| Say this (example) | What happens |
+|--------------------|--------------|
+| **“Add buy milk and call dentist to Brain Dump”** | Sends spoken text to AIOS in the background (`watchos_siri_v1`) |
+| **“Open Brain Dump”** / **“Start Brain Dump”** | Opens the capture screen |
+
+Apple requires the app name in registered phrase templates. With Display Name **Brain Dump**, that name appears naturally in the sentence — no **“in AIOS”** suffix.
+
+After installing on a physical watch:
+
+1. Open the app once and complete sign-in.
+2. Check **Watch → Siri** for the **Brain Dump** shortcut.
+3. Try: **“Add get butter and eggs to Brain Dump.”**
+
+Siri capture uses the same Keychain credentials as the app. If sign-in is missing, Siri will say to open the app and sign in first.
 
 ## First-run setup on the watch
 

@@ -6,6 +6,7 @@ public struct CaptureSubmitResult: Sendable, Equatable {
 
 public enum CaptureClientError: LocalizedError, Sendable, Equatable {
     case emptyInput
+    case notConfigured
     case invalidResponse
     case unauthorized
     case server(message: String)
@@ -15,6 +16,8 @@ public enum CaptureClientError: LocalizedError, Sendable, Equatable {
         switch self {
         case .emptyInput:
             return "Enter something to capture."
+        case .notConfigured:
+            return "Open Brain Dump on your watch and sign in to AIOS first."
         case .invalidResponse:
             return "AIOS returned an unexpected response."
         case .unauthorized:
