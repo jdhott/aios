@@ -13,7 +13,7 @@ from typing import Annotated
 from urllib.parse import quote_plus
 
 import google.auth
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from aios.ingestion.capture_metadata import has_meaningful_capture_text
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -41,7 +41,7 @@ WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
-WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v3"
+WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -867,6 +867,43 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
   }})();
   </script>
   {_theme_toggle_script()}
+  {_client_flash_script()}
+"""
+
+
+def _client_flash_script() -> str:
+    return """
+  <script>
+  (() => {
+    const raw = sessionStorage.getItem("aios-flash");
+    if (!raw) return;
+    sessionStorage.removeItem("aios-flash");
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch (_error) {
+      return;
+    }
+    const message = String(payload.message || "").trim();
+    if (!message) return;
+    const kind = payload.kind === "error" ? "error" : "success";
+    const notice = document.createElement("div");
+    notice.className = "notice " + kind;
+    notice.setAttribute("role", "status");
+    notice.textContent = message;
+    const main = document.querySelector("main");
+    if (!main) return;
+    const anchor = main.querySelector(".page-heading, .capture-heading, .detail-back, .journal-heading");
+    if (anchor && anchor.parentNode === main) {
+      anchor.insertAdjacentElement("afterend", notice);
+    } else {
+      main.insertBefore(notice, main.firstChild);
+    }
+    window.setTimeout(() => {
+      notice.remove();
+    }, 6000);
+  })();
+  </script>
 """
 
 
@@ -1877,6 +1914,7 @@ input:focus, textarea:focus {{
   </div>
 
   {notice}
+  <div id="taskSaveNotice" hidden></div>
 
   <div class="layout">
     <form method="post" action="/tasks/{task_id}/edit" id="taskEditForm" data-async-save="{WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION}">
@@ -1941,7 +1979,7 @@ input:focus, textarea:focus {{
         </div>
 
         <div class="actions">
-          <button class="primary-button" type="submit">Save Changes</button>
+          <button class="primary-button" type="submit" data-save-label="Save Changes">Save Changes</button>
           <a class="secondary-link" href="{return_to}">Cancel</a>
         </div>
       </section>
@@ -1951,22 +1989,39 @@ input:focus, textarea:focus {{
   const form = document.getElementById("taskEditForm");
   if (!form) return;
 
-  form.addEventListener("submit", (event) => {{
-    event.preventDefault();
-    if (form.dataset.saving === "1") return;
-    form.dataset.saving = "1";
+  const noticeHost = document.getElementById("taskSaveNotice");
+  const submitButton = form.querySelector('button[type="submit"]');
+  const defaultSaveLabel = submitButton?.dataset.saveLabel || "Save Changes";
 
-    const returnTo = form.querySelector('input[name="return_to"]')?.value || "/";
-    const body = new FormData(form);
+  function clearSaveNotice() {{
+    if (!noticeHost) return;
+    noticeHost.hidden = true;
+    noticeHost.replaceChildren();
+  }}
 
-    try {{
-      fetch(form.action, {{
-        method: "POST",
-        body,
-        credentials: "same-origin",
-        keepalive: true,
-      }}).catch(() => {{}});
-    }} catch (_error) {{}}
+  function showSaveNotice(message) {{
+    if (!noticeHost) return;
+    noticeHost.hidden = false;
+    noticeHost.replaceChildren();
+    const box = document.createElement("div");
+    box.className = "notice error";
+    box.setAttribute("role", "alert");
+    box.textContent = String(message || "Task could not be saved.");
+    noticeHost.appendChild(box);
+  }}
+
+  function setSavingState(active) {{
+    form.dataset.saving = active ? "1" : "0";
+    if (!submitButton) return;
+    submitButton.disabled = active;
+    submitButton.textContent = active ? "Saving…" : defaultSaveLabel;
+  }}
+
+  function navigateAfterSave(returnTo) {{
+    sessionStorage.setItem(
+      "aios-flash",
+      JSON.stringify({{ kind: "success", message: "Task saved." }}),
+    );
 
     let returned = false;
     try {{
@@ -1990,6 +2045,43 @@ input:focus, textarea:focus {{
         fastReturn = url.pathname + url.search + url.hash;
       }} catch (_error) {{}}
       window.location.assign(fastReturn);
+    }}
+  }}
+
+  form.addEventListener("submit", async (event) => {{
+    event.preventDefault();
+    if (form.dataset.saving === "1") return;
+    clearSaveNotice();
+    setSavingState(true);
+
+    const returnTo = form.querySelector('input[name="return_to"]')?.value || "/";
+    const body = new FormData(form);
+    const saveUrl = form.action.replace(/\\/edit$/, "/edit-optimistic");
+
+    try {{
+      const response = await fetch(saveUrl, {{
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        headers: {{ Accept: "application/json" }},
+      }});
+      let payload = {{}};
+      try {{
+        payload = await response.json();
+      }} catch (_error) {{}}
+      if (!response.ok || !payload.ok) {{
+        throw new Error(
+          String(payload.error || "Task could not be saved. Please try again."),
+        );
+      }}
+      navigateAfterSave(returnTo);
+    }} catch (error) {{
+      setSavingState(false);
+      showSaveNotice(
+        error && error.message
+          ? error.message
+          : "Task could not be saved. Please try again.",
+      );
     }}
   }});
 }})();
@@ -2068,11 +2160,14 @@ document.addEventListener('DOMContentLoaded',function(){{ window.aiosInitBreakdo
 </html>"""
 
 
-def _save_task_detail_background(task_id: str, payload: dict) -> None:
-    try:
-        _update_task_detail(task_id, payload)
-    except Exception as exc:
-        print(f"[Task Edit Background] Save failed for {task_id}:", exc)
+def _task_save_user_error(_exc: Exception | None = None) -> str:
+    return "Task could not be saved. Please try again."
+
+
+def _return_with_task_save_message(value: str | None) -> str:
+    target = _with_fast_return_param(value)
+    joiner = "&" if "?" in target else "?"
+    return f"{target}{joiner}message=Task+saved."
 
 
 def _fetch_projects() -> list[dict]:
@@ -8074,7 +8169,6 @@ def focus_context_save_web(task_id: str, _user: Annotated[str, Depends(_check_ba
 @app.post("/tasks/{task_id}/edit")
 def edit_task_web(
     task_id: str,
-    background_tasks: BackgroundTasks,
     _user: Annotated[str, Depends(_check_basic_auth)],
     title: Annotated[str, Form()],
     context: Annotated[str, Form()] = "",
@@ -8098,9 +8192,21 @@ def edit_task_web(
         duration=duration,
         is_just_do_it=is_just_do_it,
     )
-    background_tasks.add_task(_save_task_detail_background, task_id, payload)
+    safe_return = _safe_return_to(return_to)
+    try:
+        _update_task_detail(task_id, payload)
+    except Exception as exc:
+        print(f"[Task Edit] Save failed for {task_id}:", exc)
+        return RedirectResponse(
+            url=(
+                f"/tasks/{task_id}?error={quote_plus(_task_save_user_error())}"
+                f"&return_to={quote_plus(safe_return)}"
+            ),
+            status_code=303,
+        )
+
     return RedirectResponse(
-        url=_with_fast_return_param(return_to),
+        url=_return_with_task_save_message(return_to),
         status_code=303,
     )
 
@@ -8108,7 +8214,6 @@ def edit_task_web(
 @app.post("/tasks/{task_id}/edit-optimistic")
 def edit_task_optimistic_web(
     task_id: str,
-    background_tasks: BackgroundTasks,
     _user: Annotated[str, Depends(_check_basic_auth)],
     title: Annotated[str, Form()],
     context: Annotated[str, Form()] = "",
@@ -8117,8 +8222,7 @@ def edit_task_optimistic_web(
     importance: Annotated[str, Form()] = "",
     urgency: Annotated[str, Form()] = "",
     effort: Annotated[str, Form()] = "",
-    duration: Annotated[str, Form()] = "",
-    is_just_do_it: Annotated[str | None, Form()] = None,
+    duration: Annotated[str | None, Form()] = None,
 ) -> JSONResponse:
     payload = _task_edit_form_payload(
         title=title,
@@ -8131,8 +8235,16 @@ def edit_task_optimistic_web(
         duration=duration,
         is_just_do_it=is_just_do_it,
     )
-    background_tasks.add_task(_save_task_detail_background, task_id, payload)
-    return JSONResponse({"ok": True, "accepted": True})
+    try:
+        _update_task_detail(task_id, payload)
+    except Exception as exc:
+        print(f"[Task Edit Optimistic] Save failed for {task_id}:", exc)
+        return JSONResponse(
+            {"ok": False, "error": _task_save_user_error()},
+            status_code=502,
+        )
+
+    return JSONResponse({"ok": True})
 
 
 @app.post("/tasks/{task_id}/breakdown/request")

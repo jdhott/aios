@@ -278,6 +278,48 @@ Possible later refinements:
 
 Search is considered complete for now.
 
+### UX polish and feedback consistency
+
+**Status:** Active — task save feedback shipped locally August 21, 2026; remaining
+items queued after normal-use observation.
+
+The dashboard and focus loop are the most polished surfaces. Task detail, projects,
+reviews, and journal are capable but uneven in async feedback, optimistic
+interaction, and human-readable labels.
+
+#### Implemented (August 21, 2026)
+
+-   **Task edit save feedback (v4)** — Save waits for a confirmed API write via
+    `/edit-optimistic`, shows **Saving…** on the button, surfaces inline errors on
+    failure, and displays a **Task saved.** flash on return (including
+    `history.back()` via `sessionStorage`).
+
+#### Next opportunities (priority order)
+
+1.  **Focus context loading feedback** — wire existing `showFocusUpdating()` or
+    fetch + poll when submitting context coaching forms.
+2.  **Empty-state copy fixes** — dashboard “No matching tasks” when no search;
+    reviews “All caught up” when both queues are empty.
+3.  **Review resolution confirmation** — brief success toast/banner after
+    accepting or dismissing a review card.
+4.  **Journal summary polling** — auto-refresh pending daily summary on today’s
+    journal page.
+5.  **Project name on task detail** — replace raw Project ID; optional project
+    picker on create/edit.
+6.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+7.  **Preserve form data on errors** — create-task and dashboard Brain Dump
+    failures should keep user input.
+8.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+    query-param notices.
+9.  **Hide or collapse BNA Rank/Score** for normal daily use.
+
+#### UX principles
+
+-   One feedback language across surfaces: saving, success, error, pending, timeout.
+-   Optimistic interaction wherever the user acts frequently.
+-   Progressive disclosure for technical metadata (rank, score, raw IDs).
+-   Do not wait for SSE to fix silent failures or misleading empty states.
+
 ### Real-time UI updates (Server-Sent Events)
 
 **Status:** Partially implemented (JSON polling); SSE planned as Phase 3.
@@ -415,30 +457,77 @@ should be a thin client over the same Supabase/API architecture.
 
 ### AI usage / credit efficiency
 
-**Parking lot — review after the current testing-heavy period.**
+**Status:** Active — first optimizations shipped August 21, 2026; observe in
+normal use for at least a few days before the next pass.
 
-AIOS is making greater use of AI and development testing may be inflating
-current credit consumption. Before optimizing, instrument and understand normal
-usage.
+All live model calls run through the Cloud Run processor (`run_aios.py`) using
+OpenAI `gpt-4.1-mini`. The web app and API enqueue processor runs; they do not
+call models directly.
 
-Review each AI call for:
+#### Implemented (August 21, 2026)
 
--   Frequency.
--   Trigger.
--   Cost.
--   User value.
--   Whether inputs materially changed since the previous call.
+-   **Project work generation cache** — automatic project-work proposals store a
+    `work_proposals_generation_key` fingerprint (outcome, context, work lists,
+    activation history, proposal feedback). Unchanged inputs reuse existing
+    proposals instead of calling generate + validate again. Manual **Generate
+    work**, feedback/retry, and material project changes still trigger fresh AI.
+-   **Light maintenance runs** — when the inbox is empty, the pipeline did no
+    meaningful work this run, and no pending AI queues exist (breakdown,
+    focus-context coaching, project-work dialogue), the processor skips heavy
+    maintenance: project candidate detector and automatic project-work refresh.
+    Execution ranking, focus activation (when needed), and daily summary
+    (fingerprint-cached) still run.
+-   **Scheduled processor throttling** — Cloud Scheduler reduced from every 15
+    minutes to every 30 minutes (5am–8pm Toronto), plus the existing 9pm run.
 
-Look for simple, general reductions:
+Override env vars for debugging: `AIOS_FORCE_HEAVY_MAINTENANCE`,
+`AIOS_SKIP_HEAVY_MAINTENANCE`.
 
--   Better caching.
--   Avoiding regeneration when inputs have not materially changed.
--   Deduplicating equivalent calls.
--   Event-driven generation instead of running on every processor pass.
+#### Next opportunities (after observation period)
+
+Review processor logs and OpenAI usage after a few days of normal use. If spend
+is still higher than desired, consider these in rough priority order:
+
+1.  **Existing-task project discovery throttling** — `run_existing_task_project_discovery`
+    can invoke a large batch AI call (`ask_ai_existing_project_clusters`) on
+    every heavy processor run when ≥2 unprojected open tasks exist. Options:
+    run at most once per day, or only when the unprojected-task fingerprint
+    changes. Interim toggle: `RUN_EXISTING_TASK_PROJECT_DISCOVERY=false`.
+2.  **Instrument AI call counts** — add a per-run tally in processor logs
+    (calls by category: inbox, duplicate, project work, focus, etc.) so
+    before/after savings are visible without guessing from OpenAI dashboards.
+3.  **Merge inbox title-prep calls** — `prepare_task_title` can chain up to
+    three sequential calls (noun rewrite, hard rewrite, soft rewrite). Consider
+    one structured JSON call when rule-based prep is insufficient.
+4.  **Merge clarification route + suggestions** — clarify-routed tasks may hit
+    `ask_ai_clarification_route` and `generate_clarification_suggestions`
+    separately; combine when rule-based routing is not already confident.
+5.  **Batch duplicate detection** — `judge_duplicate` runs per inbox item with
+    lexical candidates; batch multiple new titles in one run when several
+    captures arrive together.
+6.  **Project work generate + validate** — two calls per generation by design
+    (fail-closed grounding). Consider a single-call path for low-stakes automatic
+    gap-filling only; keep the two-call path for manual generation.
+7.  **Focus guidance vs activation overlap** — review whether legacy
+    `ensure_focus_guidance` is still needed now that activation children are
+    canonical; guidance is fingerprint-cached but may be redundant on BNA change.
+
+#### Principles (unchanged)
+
+Before optimizing further, prefer simple, general reductions:
+
+-   Better caching and fingerprinting when inputs have not materially changed.
+-   Event-driven or state-driven generation instead of running on every
+    processor pass.
 -   Consolidating calls where doing so does not reduce quality.
+-   Throttling or scheduling heavy batch passes (project discovery) separately
+    from inbox-driven work.
 
 Preserve high-value AI behavior such as context coaching rather than optimizing
 credits blindly. Prefer simple general reductions over new special-case logic.
+
+Do not start the next item until normal use after the August 21 changes shows
+whether further reduction is still needed.
 
 ### Execution intelligence
 
@@ -504,9 +593,13 @@ sequence is:
 6.  Validate async UI polling (dashboard, breakdown, project work,
     reviews) in normal use.
 7.  Design Recurring Tasks before implementation.
-8.  Consider SSE (Phase 3) only if polling validation shows latency or
+8.  Observe AI spend optimizations in normal use for a few days; revisit
+    **AI usage / credit efficiency** next opportunities if needed.
+9.  Continue **UX polish and feedback consistency** — focus context loading
+    feedback and empty-state copy fixes are next after task save feedback.
+10. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
-9.  Choose subsequent improvements based on actual AIOS usage rather
+11. Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
 
 ------------------------------------------------------------------------
@@ -532,6 +625,9 @@ Recent milestones that materially changed the architecture:
 -   Dashboard async UI: focus-card and task-list JSON polling; undo
     sync; breakdown, project work, and review pending-fragment polling
     (Phases 1--2b).
+-   AI spend optimizations: project-work generation fingerprint cache,
+    processor light-maintenance gating, and 30-minute scheduled processor
+    cadence (August 21, 2026).
 
 ------------------------------------------------------------------------
 
