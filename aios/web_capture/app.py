@@ -45,7 +45,7 @@ WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
 WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.7"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -1037,26 +1037,20 @@ def _brain_dump_sheet_script() -> str:
         return sentenceCaseBulletLine(normalized);
       }).join("\\n");
 
-    const applySentenceCaseAtCursor = (element) => {
-      const value = element.value;
-      const cursor = element.selectionStart;
-      const lines = value.split("\\n");
-      let offset = 0;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineStart = offset;
-        const lineEnd = offset + line.length;
-        if (cursor >= lineStart && cursor <= lineEnd) {
-          const updated = sentenceCaseBulletLine(line);
-          if (updated !== line) {
-            lines[i] = updated;
-            element.value = lines.join("\\n");
-            element.selectionStart = element.selectionEnd = cursor;
-          }
-          break;
-        }
-        offset = lineEnd + 1;
+    const syncDraftNormalization = () => {
+      const cursor = box.selectionStart;
+      const normalized = normalizeBullets(box.value);
+      if (normalized !== box.value) {
+        box.value = normalized;
+        box.selectionStart = box.selectionEnd = Math.min(cursor, box.value.length);
       }
+      localStorage.setItem(DRAFT_KEY, box.value);
+      syncClearButton();
+    };
+
+    const persistDraftInput = () => {
+      localStorage.setItem(DRAFT_KEY, box.value);
+      syncClearButton();
     };
 
     const readDraft = () => {
@@ -1142,31 +1136,13 @@ def _brain_dump_sheet_script() -> str:
       }
     });
 
-    box?.addEventListener("compositionstart", () => {{
-      box.dataset.composing = "1";
+    box?.addEventListener("input", () => {{
+      persistDraftInput();
     }});
 
-    box?.addEventListener("compositionend", () => {{
-      delete box.dataset.composing;
-      applySentenceCaseAtCursor(box);
-      localStorage.setItem(DRAFT_KEY, box.value);
-      syncClearButton();
+    box?.addEventListener("blur", () => {{
+      syncDraftNormalization();
     }});
-
-    box?.addEventListener("input", (event) => {
-      localStorage.setItem(DRAFT_KEY, box.value);
-      if (
-        box.dataset.composing === "1" ||
-        event.isComposing ||
-        /Composition|Dictation|Handwriting/i.test(String(event.inputType || ""))
-      ) {{
-        syncClearButton();
-        return;
-      }}
-      applySentenceCaseAtCursor(box);
-      localStorage.setItem(DRAFT_KEY, box.value);
-      syncClearButton();
-    });
 
     box?.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -1189,6 +1165,8 @@ def _brain_dump_sheet_script() -> str:
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (form.dataset.submitting === "1") return;
+
+      syncDraftNormalization();
 
       const text = normalizeBullets(box.value)
         .split("\\n")
@@ -7978,48 +7956,25 @@ function normalizeBullets(value){
   }).join("\n");
 }
 
-function applySentenceCaseAtCursor(element){
-  const value=element.value;
-  const cursor=element.selectionStart;
-  const lines=value.split("\n");
-  let offset=0;
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    const lineStart=offset;
-    const lineEnd=offset+line.length;
-    if(cursor>=lineStart && cursor<=lineEnd){
-      const updated=sentenceCaseBulletLine(line);
-      if(updated!==line){
-        lines[i]=updated;
-        element.value=lines.join("\n");
-        element.selectionStart=element.selectionEnd=cursor;
-      }
-      break;
-    }
-    offset=lineEnd+1;
-  }
-}
-
 const savedDraft=localStorage.getItem(key)||"";
 box.value=savedDraft ? normalizeBullets(savedDraft) : "• ";
 
-box.addEventListener("compositionstart",()=>{ box.dataset.composing="1"; });
-box.addEventListener("compositionend",()=>{
-  delete box.dataset.composing;
-  applySentenceCaseAtCursor(box);
+const syncDraftNormalization=()=>{
+  const cursor=box.selectionStart;
+  const normalized=normalizeBullets(box.value);
+  if(normalized!==box.value){
+    box.value=normalized;
+    box.selectionStart=box.selectionEnd=Math.min(cursor,box.value.length);
+  }
+  localStorage.setItem(key,box.value);
+};
+
+box.addEventListener("input",()=>{
   localStorage.setItem(key,box.value);
 });
-box.addEventListener("input",(event)=>{
-  localStorage.setItem(key,box.value);
-  if(
-    box.dataset.composing==="1" ||
-    event.isComposing ||
-    /Composition|Dictation|Handwriting/i.test(String(event.inputType||""))
-  ){
-    return;
-  }
-  applySentenceCaseAtCursor(box);
-  localStorage.setItem(key,box.value);
+
+box.addEventListener("blur",()=>{
+  syncDraftNormalization();
 });
 
 box.addEventListener("keydown",e=>{
@@ -8044,6 +7999,8 @@ box.addEventListener("keydown",e=>{
 
 form.addEventListener("submit",async e=>{
   e.preventDefault();
+
+  syncDraftNormalization();
 
   const text=normalizeBullets(box.value)
     .split("\n")
