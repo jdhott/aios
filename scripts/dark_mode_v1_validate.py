@@ -7,7 +7,9 @@ web = (root / "aios/web_capture/app.py").read_text()
 ast.parse(web)
 
 checks = [
-    ("web marker", 'WEB_DARK_MODE_VERSION = "dark-mode-v1"' in web),
+    ("web marker", 'WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"' in web),
+    ("warm paper token", '--paper: #121110;' in web),
+    ("warm focus yellow", '--focus-yellow: #FFC93C;' in web and "_DARK_DESIGN_TOKENS" in web),
     ("dark tokens block", "_DARK_DESIGN_TOKENS" in web),
     ("system dark media query", '@media (prefers-color-scheme: dark)' in web),
     ("manual dark override", ':root[data-theme="dark"]' in web),

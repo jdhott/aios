@@ -42,7 +42,7 @@ WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v3"
-WEB_DARK_MODE_VERSION = "dark-mode-v1"
+WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
 app = FastAPI(
@@ -132,36 +132,37 @@ def _safe_login_next(value: str | None) -> str:
 
 
 _DARK_DESIGN_TOKENS = """
-      --navy: #9fc2d8;
-      --ink: #edf2f2;
-      --muted: #aab6bb;
-      --paper: #111719;
-      --surface: #182126;
-      --border: #34434a;
-      --focus-yellow: #d4a832;
-      --focus-bg: #2a2618;
-      --accent-soft: rgba(159, 194, 216, 0.10);
-      --highlight: #1e282d;
-      --success: #1a2a22;
-      --error: #2a1e1c;
-      --ok: #8bd3a8;
-      --shadow: 0 4px 24px rgba(0, 0, 0, 0.28);
-      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.36);
-      --nav-bg: rgba(24, 33, 38, 0.96);
-      --nav-border: rgba(159, 194, 216, 0.12);
-      --nav-shadow: 0 16px 48px rgba(0, 0, 0, 0.38);
-      --nav-add-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
-      --focus-ring: rgba(159, 194, 216, 0.35);
-      --focus-ring-shadow: rgba(159, 194, 216, 0.14);
-      --check-border: rgba(159, 194, 216, 0.35);
-      --check-border-hover: rgba(159, 194, 216, 0.65);
-      --check-glow: rgba(159, 194, 216, 0.14);
-      --button-hover: #243038;
-      --row-hover: #1a2328;
-      --menu-hover: #243038;
-      --toast-error: #4a2828;
-      --theme-color: #182126;
-      --focus-card-glow: rgba(212, 168, 50, 0.22);
+      --navy: #5A7382;
+      --ink: #EEEBE4;
+      --muted: #8E8880;
+      --paper: #121110;
+      --surface: #1A1917;
+      --border: #2E2B28;
+      --focus-yellow: #FFC93C;
+      --focus-bg: #2A2418;
+      --accent-soft: rgba(240, 237, 230, 0.06);
+      --highlight: #242220;
+      --success: #1E2A22;
+      --error: #2A1E1C;
+      --ok: #6BB892;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.32);
+      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.42);
+      --nav-bg: rgba(26, 25, 23, 0.96);
+      --nav-border: rgba(240, 237, 230, 0.08);
+      --nav-shadow: 0 16px 48px rgba(0, 0, 0, 0.44);
+      --nav-add-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
+      --focus-ring: rgba(240, 237, 230, 0.28);
+      --focus-ring-shadow: rgba(240, 237, 230, 0.10);
+      --check-border: rgba(240, 237, 230, 0.22);
+      --check-border-hover: rgba(255, 201, 60, 0.55);
+      --check-glow: rgba(255, 201, 60, 0.12);
+      --button-hover: #242220;
+      --row-hover: #1F1E1C;
+      --menu-hover: #242220;
+      --on-accent: #F7F6F1;
+      --toast-error: #4A2828;
+      --theme-color: #1A1917;
+      --focus-card-glow: rgba(255, 201, 60, 0.16);
 """
 
 
@@ -173,7 +174,7 @@ def _theme_meta_tags() -> str:
     return """
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#264155" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#182126" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#1A1917" media="(prefers-color-scheme: dark)">
 """
 
 
@@ -211,7 +212,12 @@ def _theme_toggle_script() -> str:
       if (persist) localStorage.removeItem(STORAGE_KEY);
     }
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      button.textContent = "Appearance: " + themeLabel(mode);
+      const value = button.querySelector(".theme-toggle-value");
+      if (value) {
+        value.textContent = themeLabel(mode);
+      } else {
+        button.textContent = "Appearance: " + themeLabel(mode);
+      }
     });
   }
 
@@ -283,6 +289,22 @@ def _mobile_design_tokens() -> str:
     }}
     :root[data-theme="light"] {{
       color-scheme: light;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root:not([data-theme="light"]) h1,
+      :root:not([data-theme="light"]) h2,
+      :root:not([data-theme="light"]) h3,
+      :root:not([data-theme="light"]) .brand,
+      :root:not([data-theme="light"]) .card-title {{
+        color: var(--ink);
+      }}
+    }}
+    :root[data-theme="dark"] h1,
+    :root[data-theme="dark"] h2,
+    :root[data-theme="dark"] h3,
+    :root[data-theme="dark"] .brand,
+    :root[data-theme="dark"] .card-title {{
+      color: var(--ink);
     }}
     """
 
@@ -618,7 +640,9 @@ def _bottom_nav_css() -> str:
       position: absolute;
       right: 0;
       bottom: calc(100% + 10px);
-      min-width: 196px;
+      min-width: 252px;
+      width: max-content;
+      max-width: min(280px, calc(100vw - 24px));
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: var(--radius-2xl);
@@ -641,6 +665,33 @@ def _bottom_nav_css() -> str:
       font-size: 0.92rem;
       font-weight: 600;
       cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      text-align: left;
+    }
+    .bottom-nav-sheet .theme-toggle-row {
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .bottom-nav-sheet .theme-toggle-value {
+      color: var(--muted);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .bottom-nav-sheet-divider {
+      height: 1px;
+      margin: 6px 8px;
+      background: var(--border);
+    }
+    .bottom-nav-sheet .sign-out-form {
+      margin: 0;
+    }
+    .bottom-nav-sheet .sign-out-button {
+      color: var(--muted);
+    }
+    .bottom-nav-sheet .sign-out-button:hover,
+    .bottom-nav-sheet .sign-out-button:focus-visible {
+      color: var(--ink);
     }
     .bottom-nav-sheet a:hover,
     .bottom-nav-sheet button:hover {
@@ -785,11 +836,17 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
         <span class="nav-label">More</span>
       </summary>
       <div class="bottom-nav-sheet">
-        <button type="button" data-theme-toggle>Appearance: System</button>
+        <button type="button" class="theme-toggle-row" data-theme-toggle aria-label="Cycle appearance">
+          <span>Appearance</span>
+          <span class="theme-toggle-value">System</span>
+        </button>
         <a href="/about">About</a>
         <a href="/work-patterns">Work Patterns</a>
         <a href="/journal">Journal</a>
-        <form method="post" action="/logout"><button type="submit">Sign Out</button></form>
+        <div class="bottom-nav-sheet-divider" role="presentation"></div>
+        <form class="sign-out-form" method="post" action="/logout">
+          <button class="sign-out-button" type="submit">Sign Out</button>
+        </form>
       </div>
     </details>
   </nav>
@@ -6809,6 +6866,18 @@ button{
   font-size:.82rem;
   font-weight:600;
 }
+.theme-toggle-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  width:100%;
+}
+.theme-toggle-value{
+  color:var(--muted);
+  font-weight:600;
+  white-space:nowrap;
+}
 button:disabled{opacity:.55}
 .status{
   min-height:1.3em;
@@ -6859,7 +6928,10 @@ button:disabled{opacity:.55}
 
       <div class="card-footer">
         <button id="captureButton" type="submit">Capture</button>
-        <button type="button" class="theme-toggle" data-theme-toggle>Appearance: System</button>
+        <button type="button" class="theme-toggle theme-toggle-row" data-theme-toggle aria-label="Cycle appearance">
+          <span>Appearance</span>
+          <span class="theme-toggle-value">System</span>
+        </button>
         <div class="hint">⌘/Ctrl + Enter</div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </div>
