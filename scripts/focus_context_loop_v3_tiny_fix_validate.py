@@ -6,7 +6,8 @@ assert 'class="focus-autoexpand" name="context"' in s or 'name="context"' in s a
 assert "Use my answer</button>" in s
 assert "function resizeFocusTextarea" in s
 assert ".focus-context-spinner {{" in s
-assert "window.location.reload(), 2500" in s
+assert "/api/focus-card" in s
+assert "startFocusPolling" in s
 
 print("PASS: answer textarea auto-expands")
 print("PASS: answer text uses normal-weight class")

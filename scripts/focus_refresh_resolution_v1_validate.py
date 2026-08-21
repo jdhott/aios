@@ -6,7 +6,7 @@ web = Path('aios/web_capture/app.py').read_text()
 checks = [
     ('activation history no longer implies pending', 'task["activation_pending"] = False\n            task["activation_history_exists"] = bool(activation_history)' in api),
     ('activation history exposed separately', 'task["activation_history_exists"] = True' in api),
-    ('refresh state is bounded', 'if (count < 15)' in web and 'url.searchParams.delete("refresh_focus")' in web),
+    ('refresh state is bounded', 'maxAttempts' in web and 'aios-focus-activation-refresh-count' in web and 'url.searchParams.delete("refresh_focus")' in web),
     ('refresh resolves to focus card', '+ "#focus-card"' in web),
     ('start-here pending has spinner', '<span class="mini-spinner"></span> Finding your next step…' in web),
     ('stale starter suppressed after activation history', 'elif activation_pending or activation_history_exists:' in web),

@@ -18,9 +18,9 @@ html = _page(
 assert "Updating your focus" in html
 print("Missing-focus transition renders: PASS")
 
-assert "setTimeout" in html
-assert "2000" in html
-assert "count < 10" in html
+assert "startFocusPolling" in html
+assert "__AIOS_FOCUS_POLL__" in html
+assert '"maxAttempts": 15' in html
 print("Missing-focus transition polls safely: PASS")
 
 
@@ -46,7 +46,7 @@ assert "Finding your next step" in html
 assert "STALE GUIDANCE" not in html
 print("Returned-focus child wait renders: PASS")
 
-assert "setTimeout" in html
+assert "startFocusPolling" in html or "__AIOS_FOCUS_POLL__" in html
 print("Returned-focus child wait continues polling: PASS")
 
 

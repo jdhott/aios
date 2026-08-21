@@ -17,7 +17,7 @@ print("PASS: Undo restores authoritative open state")
 assert 'event.preventDefault();' in web
 assert 'showOptimisticToast(state)' in web
 assert 'window.setTimeout(() => finishOptimisticWindow(state), 8000)' in web
-assert 'window.location.href = "/?refresh_focus=1#focus-card"' in web
+assert "startFocusPolling({{ refreshFocus: true }})" in web
 print("PASS: dashboard updates immediately and preserves an Undo window")
 print("PASS: BNA reconciliation waits until the Undo window closes")
 print("RESULT: OPTIMISTIC COMPLETE V1 SMOKE TEST PASSED")

@@ -28,6 +28,7 @@ WEB_TASKS_VERSION = "aios-web-tasks-v1-read-only"
 WEB_TASK_ACTION_UI_VERSION = "aios-web-tasks-v1.2-checkbox-trash"
 WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
+WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
 WEB_DASHBOARD_UI_VERSION = "dashboard-v1.4-compact-capture-toggle"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
@@ -128,19 +129,23 @@ def _mobile_design_tokens() -> str:
     return """
     :root {
       color-scheme: light;
-      --paper: #FAFAF8;
-      --ink: #2C2C2C;
-      --charcoal: #1A1A1A;
-      --muted: #6B6B6B;
-      --border: rgba(44, 44, 44, 0.10);
-      --card: #FFFFFF;
-      --accent: #2C2C2C;
-      --accent-soft: rgba(44, 44, 44, 0.06);
-      --highlight: #F3F2EF;
+      --navy: #264155;
+      --ink: #25333D;
+      --muted: #687780;
+      --paper: #F7F6F1;
+      --surface: #FFFFFF;
+      --border: #D9DDDC;
+      --focus-yellow: #FFC93C;
+      --focus-bg: #FFF8DC;
+      --charcoal: var(--navy);
+      --card: var(--surface);
+      --accent: var(--navy);
+      --accent-soft: rgba(38, 65, 85, 0.08);
+      --highlight: #F0EFEA;
       --success: #EEF6F0;
       --error: #FAEFED;
-      --shadow: 0 4px 24px rgba(26, 26, 26, 0.06);
-      --shadow-lg: 0 12px 40px rgba(26, 26, 26, 0.08);
+      --shadow: 0 4px 24px rgba(38, 65, 85, 0.08);
+      --shadow-lg: 0 12px 40px rgba(38, 65, 85, 0.12);
       --radius-2xl: 20px;
       --line-body: 1.7;
       --line-relaxed: 1.85;
@@ -166,9 +171,9 @@ def _bottom_nav_css() -> str:
       background: rgba(255, 255, 255, 0.96);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(44, 44, 44, 0.08);
+      border: 1px solid rgba(38, 65, 85, 0.10);
       border-radius: 28px;
-      box-shadow: 0 16px 48px rgba(26, 26, 26, 0.12);
+      box-shadow: 0 16px 48px rgba(38, 65, 85, 0.14);
     }
     .bottom-nav-item {
       position: relative;
@@ -216,7 +221,7 @@ def _bottom_nav_css() -> str:
       background: var(--charcoal);
       color: var(--paper);
       text-decoration: none;
-      box-shadow: 0 10px 28px rgba(26, 26, 26, 0.24);
+      box-shadow: 0 10px 28px rgba(38, 65, 85, 0.22);
     }
     .bottom-nav-add .nav-icon {
       font-size: 1.65rem;
@@ -224,7 +229,7 @@ def _bottom_nav_css() -> str:
       font-weight: 300;
     }
     .bottom-nav-add.active {
-      outline: 3px solid rgba(44, 44, 44, 0.14);
+      outline: 3px solid rgba(255, 201, 60, 0.45);
     }
     .nav-badge {
       position: absolute;
@@ -411,7 +416,7 @@ def _login_page(next_url: str = "/", error: str = "") -> str:
     )
     return f'''<!doctype html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>Sign in · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -919,7 +924,7 @@ def _task_detail_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>AIOS Task</title>
 <style>
 {_mobile_shell_css()}
@@ -1285,7 +1290,7 @@ def _pattern_rows(steps: list[dict]) -> str:
     return ''.join('<div class="pattern-row" draggable="true"><button class="drag" type="button">☷</button><div><input name="step_title" required value="'+html.escape(str(s.get("title") or ""),quote=True)+'" placeholder="Task title"><input name="step_context" value="'+html.escape(str(s.get("context") or ""),quote=True)+'" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button></div>' for s in steps)
 
 def _pattern_shell(title: str, body: str, *, nav_active: str = "more") -> str:
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1A1A1A"><title>{html.escape(title)} · AIOS</title><style>{_mobile_shell_css()}
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#264155"><title>{html.escape(title)} · AIOS</title><style>{_mobile_shell_css()}
 .card,.pattern-row{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-2xl);box-shadow:var(--shadow)}}
 .card{{padding:24px 22px;margin:0 0 20px;line-height:var(--line-relaxed)}}
 .pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:10px;padding:12px;margin:10px 0}}
@@ -1691,7 +1696,7 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>AIOS Projects</title>
 <style>
 {_mobile_shell_css()}
@@ -2015,7 +2020,7 @@ sessionStorage.removeItem("aios-project-proposal-refresh-count");
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>{name} · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -2409,7 +2414,7 @@ def _possible_duplicate_new_task_page(review: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>AIOS New Task Review</title>
 <style>
 {_mobile_shell_css()}
@@ -2998,7 +3003,7 @@ sessionStorage.removeItem(
 <meta charset="utf-8">
 <meta name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>AIOS Review</title>
 <style>
 {_mobile_shell_css()}
@@ -3519,7 +3524,7 @@ def _create_task_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>New Task · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -3632,6 +3637,275 @@ button {{
 {_bottom_nav_html(active="new")}
 </body>
 </html>"""
+
+
+def _focus_card_fingerprint(focus: dict | None, *, refresh_focus: bool) -> str:
+    if not focus:
+        return "pending-no-focus" if refresh_focus else "none"
+    activation = dict(focus.get("activation") or {})
+    parts = [
+        str(focus.get("id") or ""),
+        str(activation.get("id") or ""),
+        str(activation.get("title") or ""),
+        str(activation.get("activation_disposition") or ""),
+        str(focus.get("focus_context_help_state") or ""),
+        str(focus.get("focus_context_draft") or "")[:120],
+        str(focus.get("focus_context_question") or "")[:120],
+        str(focus.get("title") or ""),
+        str(focus.get("starter_step") or ""),
+        str(focus.get("starter_minutes") or ""),
+        "refresh" if refresh_focus else "",
+    ]
+    return "|".join(parts)
+
+
+def _focus_card_pending(focus: dict | None, *, refresh_focus: bool) -> bool:
+    if not focus:
+        return bool(refresh_focus)
+
+    context_pending = str(focus.get("focus_context_help_state") or "") in {
+        "pending",
+        "answer_pending",
+    }
+    if context_pending:
+        return True
+
+    if not refresh_focus:
+        return False
+
+    activation = dict(focus.get("activation") or {})
+    activation_id = str(activation.get("id") or "")
+    if activation_id:
+        return False
+
+    # refresh_focus with a focus task but no activation child yet — keep
+    # polling until the processor publishes a new Start Here step.
+    return True
+
+
+def _focus_card_view(
+    focus: dict | None,
+    *,
+    refresh_focus: bool = False,
+) -> dict[str, object]:
+    activation = dict(focus.get("activation") or {}) if focus else {}
+    activation_id = str(activation.get("id") or "")
+    activation_history_exists = bool(
+        focus.get("activation_history_exists")
+        if focus
+        else False
+    )
+    refresh_pending = bool(refresh_focus and not focus)
+    focus_id = str(focus.get("id") or "") if focus else ""
+    focus_card = ""
+
+    focus_parent_meta = ""
+    if focus:
+        focus_parent_id = str(focus.get("parent_task_id") or "").strip()
+        focus_parent_title = str(focus.get("parent_title") or "").strip()
+        if focus_parent_id and focus_parent_title:
+            focus_parent_meta = (
+                '<div class="focus-parent-meta">Part of: '
+                f'<a href="/tasks/{html.escape(focus_parent_id, quote=True)}">{html.escape(focus_parent_title)}</a>'
+                '</div>'
+            )
+
+    if refresh_pending:
+        focus_card = (
+            '<section class="focus-card" id="focus-card">'
+            '<div class="focus-label">⭐ Best Next Action</div>'
+            '<div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>'
+            '</section>'
+        )
+
+    if focus and not refresh_pending:
+        safe_id = html.escape(focus_id)
+        title = html.escape(str(focus.get("title") or "Untitled task"))
+        focus_context = str(focus.get("context") or "").strip()
+        focus_context_state = str(focus.get("focus_context_help_state") or "").strip()
+        focus_context_draft = str(focus.get("focus_context_draft") or "").strip()
+        focus_context_question = str(focus.get("focus_context_question") or "").strip()
+        meta = []
+        if focus.get("execution_rank") is not None:
+            meta.append(f"Rank {html.escape(str(focus.get('execution_rank')))}")
+        if focus.get("execution_score") is not None:
+            meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
+        if focus.get("importance"):
+            meta.append(html.escape(str(focus.get("importance"))))
+
+        activation_title = str(activation.get("title") or "").strip()
+        activation_disposition = str(activation.get("activation_disposition") or "").strip()
+        activation_not_useful = activation_disposition == "not_useful"
+        activation_pending = bool(focus.get("activation_pending"))
+
+        if activation_title:
+            starter = activation_title
+        elif activation_pending or activation_history_exists:
+            starter = ""
+        elif refresh_focus and not activation_id:
+            starter = ""
+        else:
+            starter = str(focus.get("starter_step") or "").strip()
+
+        activation_duration = str(activation.get("duration") or "").strip()
+        if activation_pending:
+            timebox_text = ""
+        elif activation_duration:
+            timebox_text = activation_duration
+        else:
+            legacy_minutes = focus.get("starter_minutes")
+            timebox_text = (
+                f"{legacy_minutes} min"
+                if legacy_minutes
+                else ""
+            )
+
+        focus_step_actions_html = (
+            '<div class="focus-step-actions"><span class="focus-rejected-note">Marked not useful</span></div>'
+            if activation_not_useful
+            else ""
+        )
+
+        timebox_sub_html = (
+            f'<div class="focus-start-sub-line focus-timebox-inline"><strong>Give it {html.escape(timebox_text)}</strong>'
+            '<span> — only for this starting move.</span></div>'
+        ) if timebox_text else ""
+
+        starter_html = ""
+
+        if activation_pending or (refresh_focus and not activation_id):
+            starter_html = (
+                '<div class="focus-start">'
+                '<div class="focus-start-heading">Start here</div>'
+                '<div class="task-title-row">'
+                '<span class="task-check-placeholder" aria-hidden="true"></span>'
+                '<div class="focus-pending">'
+                '<span class="mini-spinner"></span> Finding your next step…'
+                '</div></div></div>'
+            )
+
+        if starter:
+            if activation_id:
+                safe_activation_id = html.escape(activation_id)
+                starter_html = (
+                    '<div class="focus-start">'
+                    '<div class="focus-start-heading">Start here</div>'
+                    '<div class="task-title-row">'
+                    f'<form class="complete-form focus-activation-complete" data-task-id="{safe_activation_id}" method="post" action="/tasks/{safe_activation_id}/complete">'
+                    '<button class="complete-checkbox" type="submit" aria-label="Complete starting step" title="Complete starting step"><span aria-hidden="true"></span></button>'
+                    '</form>'
+                    f'<a class="task-link" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
+                    '</div>'
+                    '<div class="task-sub">'
+                    + (
+                        focus_step_actions_html
+                        if activation_not_useful
+                        else (
+                            '<div class="focus-step-actions">'
+                            f'<form class="focus-not-now-form" method="post" action="/tasks/{safe_activation_id}/not-now">'
+                            '<button class="focus-not-now" type="submit">Not now</button></form>'
+                            f'<form class="focus-not-useful-form" method="post" action="/tasks/{safe_activation_id}/not-useful">'
+                            '<button class="focus-not-useful" type="submit">Not useful</button></form>'
+                            '</div>'
+                        )
+                    )
+                    + timebox_sub_html
+                    + '</div></div>'
+                )
+            else:
+                starter_html = (
+                    '<div class="focus-start">'
+                    '<div class="focus-start-heading">Start here</div>'
+                    '<div class="task-title-row">'
+                    '<span class="task-check-placeholder" aria-hidden="true"></span>'
+                    f'<div class="task-link">{html.escape(starter)}</div>'
+                    '</div>'
+                    + (f'<div class="task-sub">{timebox_sub_html}</div>' if timebox_sub_html else '')
+                    + '</div>'
+                )
+
+        context_value = (
+            focus_context_draft
+            if focus_context_state in {"ready", "answer_pending"}
+            else focus_context
+        )
+        context_summary = "Edit context" if focus_context else "Add context"
+        context_question_html = ""
+        if focus_context_state == "ready" and focus_context_question:
+            context_question_html = (
+                '<div class="focus-context-question"><strong>One useful question:</strong> '
+                + html.escape(focus_context_question)
+                + '</div>'
+                + f'<form class="focus-context-answer-form" method="post" action="/tasks/{safe_id}/focus-context/answer">'
+                + '<label>Your answer<textarea class="focus-autoexpand focus-context-answer" name="answer" rows="2" required placeholder="Type your answer here…"></textarea></label>'
+                + '<button class="focus-context-answer-button" type="submit">Use my answer</button></form>'
+            )
+        context_help_status = (
+            '<div class="focus-context-pending"><span class="mini-spinner"></span> <span class="focus-context-processing"><span class="focus-context-spinner" aria-hidden="true"></span>Improving your context…</span></div>'
+            if focus_context_state in {"pending", "answer_pending"}
+            else ""
+        )
+        context_help_button = (
+            ""
+            if focus_context_state in {"pending", "answer_pending", "ready"}
+            else f'<form method="post" action="/tasks/{safe_id}/focus-context/help"><button class="focus-context-help-button" type="submit">Help me improve this context</button></form>'
+        )
+        focus_context_html = (
+            '<details class="focus-context-panel"'
+            + (' open' if focus_context_state in {"pending", "answer_pending", "ready"} else '')
+            + '>'
+            + f'<summary>{context_summary}</summary><div class="focus-context-body">'
+            + '<p>Tell AIOS what is already decided, what matters, or what would make the next step more relevant.</p>'
+            + context_question_html
+            + context_help_status
+            + f'<form method="post" action="/tasks/{safe_id}/focus-context">'
+            + f'<textarea name="context" rows="4" placeholder="What should AIOS know about this task?" class="focus-autoexpand">{html.escape(context_value)}</textarea>'
+            + '<button class="focus-context-save" type="submit">Save context &amp; refresh Start Here</button></form>'
+            + context_help_button
+            + '</div></details>'
+        )
+
+        meta_html = ""
+        if meta:
+            meta_html = (
+                '<div class="focus-meta">'
+                + "".join(f'<span class="focus-meta-tag">{part}</span>' for part in meta)
+                + "</div>"
+            )
+
+        focus_card = (
+            f'<section class="focus-card surface-card" id="focus-card" data-task-id="{safe_id}">'
+            '<div class="focus-label">⭐ Best Next Action</div>'
+            '<div class="task-title-row focus-parent-title-row">'
+            f'<form class="complete-form focus-parent-complete" data-task-id="{safe_id}" method="post" action="/tasks/{safe_id}/complete">'
+            '<button class="complete-checkbox" type="submit" aria-label="Complete Best Next Action" title="Complete Best Next Action"><span aria-hidden="true"></span></button>'
+            '</form>'
+            f'<a class="task-link" href="/tasks/{safe_id}">{title}</a>'
+            '</div>'
+            '<div class="task-sub focus-parent-sub">'
+            + focus_parent_meta
+            + meta_html
+            + '<div class="focus-action-bar">'
+            + _task_snooze_control_html(
+                focus_id,
+                return_to="/?refresh_focus=1#focus-card",
+                css_class="focus-snooze",
+            )
+            + f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
+            '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
+            + "</div></div>"
+            + starter_html
+            + focus_context_html
+            + '</section>'
+        )
+
+    pending = _focus_card_pending(focus, refresh_focus=refresh_focus)
+    return {
+        "html": focus_card,
+        "pending": pending,
+        "focus_id": focus_id or None,
+        "fingerprint": _focus_card_fingerprint(focus, refresh_focus=refresh_focus),
+    }
 
 
 def _page(
@@ -3849,218 +4123,10 @@ def _page(
             '</div>'
         )
 
-    focus_card = ""
-    focus_id = ""
-
-    activation = (
-        dict(focus.get("activation") or {})
-        if focus
-        else {}
-    )
-    activation_id = str(activation.get("id") or "")
-    activation_history_exists = bool(
-        focus.get("activation_history_exists")
-        if focus
-        else False
-    )
-    # refresh_focus is transient UI state. Historical activation rows are not
-    # proof that generation is still running. If no replacement appears, the
-    # bounded refresh loop below resolves back to the BNA without START HERE.
-    refresh_pending = bool(
-        refresh_focus
-        and (not focus or not activation_id)
-    )
-
-    focus_parent_meta = ""
-    if focus:
-        focus_parent_id = str(focus.get("parent_task_id") or "").strip()
-        focus_parent_title = str(focus.get("parent_title") or "").strip()
-        if focus_parent_id and focus_parent_title:
-            focus_parent_meta = (
-                '<div class="focus-parent-meta">Part of: '
-                f'<a href="/tasks/{html.escape(focus_parent_id, quote=True)}">{html.escape(focus_parent_title)}</a>'
-                '</div>'
-            )
-
-    if refresh_pending:
-        focus_card = (
-            '<section class="focus-card" id="focus-card">'
-            '<div class="focus-label">⭐ Best Next Action</div>'
-            '<div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>'
-            '</section>'
-        )
-
-    if focus and not refresh_pending:
-        focus_id = str(focus.get("id") or "")
-        safe_id = html.escape(focus_id)
-        title = html.escape(str(focus.get("title") or "Untitled task"))
-        focus_context = str(focus.get("context") or "").strip()
-        focus_context_state = str(focus.get("focus_context_help_state") or "").strip()
-        focus_context_draft = str(focus.get("focus_context_draft") or "").strip()
-        focus_context_question = str(focus.get("focus_context_question") or "").strip()
-        meta = []
-        if focus.get("execution_rank") is not None: meta.append(f"Rank {html.escape(str(focus.get('execution_rank')))}")
-        if focus.get("execution_score") is not None: meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
-        if focus.get("importance"): meta.append(html.escape(str(focus.get("importance"))))
-
-        activation_title = str(activation.get("title") or "").strip()
-        activation_disposition = str(activation.get("activation_disposition") or "").strip()
-        activation_not_useful = activation_disposition == "not_useful"
-        activation_pending = bool(focus.get("activation_pending"))
-
-        # Activation child is canonical. Never fall back to stale legacy
-        # guidance while the processor is generating the next activation.
-        if activation_title:
-            starter = activation_title
-        elif activation_pending or activation_history_exists:
-            starter = ""
-        else:
-            starter = str(
-                focus.get("starter_step") or ""
-            ).strip()
-
-        activation_duration = str(activation.get("duration") or "").strip()
-        if activation_pending:
-            timebox_text = ""
-        elif activation_duration:
-            timebox_text = activation_duration
-        else:
-            legacy_minutes = focus.get("starter_minutes")
-            timebox_text = (
-                f"{legacy_minutes} min"
-                if legacy_minutes
-                else ""
-            )
-
-        focus_step_actions_html = (
-            '<div class="focus-step-actions"><span class="focus-rejected-note">Marked not useful</span></div>'
-            if activation_not_useful
-            else ""
-        )
-
-        timebox_sub_html = (
-            f'<div class="focus-start-sub-line focus-timebox-inline"><strong>Give it {html.escape(timebox_text)}</strong>'
-            '<span> — only for this starting move.</span></div>'
-        ) if timebox_text else ""
-
-        starter_html = ""
-
-        if activation_pending:
-            starter_html = (
-                '<div class="focus-start">'
-                '<div class="focus-start-heading">Start here</div>'
-                '<div class="task-title-row">'
-                '<span class="task-check-placeholder" aria-hidden="true"></span>'
-                '<div class="focus-pending">'
-                '<span class="mini-spinner"></span> Finding your next step…'
-                '</div></div></div>'
-            )
-
-        if starter:
-            if activation_id:
-                safe_activation_id = html.escape(activation_id)
-                starter_html = (
-                    '<div class="focus-start">'
-                    '<div class="focus-start-heading">Start here</div>'
-                    '<div class="task-title-row">'
-                    f'<form class="complete-form focus-activation-complete" data-task-id="{safe_activation_id}" method="post" action="/tasks/{safe_activation_id}/complete">'
-                    '<button class="complete-checkbox" type="submit" aria-label="Complete starting step" title="Complete starting step"><span aria-hidden="true"></span></button>'
-                    '</form>'
-                    f'<a class="task-link" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
-                    '</div>'
-                    '<div class="task-sub">'
-                    + (
-                        focus_step_actions_html
-                        if activation_not_useful
-                        else (
-                            '<div class="focus-step-actions">'
-                            f'<form class="focus-not-now-form" method="post" action="/tasks/{safe_activation_id}/not-now">'
-                            '<button class="focus-not-now" type="submit">Not now</button></form>'
-                            f'<form class="focus-not-useful-form" method="post" action="/tasks/{safe_activation_id}/not-useful">'
-                            '<button class="focus-not-useful" type="submit">Not useful</button></form>'
-                            '</div>'
-                        )
-                    )
-                    + timebox_sub_html
-                    + '</div></div>'
-                )
-            else:
-                starter_html = (
-                    '<div class="focus-start">'
-                    '<div class="focus-start-heading">Start here</div>'
-                    '<div class="task-title-row">'
-                    '<span class="task-check-placeholder" aria-hidden="true"></span>'
-                    f'<div class="task-link">{html.escape(starter)}</div>'
-                    '</div>'
-                    + (f'<div class="task-sub">{timebox_sub_html}</div>' if timebox_sub_html else '')
-                    + '</div>'
-                )
-
-        timebox_html = ""
-
-        context_value = focus_context_draft if focus_context_state in {"ready", "answer_pending"} else focus_context
-        context_summary = "Edit context" if focus_context else "Add context"
-        context_question_html = ""
-        if focus_context_state == "ready" and focus_context_question:
-            context_question_html = (
-                '<div class="focus-context-question"><strong>One useful question:</strong> ' + html.escape(focus_context_question) + '</div>'
-                + f'<form class="focus-context-answer-form" method="post" action="/tasks/{safe_id}/focus-context/answer">'
-                + '<label>Your answer<textarea class="focus-autoexpand focus-context-answer" name="answer" rows="2" required placeholder="Type your answer here…"></textarea></label>'
-                + '<button class="focus-context-answer-button" type="submit">Use my answer</button></form>'
-            )
-        context_help_status = (
-            '<div class="focus-context-pending"><span class="mini-spinner"></span> <span class="focus-context-processing"><span class="focus-context-spinner" aria-hidden="true"></span>Improving your context…</span></div>'
-            if focus_context_state in {"pending", "answer_pending"} else ""
-        )
-        context_help_button = (
-            "" if focus_context_state in {"pending", "answer_pending", "ready"} else
-            f'<form method="post" action="/tasks/{safe_id}/focus-context/help"><button class="focus-context-help-button" type="submit">Help me improve this context</button></form>'
-        )
-        focus_context_html = (
-            '<details class="focus-context-panel"' + (' open' if focus_context_state in {"pending", "answer_pending", "ready"} else '') + '>'
-            + f'<summary>{context_summary}</summary><div class="focus-context-body">'
-            + '<p>Tell AIOS what is already decided, what matters, or what would make the next step more relevant.</p>'
-            + context_question_html + context_help_status
-            + f'<form method="post" action="/tasks/{safe_id}/focus-context">'
-            + f'<textarea name="context" rows="4" placeholder="What should AIOS know about this task?" class="focus-autoexpand">{html.escape(context_value)}</textarea>'
-            + '<button class="focus-context-save" type="submit">Save context &amp; refresh Start Here</button></form>'
-            + context_help_button + '</div></details>'
-        )
-
-        meta_html = ""
-        if meta:
-            meta_html = (
-                '<div class="focus-meta">'
-                + "".join(f'<span class="focus-meta-tag">{part}</span>' for part in meta)
-                + "</div>"
-            )
-
-        focus_card = (
-            f'<section class="focus-card surface-card" id="focus-card" data-task-id="{safe_id}">'
-            '<div class="focus-label">⭐ Best Next Action</div>'
-            '<div class="task-title-row focus-parent-title-row">'
-            f'<form class="complete-form focus-parent-complete" data-task-id="{safe_id}" method="post" action="/tasks/{safe_id}/complete">'
-            '<button class="complete-checkbox" type="submit" aria-label="Complete Best Next Action" title="Complete Best Next Action"><span aria-hidden="true"></span></button>'
-            '</form>'
-            f'<a class="task-link" href="/tasks/{safe_id}">{title}</a>'
-            '</div>'
-            '<div class="task-sub focus-parent-sub">'
-            + focus_parent_meta
-            + meta_html
-            + '<div class="focus-action-bar">'
-            + _task_snooze_control_html(
-                focus_id,
-                return_to="/?refresh_focus=1#focus-card",
-                css_class="focus-snooze",
-            )
-            + f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
-            '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
-            + "</div></div>"
-            + starter_html
-            + timebox_html
-            + focus_context_html
-            + '</section>'
-        )
+    focus_view = _focus_card_view(focus, refresh_focus=refresh_focus)
+    focus_card = str(focus_view["html"])
+    refresh_needed = bool(focus_view["pending"])
+    initial_focus_fingerprint = str(focus_view["fingerprint"])
 
     notice = ""
     if message:
@@ -4087,45 +4153,25 @@ function showFocusUpdating() {
 </script>
 """
 
-    pending_refresh_script = ""
-
-    refresh_needed = refresh_pending or bool(focus and str(focus.get("focus_context_help_state") or "") == "pending")
-
-    if refresh_needed:
-        pending_refresh_script = """
-<script>
-(() => {
-  const key = "aios-focus-activation-refresh-count";
-  const count = Number(sessionStorage.getItem(key) || "0");
-  if (count < 15) {
-    sessionStorage.setItem(key, String(count + 1));
-    setTimeout(() => window.location.reload(), 2000);
-    return;
-  }
-
-  sessionStorage.removeItem(key);
-  const url = new URL(window.location.href);
-  url.searchParams.delete("refresh_focus");
-  url.searchParams.delete("message");
-  window.location.replace(
-    url.pathname + (url.search ? url.search : "") + "#focus-card"
-  );
-})();
-</script>
-"""
-    else:
-        pending_refresh_script = """
-<script>
-sessionStorage.removeItem("aios-focus-activation-refresh-count");
-</script>
-"""
+    focus_poll_config = {
+        "enabled": refresh_needed,
+        "refreshFocus": refresh_focus,
+        "initialFocusId": focus_id or None,
+        "initialFingerprint": initial_focus_fingerprint,
+        "maxAttempts": 15,
+    }
+    focus_poll_script = (
+        f"<script>window.__AIOS_FOCUS_POLL__ = {json.dumps(focus_poll_config)};</script>"
+        if refresh_needed
+        else '<script>window.__AIOS_FOCUS_POLL__ = {"enabled": false};sessionStorage.removeItem("aios-focus-activation-refresh-count");</script>'
+    )
 
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1A1A1A">
+  <meta name="theme-color" content="#264155">
   <meta name="application-name" content="AIOS">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -4158,6 +4204,11 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       --task-check:20px;
       --task-check-gap:12px;
       margin:0 0 24px;
+    }}
+    .focus-card.surface-card {{
+      background:var(--focus-bg);
+      border-color:var(--focus-yellow);
+      box-shadow:0 4px 24px rgba(255, 201, 60, 0.18), var(--shadow);
     }}
     .tasks-section {{
       --task-check:20px;
@@ -4197,20 +4248,20 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .task-title-row .complete-checkbox span {{
       width:var(--task-check);
       height:var(--task-check);
-      border:1.5px solid rgba(26, 26, 26, 0.28);
+      border:1.5px solid rgba(37, 51, 61, 0.32);
       border-radius:50%;
-      background:var(--card);
+      background:var(--surface);
       box-sizing:border-box;
       display:block;
     }}
     .task-title-row .complete-checkbox:hover span,
     .task-title-row .complete-checkbox:focus-visible span {{
-      border-color:rgba(26, 26, 26, 0.52);
+      border-color:rgba(38, 65, 85, 0.58);
       box-shadow:none;
     }}
     .task-title-row .complete-checkbox.is-completing span {{
-      background:var(--charcoal);
-      border-color:var(--charcoal);
+      background:var(--navy);
+      border-color:var(--navy);
     }}
     .task-title-row .complete-checkbox.is-completing span::after {{
       font-size:11px;
@@ -4219,7 +4270,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       flex:1;
       min-width:0;
       display:block;
-      color:var(--charcoal);
+      color:var(--ink);
       text-decoration:none;
       font-size:.9375rem;
       line-height:1.35;
@@ -4242,7 +4293,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     @keyframes dashboard-spin {{ to {{ transform:rotate(360deg); }} }}
     .focus-label {{
       margin-bottom:12px;
-      color:var(--charcoal);
+      color:var(--navy);
       font-size:.72rem;
       font-weight:700;
       letter-spacing:.06em;
@@ -4308,19 +4359,19 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     .complete-checkbox span {{
       width:22px;
       height:22px;
-      border:2px solid var(--charcoal);
+      border:2px solid var(--navy);
       border-radius:7px;
-      background:var(--card);
+      background:var(--surface);
       display:block;
     }}
     .complete-checkbox:hover span,
     .complete-checkbox:focus-visible span {{
-      border-color:var(--charcoal);
-      box-shadow:0 0 0 3px rgba(44,44,44,.12);
+      border-color:var(--navy);
+      box-shadow:0 0 0 3px rgba(38, 65, 85, 0.12);
     }}
     .complete-checkbox.is-completing span {{
-      background:var(--charcoal);
-      border-color:var(--charcoal);
+      background:var(--navy);
+      border-color:var(--navy);
       position:relative;
     }}
     .complete-checkbox.is-completing span::after {{
@@ -4389,7 +4440,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
     }}
     .focus-start-heading {{
       margin:0 0 12px;
-      color:var(--charcoal);
+      color:var(--navy);
       font-size:1.35rem;
       font-weight:700;
       letter-spacing:-0.015em;
@@ -4776,7 +4827,7 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       align-items:center;
       justify-content:center;
       border-radius:50%;
-      background:rgba(26, 26, 26, 0.12);
+      background:rgba(38, 65, 85, 0.12);
       color:var(--muted);
       font-size:11px;
       font-weight:700;
@@ -4862,9 +4913,6 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         el.addEventListener("input", () => resizeFocusTextarea(el));
       }});
 
-      if (document.querySelector(".focus-context-processing")) {{
-        window.setTimeout(() => window.location.reload(), 2500);
-      }}
       const scrollKey = "aios-task-scroll-y";
 
       const saveScroll = () => {{
@@ -4943,11 +4991,13 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         removeOptimisticToast();
         optimisticCompletion = null;
         if (state.affectsFocus) {{
-          window.location.href = "/?refresh_focus=1#focus-card";
+          startFocusPolling({{ refreshFocus: true }});
         }}
       }};
 
-      document.querySelectorAll(".complete-form").forEach((form) => {{
+      const bindCompleteForm = (form) => {{
+        if (form.dataset.aiosCompleteBound === "1") return;
+        form.dataset.aiosCompleteBound = "1";
         const button = form.querySelector(".complete-checkbox");
         const taskId = form.dataset.taskId || form.action.split("/tasks/")[1]?.split("/")[0] || "";
         if (!button || !taskId) return;
@@ -5021,9 +5071,13 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
             window.setTimeout(removeOptimisticToast, 3000);
           }}
         }});
-      }});
+      }};
 
-      document.querySelectorAll(".delete-form").forEach((form) => {{
+      document.querySelectorAll(".complete-form").forEach(bindCompleteForm);
+
+      const bindDeleteForm = (form) => {{
+        if (form.dataset.aiosDeleteBound === "1") return;
+        form.dataset.aiosDeleteBound = "1";
         form.addEventListener("submit", () => {{
           if (form.closest(".focus-card")) {{
             sessionStorage.removeItem(scrollKey);
@@ -5031,21 +5085,110 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
             saveScroll();
           }}
         }});
-      }});
+      }};
 
-      document.querySelectorAll(".task-snooze-menu form").forEach((form) => {{
-        form.addEventListener("submit", () => {{
-          if (form.closest(".focus-card")) {{
-            sessionStorage.removeItem(scrollKey);
-          }} else {{
-            saveScroll();
+      document.querySelectorAll(".delete-form").forEach(bindDeleteForm);
+
+      const bindSnoozeForm = (form) => {{
+        if (form.dataset.aiosSnoozeBound === "1") return;
+        form.dataset.aiosSnoozeBound = "1";
+        form.addEventListener("submit", async (event) => {{
+          event.preventDefault();
+
+          const submitter = event.submitter;
+          if (submitter?.dataset.submitting === "1") return;
+          if (submitter) submitter.dataset.submitting = "1";
+
+          const details = form.closest("details");
+          const taskId =
+            details?.closest("[data-task-id]")?.dataset.taskId ||
+            form.action.split("/tasks/")[1]?.split("/")[0] ||
+            "";
+
+          if (!taskId) {{
+            form.submit();
+            return;
+          }}
+
+          const formData = new FormData(form);
+          if (submitter?.name) {{
+            formData.set(submitter.name, submitter.value);
+          }}
+
+          const hiddenNodes = Array.from(
+            document.querySelectorAll(
+              `.task-row[data-task-id="${{CSS.escape(taskId)}}"]`
+            )
+          );
+
+          const projectRow = details?.closest(".project-editor-row");
+          if (projectRow && !hiddenNodes.includes(projectRow)) {{
+            hiddenNodes.push(projectRow);
+          }}
+
+          const focusCard = details?.closest(".focus-card");
+          const focusHtml = focusCard ? focusCard.innerHTML : null;
+
+          hiddenNodes.forEach((node) => {{
+            node.classList.add("optimistic-hidden");
+          }});
+
+          if (focusCard) {{
+            focusCard.innerHTML =
+              '<div class="focus-label">⭐ Best Next Action</div>' +
+              '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+          }}
+
+          if (details) details.open = false;
+
+          try {{
+            const response = await fetch(
+              `/tasks/${{encodeURIComponent(taskId)}}/snooze-optimistic`,
+              {{
+                method: "POST",
+                headers: {{ "X-Requested-With": "fetch" }},
+                body: formData,
+              }}
+            );
+
+            if (!response.ok) throw new Error("Snooze failed");
+
+            if (focusCard) {{
+              startFocusPolling({{
+                refreshFocus: false,
+                previousFocusId: taskId,
+                waitForFocusChange: true,
+              }});
+            }}
+          }} catch (_error) {{
+            hiddenNodes.forEach((node) => {{
+              node.classList.remove("optimistic-hidden");
+            }});
+
+            if (focusCard && focusHtml !== null) {{
+              focusCard.innerHTML = focusHtml;
+              initFocusCard(focusCard);
+            }}
+
+            if (submitter) submitter.dataset.submitting = "0";
+
+            removeOptimisticToast();
+
+            const failed = document.createElement("div");
+            failed.id = "optimisticCompleteToast";
+            failed.className = "optimistic-toast error";
+            failed.textContent = "Task could not be snoozed.";
+            document.body.appendChild(failed);
+
+            window.setTimeout(removeOptimisticToast, 3000);
           }}
         }});
-      }});
+      }};
 
-      const snoozeMenus = Array.from(
-        document.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze")
-      );
+      document.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
+
+      const allSnoozeMenus = () =>
+        Array.from(document.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze"));
 
       const positionSnoozeMenu = (menu) => {{
         const panel = menu.querySelector(".task-snooze-menu");
@@ -5063,25 +5206,189 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         }}
       }};
 
-      snoozeMenus.forEach((menu) => {{
+      const bindSnoozeMenu = (menu) => {{
+        if (menu.dataset.aiosSnoozeMenuBound === "1") return;
+        menu.dataset.aiosSnoozeMenuBound = "1";
         menu.addEventListener("toggle", () => {{
           if (!menu.open) return;
-          snoozeMenus.forEach((other) => {{
+          allSnoozeMenus().forEach((other) => {{
             if (other !== menu) other.open = false;
           }});
           positionSnoozeMenu(menu);
         }});
-      }});
+      }};
+
+      const initFocusTextareas = (root) => {{
+        (root || document).querySelectorAll("textarea.focus-autoexpand").forEach((el) => {{
+          if (el.dataset.aiosTextareaBound === "1") return;
+          el.dataset.aiosTextareaBound = "1";
+          resizeFocusTextarea(el);
+          el.addEventListener("input", () => resizeFocusTextarea(el));
+        }});
+      }};
+
+      const initFocusCard = (root) => {{
+        const card = root || document.getElementById("focus-card");
+        if (!card) return;
+        card.querySelectorAll(".complete-form").forEach(bindCompleteForm);
+        card.querySelectorAll(".delete-form").forEach(bindDeleteForm);
+        card.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
+        card.querySelectorAll("details.task-snooze, details.focus-snooze").forEach(bindSnoozeMenu);
+        initFocusTextareas(card);
+      }};
+
+      const replaceFocusCard = (html) => {{
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = html.trim();
+        const next = wrapper.firstElementChild;
+        if (!next) return null;
+        const existing = document.getElementById("focus-card");
+        if (existing) {{
+          existing.replaceWith(next);
+        }} else {{
+          const anchor = document.querySelector(".tasks-section");
+          if (anchor) {{
+            anchor.parentElement?.insertBefore(next, anchor);
+          }} else {{
+            document.querySelector("main")?.appendChild(next);
+          }}
+        }}
+        initFocusCard(next);
+        return next;
+      }};
+
+      const cleanFocusPollUrl = () => {{
+        const url = new URL(window.location.href);
+        url.searchParams.delete("refresh_focus");
+        url.searchParams.delete("message");
+        const next = url.pathname + (url.search ? url.search : "") + "#focus-card";
+        window.history.replaceState(null, "", next);
+      }};
+
+      let focusPollTimer = null;
+      let focusPollFingerprint = window.__AIOS_FOCUS_POLL__?.initialFingerprint || null;
+
+      const startFocusPolling = (overrides = {{}}) => {{
+        const card = document.getElementById("focus-card");
+        const base = window.__AIOS_FOCUS_POLL__ || {{ enabled: false }};
+        const config = {{
+          ...base,
+          ...overrides,
+          enabled: true,
+          initialFocusId:
+            overrides.initialFocusId
+            ?? base.initialFocusId
+            ?? card?.dataset.taskId
+            ?? null,
+          previousFocusId:
+            overrides.previousFocusId
+            ?? base.previousFocusId
+            ?? null,
+          waitForFocusChange: Boolean(
+            overrides.waitForFocusChange ?? base.waitForFocusChange
+          ),
+          refreshFocus: overrides.refreshFocus ?? base.refreshFocus ?? true,
+          maxAttempts: overrides.maxAttempts || base.maxAttempts || 15,
+        }};
+        if (focusPollTimer) {{
+          window.clearTimeout(focusPollTimer);
+          focusPollTimer = null;
+        }}
+
+        const key = "aios-focus-activation-refresh-count";
+        let attempt = Number(sessionStorage.getItem(key) || "0");
+        let delay = config.waitForFocusChange ? 800 : 2000;
+        const maxDelay = 30000;
+
+        const poll = async () => {{
+          if (attempt >= config.maxAttempts) {{
+            sessionStorage.removeItem(key);
+            cleanFocusPollUrl();
+            focusPollTimer = null;
+            if (config.waitForFocusChange) {{
+              window.location.reload();
+            }}
+            return;
+          }}
+
+          attempt += 1;
+          sessionStorage.setItem(key, String(attempt));
+
+          const url = new URL("/api/focus-card", window.location.origin);
+          if (config.refreshFocus) {{
+            url.searchParams.set("refresh_focus", "1");
+          }}
+
+          try {{
+            const response = await fetch(url.toString(), {{
+              headers: {{ "X-Requested-With": "fetch" }},
+            }});
+            if (!response.ok) throw new Error("Focus poll failed");
+            const data = await response.json();
+
+            const focusChanged = Boolean(
+              config.waitForFocusChange
+              && config.previousFocusId
+              && data.focus_id
+              && data.focus_id !== config.previousFocusId
+            );
+
+            if (
+              !focusChanged
+              && config.initialFocusId
+              && data.focus_id
+              && data.focus_id !== config.initialFocusId
+            ) {{
+              sessionStorage.removeItem(key);
+              const url = new URL(window.location.href);
+              url.searchParams.delete("refresh_focus");
+              url.searchParams.delete("message");
+              window.location.replace(url.pathname + url.search + "#focus-card");
+              return;
+            }}
+
+            if (data.html && (data.fingerprint !== focusPollFingerprint || focusChanged)) {{
+              replaceFocusCard(data.html);
+              focusPollFingerprint = data.fingerprint;
+            }}
+
+            const waitingForFocusChange = Boolean(
+              config.waitForFocusChange
+              && config.previousFocusId
+              && (!data.focus_id || data.focus_id === config.previousFocusId)
+            );
+
+            if (!data.pending && !waitingForFocusChange) {{
+              sessionStorage.removeItem(key);
+              cleanFocusPollUrl();
+              focusPollTimer = null;
+              if (focusChanged) {{
+                window.location.reload();
+              }}
+              return;
+            }}
+          }} catch (_error) {{
+            // Keep polling on transient failures.
+          }}
+
+          delay = Math.min(Math.round(delay * 1.6), maxDelay);
+          focusPollTimer = window.setTimeout(poll, delay);
+        }};
+
+        focusPollTimer = window.setTimeout(poll, delay);
+      }};
+
+      allSnoozeMenus().forEach(bindSnoozeMenu);
 
       document.addEventListener("click", (event) => {{
-        snoozeMenus.forEach((menu) => {{
+        allSnoozeMenus().forEach((menu) => {{
           if (menu.open && !menu.contains(event.target)) menu.open = false;
         }});
       }});
 
       document.addEventListener("keydown", (event) => {{
         if (event.key !== "Escape") return;
-        snoozeMenus.forEach((menu) => {{
+        allSnoozeMenus().forEach((menu) => {{
           if (!menu.open) return;
           menu.open = false;
           const trigger = menu.querySelector("summary");
@@ -5173,10 +5480,14 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       }} else {{
         restoreScroll();
       }}
+
+      if (window.__AIOS_FOCUS_POLL__?.enabled) {{
+        startFocusPolling(window.__AIOS_FOCUS_POLL__);
+      }}
     }})();
   </script>
 {focus_submit_feedback_script}
-{pending_refresh_script}
+{focus_poll_script}
 <script>
 if ("serviceWorker" in navigator) {{
   window.addEventListener("load", () => {{
@@ -5194,7 +5505,7 @@ _MAIN_PWA_MANIFEST = r'''{
   "id": "/", "name": "AIOS", "short_name": "AIOS",
   "description": "AIOS personal task assistant",
   "start_url": "/", "scope": "/", "display": "standalone",
-  "background_color": "#FAFAF8", "theme_color": "#1A1A1A",
+  "background_color": "#F7F6F1", "theme_color": "#264155",
   "icons": [
     {"src":"/pwa/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
     {"src":"/pwa/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
@@ -5220,8 +5531,8 @@ _CAPTURE_PWA_MANIFEST = '''{
   "start_url": "/capture",
   "scope": "/capture",
   "display": "standalone",
-  "background_color": "#FAFAF8",
-  "theme_color": "#1A1A1A",
+  "background_color": "#F7F6F1",
+  "theme_color": "#264155",
   "icons": [
     {"src": "/capture/icon-192.png", "sizes": "192x192", "type": "image/png"},
     {"src": "/capture/icon-512.png", "sizes": "512x512", "type": "image/png"}
@@ -5244,12 +5555,12 @@ def _capture_pwa_page() -> str:
 <style>
 :root{
   color-scheme:light dark;
-  --bg:#f7f7f3;
-  --card:#fff;
-  --ink:#17242d;
+  --bg:#F7F6F1;
+  --card:#FFFFFF;
+  --ink:#25333D;
   --navy:#264155;
-  --muted:#66747d;
-  --border:#d9dedf;
+  --muted:#687780;
+  --border:#D9DDDC;
   --ok:#2d6a4f;
 }
 @media(prefers-color-scheme:dark){
@@ -5650,6 +5961,22 @@ def index(
             review_count=review_count,
         )
     )
+
+
+@app.get("/api/focus-card")
+def focus_card_api(
+    request: Request,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    refresh_focus = request.query_params.get("refresh_focus") == "1"
+    try:
+        focus = _fetch_focus()
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc), "pending": True},
+            status_code=503,
+        )
+    return JSONResponse(_focus_card_view(focus, refresh_focus=refresh_focus))
 
 
 
@@ -6635,6 +6962,24 @@ def cancel_breakdown_web(
     )
 
 
+@app.post("/tasks/{task_id}/snooze-optimistic")
+def snooze_task_optimistic_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    preset: Annotated[str, Form()] = "",
+    custom_date: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    try:
+        result = _snooze_task(task_id, preset, custom_date)
+        return JSONResponse({"ok": True, **result})
+    except Exception as exc:
+        print("[Optimistic Snooze] Save failed:", exc)
+        return JSONResponse(
+            {"ok": False, "detail": "Task could not be snoozed."},
+            status_code=502,
+        )
+
+
 @app.post("/tasks/{task_id}/complete-optimistic")
 def complete_task_optimistic_web(
     task_id: str,
@@ -6952,7 +7297,7 @@ def _journal_page(journal_date: str, payload: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1A1A1A">
+<meta name="theme-color" content="#264155">
 <title>{html.escape(heading)} - Daily Journal</title>
 <style>
 {_mobile_shell_css()}
