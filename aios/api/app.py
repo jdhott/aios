@@ -12,7 +12,12 @@ from aios.focus_activation import (
 from aios.focus_activation_refresh import (
     FOCUS_ACTIVATION_REFRESH_VERSION,
     get_openai_client,
+    refresh_dashboard_focus_activation,
     refresh_focus_activation_for_parent,
+)
+from aios.focus_context_refresh import (
+    FOCUS_CONTEXT_REFRESH_VERSION,
+    refresh_focus_context_for_task,
 )
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -60,7 +65,10 @@ from aios.temporal import (
     local_timezone,
     serialize_task_datetime,
 )
-from aios.daily_completion_summary import completion_fingerprint
+from aios.daily_completion_summary import (
+    completion_fingerprint,
+    refresh_daily_completion_summary,
+)
 from aios.processing.trigger_coordinator import (
     ProcessingTriggerCoordinator,
 )
@@ -75,6 +83,7 @@ AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
 AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
 AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"
 AIOS_FOCUS_ACTIVATION_REFRESH_VERSION = FOCUS_ACTIVATION_REFRESH_VERSION
+AIOS_FOCUS_CONTEXT_REFRESH_VERSION = FOCUS_CONTEXT_REFRESH_VERSION
 AIOS_SCHEDULED_COMPAT_TRIGGER_VERSION = "scheduled-compat-trigger-v1"
 AIOS_WEB_TASKS_API_VERSION = "web-tasks-v1-read-only"
 
@@ -177,6 +186,115 @@ def _request_processor_run() -> dict:
 
 def _completion_processor_delay_seconds() -> int:
     return int(os.getenv("AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS", "5"))
+
+
+def _refresh_focus_context_after_action(task_id: str) -> None:
+    """Run context coaching in-process instead of waiting for the processor."""
+    task_key = str(task_id or "").strip()
+    if not task_key:
+        return
+
+    try:
+        store = _store()
+        client = get_openai_client()
+        if client is None:
+            print(
+                "[Focus Context Refresh] OPENAI_API_KEY not configured; "
+                "falling back to processor."
+            )
+            _request_processor_run()
+            return
+
+        result = refresh_focus_context_for_task(store, client, task_key)
+        if result:
+            print(
+                "[Focus Context Refresh] Prepared context coaching for "
+                f"task {task_key}."
+            )
+        else:
+            print(
+                "[Focus Context Refresh] No context coaching produced for "
+                f"task {task_key}."
+            )
+    except Exception as exc:
+        print(f"[Focus Context Refresh] Fast refresh failed: {exc}")
+        try:
+            _request_processor_run()
+        except Exception:
+            pass
+
+
+def _refresh_dashboard_focus_after_action(
+    *,
+    delay_seconds: int = 0,
+    verify_task_id: str | None = None,
+    verify_completed_at: str | None = None,
+    refresh_summary: bool = False,
+) -> None:
+    """Resolve the current BNA and ensure Start Here exists after a focus change."""
+    time.sleep(max(0, int(delay_seconds)))
+
+    try:
+        store = _store()
+
+        if verify_task_id and verify_completed_at:
+            rows = (
+                store.client.table("tasks")
+                .select("id,is_done,is_open,completed_at")
+                .eq("id", verify_task_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not rows:
+                return
+            current = dict(rows[0])
+            if (
+                not current.get("is_done")
+                or current.get("is_open")
+                or str(current.get("completed_at") or "") != str(verify_completed_at)
+            ):
+                return
+
+        client = get_openai_client()
+        if client is None:
+            print(
+                "[Focus Activation Refresh] OPENAI_API_KEY not configured; "
+                "falling back to processor."
+            )
+            _request_processor_run()
+            return
+
+        child = refresh_dashboard_focus_activation(store, client)
+        if child:
+            print(
+                "[Focus Activation Refresh] Dashboard focus Start Here ready "
+                f"({child.get('id')})."
+            )
+        else:
+            print(
+                "[Focus Activation Refresh] No dashboard focus Start Here "
+                "generated; processor may retry."
+            )
+
+        if refresh_summary:
+            try:
+                refresh_daily_completion_summary(
+                    store,
+                    client,
+                    timezone_name=os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto"),
+                )
+            except Exception as summary_exc:
+                print(
+                    "[Focus Activation Refresh] Completion summary refresh "
+                    f"failed: {summary_exc}"
+                )
+
+        if not child:
+            _request_processor_run()
+    except Exception as exc:
+        print(f"[Focus Activation Refresh] Dashboard focus refresh failed: {exc}")
 
 
 def _refresh_focus_activation_after_action(
@@ -807,6 +925,20 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
         raise HTTPException(status_code=409, detail="Task is archived")
 
     task = dict(rows[0])
+    focus_state = (
+        store.client.table("task_execution_state")
+        .select("execution_rank,best_next_action")
+        .eq("task_id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    was_dashboard_focus = bool(
+        focus_state
+        and focus_state[0].get("execution_rank") == 1
+    )
+
     completed_at = datetime.now(timezone.utc).isoformat()
     (
         store.client.table("tasks")
@@ -839,19 +971,30 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
             verify_task_id=task_id,
             verify_completed_at=completed_at,
         )
-
-    background_tasks.add_task(
-        _request_processor_run_after_completion,
-        task_id,
-        completed_at,
-    )
+    elif was_dashboard_focus:
+        delay = _completion_processor_delay_seconds()
+        background_tasks.add_task(
+            _refresh_dashboard_focus_after_action,
+            delay_seconds=delay,
+            verify_task_id=task_id,
+            verify_completed_at=completed_at,
+            refresh_summary=True,
+        )
+    else:
+        background_tasks.add_task(
+            _request_processor_run_after_completion,
+            task_id,
+            completed_at,
+        )
     return {
         "id": task_id,
         "completed": True,
         "completed_at": completed_at,
         "completed_activation_children": completed_activation_children,
-        "processor_deferred": True,
-        "focus_activation_refresh_scheduled": bool(activation_parent_id),
+        "processor_deferred": not activation_parent_id and not was_dashboard_focus,
+        "focus_activation_refresh_scheduled": bool(
+            activation_parent_id or was_dashboard_focus
+        ),
     }
 
 
@@ -974,7 +1117,7 @@ def not_useful_task_http(task_id: str, background_tasks: BackgroundTasks) -> dic
         "focus_context_question": None, "focus_context_answer": None,
         "focus_context_help_updated_at": now, "updated_at": now,
     }).eq("id", parent_id).execute()
-    background_tasks.add_task(_request_processor_run)
+    background_tasks.add_task(_refresh_focus_context_after_action, parent_id)
     return {"id": task_id, "not_useful": True, "parent_task_id": parent_id}
 
 
@@ -1059,7 +1202,7 @@ def snooze_task_http(
     if not (result.data or []):
         raise HTTPException(status_code=500, detail="Task snooze could not be saved")
 
-    background_tasks.add_task(_request_processor_run)
+    background_tasks.add_task(_refresh_dashboard_focus_after_action)
     return {"id": task_id, "snoozed": True, "defer_until": defer_until}
 
 
@@ -1086,7 +1229,7 @@ def request_focus_context_help_http(task_id: str, background_tasks: BackgroundTa
         "focus_context_answer": None,
         "focus_context_help_updated_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", task_id).execute()
-    background_tasks.add_task(_request_processor_run)
+    background_tasks.add_task(_refresh_focus_context_after_action, task_id)
     return {"id": task_id, "focus_context_help_state": "pending"}
 
 
@@ -1110,7 +1253,7 @@ def answer_focus_context_http(task_id: str, request: FocusContextAnswerRequest, 
         "focus_context_help_updated_at": now,
         "updated_at": now,
     }).eq("id", task_id).execute()
-    background_tasks.add_task(_request_processor_run)
+    background_tasks.add_task(_refresh_focus_context_after_action, task_id)
     return {"id": task_id, "focus_context_help_state": "answer_pending"}
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from aios.dashboard_focus import resolve_dashboard_focus_task
 from aios.focus_activation import (
     FOCUS_ACTIVATION_SOURCE,
     ensure_next_focus_activation,
@@ -11,7 +12,7 @@ from aios.focus_activation import (
 )
 from aios.storage.supabase_store import SupabaseStore
 
-FOCUS_ACTIVATION_REFRESH_VERSION = "focus-activation-refresh-v1"
+FOCUS_ACTIVATION_REFRESH_VERSION = "focus-activation-refresh-v2"
 
 
 def get_openai_client():
@@ -72,6 +73,20 @@ def refresh_focus_activation_for_parent(
         client,
         {"id": parent_id},
     )
+
+
+def refresh_dashboard_focus_activation(
+    store: SupabaseStore,
+    client,
+) -> dict[str, Any] | None:
+    """Ensure Start Here exists for whichever task is currently in focus."""
+    focus = resolve_dashboard_focus_task(store)
+    if not focus:
+        return None
+    focus_id = str(focus.get("id") or "").strip()
+    if not focus_id:
+        return None
+    return refresh_focus_activation_for_parent(store, client, focus_id)
 
 
 def refresh_focus_activation_for_task(
