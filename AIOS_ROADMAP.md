@@ -1,6 +1,6 @@
 # AIOS Roadmap
 
-**Last updated:** August 20, 2026
+**Last updated:** August 21, 2026
 
 ## Guiding Principle
 
@@ -278,6 +278,76 @@ Possible later refinements:
 
 Search is considered complete for now.
 
+### Real-time UI updates (Server-Sent Events)
+
+**Status:** Partially implemented (JSON polling); SSE planned as Phase 3.
+
+The web app previously relied on full-page reload loops while AIOS processed
+work asynchronously (focus refresh, breakdown generation, project work
+proposals, review re-evaluation). That has been replaced incrementally with
+**JSON fragment polling** and targeted DOM patching:
+
+| Phase | Scope | Status |
+|-------|--------|--------|
+| 1 | Focus card (`/api/focus-card`) | Done |
+| 1.5 | Dashboard task list (`/api/dashboard-tasks`) | Done |
+| 2a | Undo sync + poll timeout retry UX on dashboard | Done |
+| 2b | Breakdown, project work, and review inbox pending panels | Done |
+
+Shared infrastructure includes fragment fingerprints, exponential backoff,
+re-bind after patch, and timeout UI with **Try again** / **Refresh page**.
+
+**Next:** Validate the polling model in normal use before investing in SSE.
+Polling is boring but reliable; only move to SSE if testing shows meaningful
+latency pain or unnecessary API load.
+
+**Phase 3 --- SSE (planned):**
+
+Replace client poll timers with a single long-lived **Server-Sent Events**
+stream (e.g. `GET /api/events`). The client keeps existing fragment fetch/patch
+logic; SSE tells it *when* to refresh, not *how*.
+
+Typed events to consider:
+
+-   `focus.updated`
+-   `tasks.updated`
+-   `breakdown.ready`
+-   `project_work.ready`
+-   `review.resolved`
+
+**Why SSE is a step change (not a small frontend swap):**
+
+-   **Event source:** The processor or API must emit when workflow state
+    changes (focus activation published, breakdown proposed, etc.). Polling
+    works today because the client asks until data appears; SSE requires
+    something upstream to signal completion.
+-   **Cloud Run:** Streaming responses, heartbeats (~15--30s), reconnect
+    handling, and sensible timeout configuration.
+-   **Multi-instance delivery:** If Cloud Run scales beyond one instance,
+    events may need Redis pub/sub, Postgres `LISTEN/NOTIFY`, Supabase
+    Realtime, or similar so all tabs/instances receive updates.
+
+**Rough sizing:**
+
+-   **SSE-lite** (~2--4 days): One stream; coarse events like
+    `dashboard.refresh`; client still uses existing fragment endpoints.
+    Minimal processor wiring.
+-   **SSE proper** (~1--2 weeks): Typed events emitted on workflow
+    completion; heartbeats and reconnect; removes most polling.
+-   **SSE + pub/sub** (~2--3 weeks): Production-grade fan-out across
+    Cloud Run instances and multiple browser tabs.
+
+**Prerequisites before starting SSE:**
+
+1.  Normal-use validation of current polling (snooze, complete, undo,
+    breakdown, project work, review processing).
+2.  Clear list of which state transitions must push events.
+3.  Decision on delivery mechanism if more than one Cloud Run instance
+    is expected.
+
+Do not implement SSE until polling limitations are demonstrated in real
+use or event emission can be wired cleanly from the processor.
+
 ### Project-task deferral
 
 Previously identified but intentionally lower priority. Revisit when
@@ -431,8 +501,12 @@ sequence is:
 4.  Clean up obsolete Notion review/runtime pathways after parity is
     confirmed.
 5.  Advance source-neutral Brain Dump / capture.
-6.  Design Recurring Tasks before implementation.
-7.  Choose subsequent improvements based on actual AIOS usage rather
+6.  Validate async UI polling (dashboard, breakdown, project work,
+    reviews) in normal use.
+7.  Design Recurring Tasks before implementation.
+8.  Consider SSE (Phase 3) only if polling validation shows latency or
+    load problems worth solving, or processor event emission is ready.
+9.  Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
 
 ------------------------------------------------------------------------
@@ -455,6 +529,9 @@ Recent milestones that materially changed the architecture:
 -   Dashboard search considered fixed.
 -   Daily Journal V1/V1.1 implemented and entering normal-use
     validation.
+-   Dashboard async UI: focus-card and task-list JSON polling; undo
+    sync; breakdown, project work, and review pending-fragment polling
+    (Phases 1--2b).
 
 ------------------------------------------------------------------------
 
