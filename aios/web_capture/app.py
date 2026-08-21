@@ -7,13 +7,14 @@ import json
 import time
 import html
 import os
+import subprocess
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote_plus
 
 import google.auth
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from aios.ingestion.capture_metadata import has_meaningful_capture_text
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -26,6 +27,8 @@ WEB_CAPTURE_MULTILINE_VERSION = "aios-web-capture-v1.1"
 WEB_TASKS_VERSION = "aios-web-tasks-v1-read-only"
 WEB_TASK_ACTION_UI_VERSION = "aios-web-tasks-v1.2-checkbox-trash"
 WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
+WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
+WEB_MAIN_PWA_VERSION = "main-pwa-v1"
 WEB_DASHBOARD_UI_VERSION = "dashboard-v1.4-compact-capture-toggle"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
@@ -62,6 +65,11 @@ def _session_days() -> int:
     except ValueError:
         value = SESSION_DEFAULT_DAYS
     return min(max(value, 1), 365)
+
+def _session_cookie_secure() -> bool:
+    raw = (os.getenv("AIOS_WEB_COOKIE_SECURE") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
 
 def _encode_session(username: str) -> str:
     exp = int(time.time()) + (_session_days() * 86400)
@@ -115,6 +123,286 @@ def _safe_login_next(value: str | None) -> str:
         return "/"
     return target
 
+
+def _mobile_design_tokens() -> str:
+    return """
+    :root {
+      color-scheme: light;
+      --paper: #FAFAF8;
+      --ink: #2C2C2C;
+      --charcoal: #1A1A1A;
+      --muted: #6B6B6B;
+      --border: rgba(44, 44, 44, 0.10);
+      --card: #FFFFFF;
+      --accent: #2C2C2C;
+      --accent-soft: rgba(44, 44, 44, 0.06);
+      --highlight: #F3F2EF;
+      --success: #EEF6F0;
+      --error: #FAEFED;
+      --shadow: 0 4px 24px rgba(26, 26, 26, 0.06);
+      --shadow-lg: 0 12px 40px rgba(26, 26, 26, 0.08);
+      --radius-2xl: 20px;
+      --line-body: 1.7;
+      --line-relaxed: 1.85;
+      --nav-offset: calc(108px + env(safe-area-inset-bottom));
+    }
+    """
+
+
+def _bottom_nav_css() -> str:
+    return """
+    .bottom-nav {
+      position: fixed;
+      left: 50%;
+      bottom: calc(14px + env(safe-area-inset-bottom));
+      z-index: 100;
+      transform: translateX(-50%);
+      width: min(640px, calc(100% - 28px));
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-around;
+      gap: 4px;
+      padding: 10px 14px 12px;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(44, 44, 44, 0.08);
+      border-radius: 28px;
+      box-shadow: 0 16px 48px rgba(26, 26, 26, 0.12);
+    }
+    .bottom-nav-item {
+      position: relative;
+      flex: 1;
+      max-width: 76px;
+      min-height: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 4px;
+      border: 0;
+      border-radius: 16px;
+      background: transparent;
+      color: var(--muted);
+      text-decoration: none;
+      font: inherit;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      line-height: 1.35;
+      cursor: pointer;
+      list-style: none;
+    }
+    .bottom-nav-item::-webkit-details-marker { display: none; }
+    .bottom-nav-item .nav-icon {
+      font-size: 1.28rem;
+      line-height: 1;
+    }
+    .bottom-nav-item.active,
+    .bottom-nav-item[aria-current="page"] {
+      color: var(--charcoal);
+      background: var(--accent-soft);
+    }
+    .bottom-nav-add {
+      flex: 0 0 auto;
+      width: 56px;
+      height: 56px;
+      margin-top: -22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: var(--charcoal);
+      color: var(--paper);
+      text-decoration: none;
+      box-shadow: 0 10px 28px rgba(26, 26, 26, 0.24);
+    }
+    .bottom-nav-add .nav-icon {
+      font-size: 1.65rem;
+      line-height: 1;
+      font-weight: 300;
+    }
+    .bottom-nav-add.active {
+      outline: 3px solid rgba(44, 44, 44, 0.14);
+    }
+    .nav-badge {
+      position: absolute;
+      top: 4px;
+      right: calc(50% - 22px);
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--charcoal);
+      color: white;
+      font-size: 0.62rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bottom-nav-more { position: relative; flex: 1; max-width: 76px; }
+    .bottom-nav-more > summary { width: 100%; }
+    .bottom-nav-sheet {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 10px);
+      min-width: 196px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-2xl);
+      background: var(--card);
+      box-shadow: var(--shadow-lg);
+    }
+    .bottom-nav-sheet a,
+    .bottom-nav-sheet button {
+      width: 100%;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--ink);
+      text-decoration: none;
+      font: inherit;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .bottom-nav-sheet a:hover,
+    .bottom-nav-sheet button:hover {
+      background: var(--accent-soft);
+    }
+    """
+
+
+def _mobile_shell_css() -> str:
+    return f"""
+    {_mobile_design_tokens()}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 1rem;
+      line-height: var(--line-body);
+      -webkit-font-smoothing: antialiased;
+    }}
+    main {{
+      width: min(720px, 100%);
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 20px var(--nav-offset);
+    }}
+    h1, h2, h3 {{
+      color: var(--charcoal);
+      line-height: 1.35;
+      letter-spacing: -0.02em;
+    }}
+    .detail-back {{
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 20px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.92rem;
+      font-weight: 600;
+      line-height: var(--line-body);
+    }}
+    .detail-back:hover {{ color: var(--charcoal); }}
+    .surface-card {{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-2xl);
+      padding: 28px 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }}
+    .page-heading {{
+      margin-bottom: 32px;
+      padding: 4px 2px 0;
+    }}
+    .page-heading .brand {{
+      margin: 0 0 10px;
+      font-size: clamp(1.85rem, 7vw, 2.45rem);
+      font-weight: 700;
+      color: var(--charcoal);
+      line-height: 1.2;
+    }}
+    .page-heading .subtitle,
+    .dashboard-subtitle {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.02rem;
+      line-height: var(--line-relaxed);
+    }}
+    {_bottom_nav_css()}
+    """
+
+
+def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
+    def item(href: str, label: str, icon: str, key: str, badge: str = "") -> str:
+        is_active = active == key
+        current = ' aria-current="page"' if is_active else ""
+        cls = "bottom-nav-item active" if is_active else "bottom-nav-item"
+        badge_html = f'<span class="nav-badge">{html.escape(badge)}</span>' if badge else ""
+        return (
+            f'<a class="{cls}" href="{href}"{current}>'
+            f'<span class="nav-icon" aria-hidden="true">{icon}</span>'
+            f'<span class="nav-label">{html.escape(label)}</span>'
+            f"{badge_html}"
+            f"</a>"
+        )
+
+    more_active = active in {"journal", "patterns", "more"}
+    more_cls = "bottom-nav-item active" if more_active else "bottom-nav-item"
+    reviews_badge = str(review_count) if review_count else ""
+    add_cls = "bottom-nav-add active" if active == "new" else "bottom-nav-add"
+
+    return f"""
+  <nav class="bottom-nav" aria-label="Primary">
+    {item("/", "Home", "⌂", "home")}
+    {item("/projects", "Projects", "▦", "projects")}
+    <a class="{add_cls}" href="/tasks/new" aria-label="New task"{(' aria-current="page"' if active == 'new' else '')}>
+      <span class="nav-icon" aria-hidden="true">+</span>
+    </a>
+    {item("/reviews", "Reviews", "◎", "reviews", reviews_badge)}
+    <details class="bottom-nav-more" id="bottom-nav-more">
+      <summary class="{more_cls}" aria-label="More">
+        <span class="nav-icon" aria-hidden="true">⋯</span>
+        <span class="nav-label">More</span>
+      </summary>
+      <div class="bottom-nav-sheet">
+        <a href="/work-patterns">Work Patterns</a>
+        <a href="/journal">Journal</a>
+        <form method="post" action="/logout"><button type="submit">Sign Out</button></form>
+      </div>
+    </details>
+  </nav>
+  <script>
+  (() => {{
+    const more = document.getElementById("bottom-nav-more");
+    if (!more) return;
+    document.addEventListener("click", (event) => {{
+      if (more.open && !more.contains(event.target)) more.open = false;
+    }});
+    document.addEventListener("keydown", (event) => {{
+      if (event.key === "Escape" && more.open) {{
+        more.open = false;
+        const trigger = more.querySelector("summary");
+        if (trigger) trigger.focus();
+      }}
+    }});
+  }})();
+  </script>
+"""
+
+
 def _login_page(next_url: str = "/", error: str = "") -> str:
     safe_next = html.escape(_safe_login_next(next_url), quote=True)
     error_html = (
@@ -122,13 +410,20 @@ def _login_page(next_url: str = "/", error: str = "") -> str:
         if error else ""
     )
     return f'''<!doctype html><html><head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1A1A1A">
 <title>Sign in · AIOS</title>
 <style>
-body{{margin:0;min-height:100dvh;background:#f7f7f3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center}}
-main{{width:min(420px,100%);padding:20px}}.card{{background:white;border:1px solid #d9dedf;border-radius:16px;padding:22px}}
-input,button{{width:100%;box-sizing:border-box;min-height:44px;margin-top:8px;padding:9px 11px;font:inherit}}
-button{{background:#264155;color:white;border:0;border-radius:10px;font-weight:750}}label{{display:block;margin-top:12px;font-weight:700}}h1{{color:#264155}}
+{_mobile_shell_css()}
+body{{display:grid;place-items:center;min-height:100dvh}}
+main{{width:min(420px,100%);padding:24px 20px var(--nav-offset)}}
+.card{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:28px 24px;box-shadow:var(--shadow)}}
+input,button{{width:100%;box-sizing:border-box;min-height:48px;margin-top:10px;padding:12px 14px;font:inherit;line-height:var(--line-body)}}
+input{{border:1px solid var(--border);border-radius:var(--radius-2xl);background:var(--highlight);color:var(--ink)}}
+button{{background:var(--charcoal);color:var(--paper);border:0;border-radius:var(--radius-2xl);font-weight:700;margin-top:16px}}
+label{{display:block;margin-top:16px;font-weight:600;color:var(--charcoal);line-height:var(--line-body)}}
+h1{{color:var(--charcoal);margin:0 0 12px;line-height:1.3}}
+p{{color:var(--muted);line-height:var(--line-relaxed);margin:0 0 8px}}
 </style></head><body><main><section class="card">
 <h1>AIOS</h1><p>Sign in to continue.</p>{error_html}
 <form method="post" action="/login">
@@ -180,7 +475,7 @@ def login_submit_web(
         _encode_session(expected_username),
         max_age=_session_days() * 86400,
         httponly=True,
-        secure=True,
+        secure=_session_cookie_secure(),
         samesite="lax",
         path="/",
     )
@@ -192,7 +487,7 @@ def logout_web():
     response.delete_cookie(
         SESSION_COOKIE_NAME,
         path="/",
-        secure=True,
+        secure=_session_cookie_secure(),
         httponly=True,
         samesite="lax",
     )
@@ -203,6 +498,21 @@ def _api_url() -> str:
 
 
 def _identity_token(audience: str) -> str:
+    impersonate_service_account = (os.getenv("AIOS_LOCAL_IMPERSONATE_SERVICE_ACCOUNT") or "").strip()
+    if impersonate_service_account:
+        result = subprocess.run(
+            [
+                "gcloud", "auth", "print-identity-token",
+                f"--impersonate-service-account={impersonate_service_account}",
+                f"--audiences={audience}",
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        token = result.stdout.strip()
+        if not token:
+            raise RuntimeError("gcloud returned an empty identity token")
+        return token
+
     request = GoogleAuthRequest()
     return id_token.fetch_id_token(
         request,
@@ -277,28 +587,28 @@ def _task_snooze_control_html(
     if external_form_id:
         form_id = html.escape(external_form_id, quote=True)
         preset_button = lambda value, label: (
-            f'<button type="submit" form="{form_id}" name="preset" value="{value}">{label}</button>'
+            f'<button class="menu-button" type="submit" form="{form_id}" name="preset" value="{value}">{label}</button>'
         )
         custom_controls = (
             f'<div class="task-snooze-date">'
             f'<input type="date" name="custom_date" form="{form_id}" required>'
-            f'<button type="submit" form="{form_id}" name="preset" value="pick_date">Pick date</button>'
+            f'<button class="menu-button" type="submit" form="{form_id}" name="preset" value="pick_date">Pick date</button>'
             f'</div>'
         )
     else:
         def preset_button(value: str, label: str) -> str:
             return (
-                f'<form method="post" action="/tasks/{safe_id}/snooze">'
+                f'<form class="menu-form" method="post" action="/tasks/{safe_id}/snooze">'
                 f'<input type="hidden" name="preset" value="{value}">'
                 + (f'<input type="hidden" name="return_to" value="{safe_return}">' if safe_return else '')
-                + f'<button type="submit">{label}</button></form>'
+                + f'<button class="menu-button" type="submit">{label}</button></form>'
             )
         custom_controls = (
-            f'<form class="task-snooze-date" method="post" action="/tasks/{safe_id}/snooze">'
+            f'<form class="task-snooze-date menu-form" method="post" action="/tasks/{safe_id}/snooze">'
             f'<input type="hidden" name="preset" value="pick_date">'
             + (f'<input type="hidden" name="return_to" value="{safe_return}">' if safe_return else '')
             + '<input type="date" name="custom_date" required>'
-            + '<button type="submit">Pick date</button></form>'
+            + '<button class="menu-button" type="submit">Pick date</button></form>'
         )
 
     return (
@@ -609,241 +919,189 @@ def _task_detail_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>AIOS Task</title>
 <style>
-:root {{
-  --navy:#264155;
-  --yellow:#ffc93c;
-  --paper:#f7f7f3;
-  --card:#ffffff;
-  --ink:#17242d;
-  --muted:#66747d;
-  --border:#d9dedf;
-  --border-strong:#c8d0d3;
-  --success:#e8f4e8;
-  --success-ink:#2f6b3a;
-  --error:#fae9e7;
-  --error-ink:#8a3d35;
-  --shadow:0 10px 30px rgba(38,65,85,.07);
-}}
-* {{ box-sizing:border-box; }}
-body {{
-  margin:0;
-  min-height:100vh;
-  background:var(--paper);
-  color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main {{
-  width:min(980px,100%);
-  margin:0 auto;
-  padding:max(26px,env(safe-area-inset-top)) 20px
-          max(42px,env(safe-area-inset-bottom));
-}}
-.topbar {{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:16px;
-  margin-bottom:24px;
-}}
-.back {{
-  color:var(--navy);
-  text-decoration:none;
-  font-weight:700;
-  font-size:.95rem;
-}}
-.back:hover {{ text-decoration:underline; }}
-.page-title {{
-  margin:0;
-  color:var(--navy);
-  font-size:clamp(2rem,5vw,2.8rem);
-  letter-spacing:-.035em;
-}}
-.page-subtitle {{
-  margin:7px 0 0;
-  color:var(--muted);
-  font-size:.98rem;
-}}
-.notice {{
-  margin:18px 0 0;
-  padding:13px 15px;
-  border-radius:12px;
-  font-weight:650;
-}}
-.success {{
-  background:var(--success);
-  color:var(--success-ink);
-}}
-.error {{
-  background:var(--error);
-  color:var(--error-ink);
-}}
+{_mobile_shell_css()}
 .layout {{
   display:grid;
   grid-template-columns:minmax(0,1.35fr) minmax(300px,.85fr);
-  gap:20px;
-  margin-top:22px;
+  gap:24px;
+  margin-top:8px;
   align-items:start;
 }}
 .card {{
   background:var(--card);
   border:1px solid var(--border);
-  border-radius:18px;
-  padding:22px;
+  border-radius:var(--radius-2xl);
+  padding:28px 24px;
   box-shadow:var(--shadow);
 }}
 .card-title {{
-  margin:0 0 18px;
-  color:var(--navy);
-  font-size:1.15rem;
+  margin:0 0 22px;
+  color:var(--charcoal);
+  font-size:1.12rem;
+  font-weight:700;
+  line-height:var(--line-body);
 }}
 .form-grid {{
   display:grid;
   grid-template-columns:1fr 1fr;
-  gap:16px;
+  gap:20px;
 }}
 .full {{ grid-column:1/-1; }}
 label {{
   display:grid;
-  gap:7px;
+  gap:10px;
   color:var(--ink);
-  font-size:.88rem;
-  font-weight:700;
+  font-size:.92rem;
+  font-weight:600;
+  line-height:var(--line-body);
 }}
 input[type="text"],
-input[type="date"] {{
+input[type="date"],
+textarea {{
   width:100%;
-  min-height:46px;
-  border:1px solid var(--border-strong);
-  border-radius:12px;
-  padding:0 13px;
-  background:#fff;
+  min-height:48px;
+  border:1px solid var(--border);
+  border-radius:var(--radius-2xl);
+  padding:0 16px;
+  background:var(--highlight);
   color:var(--ink);
   font:inherit;
   font-weight:500;
+  line-height:var(--line-body);
   outline:none;
 }}
-input:focus {{
-  border-color:var(--navy);
-  box-shadow:0 0 0 3px rgba(38,65,85,.10);
+textarea {{
+  min-height:96px;
+  padding:14px 16px;
+  resize:vertical;
+}}
+input:focus, textarea:focus {{
+  border-color:rgba(44,44,44,.22);
+  box-shadow:0 0 0 3px rgba(44,44,44,.10);
 }}
 .checkbox-row {{
   display:flex;
   align-items:center;
-  gap:10px;
-  min-height:46px;
-  padding:2px 0;
+  gap:12px;
+  min-height:48px;
+  padding:4px 0;
+  line-height:var(--line-relaxed);
 }}
 .checkbox-row input {{
   width:20px;
   height:20px;
-  accent-color:var(--yellow);
+  accent-color:var(--charcoal);
 }}
 .actions {{
   display:flex;
-  gap:10px;
+  gap:12px;
   align-items:center;
-  margin-top:20px;
+  margin-top:24px;
+  flex-wrap:wrap;
 }}
 .primary-button {{
-  min-height:46px;
+  min-height:48px;
   border:0;
-  border-radius:12px;
-  padding:0 18px;
-  background:var(--yellow);
-  color:var(--navy);
+  border-radius:var(--radius-2xl);
+  padding:0 20px;
+  background:var(--charcoal);
+  color:var(--paper);
   font:inherit;
-  font-weight:800;
+  font-weight:700;
   cursor:pointer;
 }}
-.primary-button:hover {{ filter:brightness(.98); }}
 .secondary-button {{
-  min-height:46px; border:1px solid var(--border-strong); border-radius:12px;
-  padding:0 16px; background:#fff; color:var(--navy); font:inherit; font-weight:750; cursor:pointer;
+  min-height:48px; border:1px solid var(--border); border-radius:var(--radius-2xl);
+  padding:0 18px; background:var(--card); color:var(--charcoal); font:inherit; font-weight:700; cursor:pointer;
 }}
-.breakdown-editor {{ width:100%; margin-top:7px; min-height:86px; resize:vertical; }}
-.breakdown-list {{ display:grid; gap:10px; margin-top:12px; }}
-.breakdown-row {{ display:grid; grid-template-columns:42px minmax(0,1fr) 46px; gap:8px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:12px; background:#fff; }}
+.breakdown-editor {{ width:100%; margin-top:10px; min-height:96px; resize:vertical; }}
+.breakdown-list {{ display:grid; gap:12px; margin-top:16px; }}
+.breakdown-row {{ display:grid; grid-template-columns:42px minmax(0,1fr) 46px; gap:10px; align-items:center; padding:12px; border:1px solid var(--border); border-radius:var(--radius-2xl); background:var(--card); box-shadow:var(--shadow); }}
 .breakdown-row.dragging {{ opacity:.45; }}
-.breakdown-drag, .breakdown-trash, .breakdown-add {{ border:1px solid var(--border); background:#fff; color:var(--navy); font:inherit; font-weight:750; cursor:pointer; border-radius:10px; }}
+.breakdown-drag, .breakdown-trash, .breakdown-add {{ border:1px solid var(--border); background:var(--card); color:var(--charcoal); font:inherit; font-weight:700; cursor:pointer; border-radius:12px; }}
 .breakdown-drag {{ height:42px; cursor:grab; font-size:22px; line-height:1; }}
 .breakdown-drag:active {{ cursor:grabbing; }}
 .breakdown-trash {{ height:42px; font-size:18px; }}
-.breakdown-add {{ min-height:42px; padding:0 14px; margin-top:12px; }}
-.breakdown-title {{ width:100%; min-height:42px; }}
-@media (max-width:640px) {{ .breakdown-row {{ grid-template-columns:38px minmax(0,1fr) 42px; padding:6px; }} }}
-
+.breakdown-add {{ min-height:44px; padding:0 16px; margin-top:14px; }}
+.breakdown-title {{ width:100%; min-height:44px; }}
+@media (max-width:640px) {{ .breakdown-row {{ grid-template-columns:38px minmax(0,1fr) 42px; padding:10px; }} }}
 .optional {{ color:var(--muted); font-weight:500; }}
-.breakdown-pending {{ display:flex; align-items:center; gap:10px; font-weight:750; color:var(--navy); }}
-.mini-spinner {{ width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--navy); border-radius:50%; animation:spin .8s linear infinite; }}
+.breakdown-pending {{ display:flex; align-items:center; gap:12px; font-weight:700; color:var(--charcoal); line-height:var(--line-relaxed); }}
+.mini-spinner {{ width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--charcoal); border-radius:50%; animation:spin .8s linear infinite; }}
 @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
 .secondary-link {{
-  min-height:46px;
+  min-height:48px;
   display:inline-flex;
   align-items:center;
-  padding:0 14px;
+  padding:0 16px;
   border:1px solid var(--border);
-  border-radius:12px;
-  color:var(--navy);
+  border-radius:var(--radius-2xl);
+  color:var(--charcoal);
   text-decoration:none;
-  font-weight:700;
-  background:#fff;
+  font-weight:600;
+  background:var(--card);
 }}
-.meta-list {{
-  display:grid;
-  gap:0;
+.notice {{
+  margin:0 0 24px;
+  padding:16px 18px;
+  border-radius:var(--radius-2xl);
+  font-weight:600;
+  line-height:var(--line-relaxed);
+  box-shadow:var(--shadow);
 }}
+.success {{ background:var(--success); color:var(--charcoal); }}
+.error {{ background:var(--error); color:var(--charcoal); }}
+.meta-list {{ display:grid; gap:0; }}
 .meta-row {{
   display:grid;
   grid-template-columns:1fr auto;
-  gap:18px;
+  gap:20px;
   align-items:center;
-  padding:14px 0;
+  padding:16px 0;
   border-bottom:1px solid var(--border);
+  line-height:var(--line-body);
 }}
 .meta-row:last-child {{ border-bottom:0; }}
 .meta-label {{
   color:var(--muted);
-  font-size:.82rem;
-  font-weight:700;
+  font-size:.86rem;
+  font-weight:600;
 }}
 .meta-value {{
   color:var(--ink);
-  font-weight:750;
+  font-weight:700;
   text-align:right;
   overflow-wrap:anywhere;
 }}
 .project-value {{
   max-width:260px;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-  font-size:.82rem;
+  font-size:.84rem;
   font-weight:600;
 }}
 .readonly-note {{
-  margin:-6px 0 14px;
+  margin:-4px 0 18px;
   color:var(--muted);
-  font-size:.86rem;
-  line-height:1.4;
+  font-size:.9rem;
+  line-height:var(--line-relaxed);
 }}
 @media (max-width:760px) {{
-  main {{ padding-left:14px; padding-right:14px; }}
   .layout {{ grid-template-columns:1fr; }}
   .form-grid {{ grid-template-columns:1fr; }}
   .full {{ grid-column:auto; }}
-  .topbar {{ align-items:flex-start; }}
-  .card {{ padding:18px; border-radius:16px; }}
+  .card {{ padding:22px 20px; }}
 }}
 </style>
 </head>
 <body>
 <main>
-  <div class="topbar">
-    <div>
-      <h1 class="page-title">Edit Task</h1>
-      <p class="page-subtitle">Update task details while keeping AIOS guidance read-only.</p>
-    </div>
+  <a class="detail-back" href="{return_to}">← Back</a>
+  <div class="page-heading">
+    <h1 class="brand">Edit Task</h1>
+    <p class="subtitle">Update task details while keeping AIOS guidance read-only.</p>
   </div>
 
   {notice}
@@ -944,11 +1202,12 @@ input:focus {{
     </aside>
   </div>
 
-  <section class="card" id="breakdown" style="margin-top:20px;">
+  <section class="card" id="breakdown" style="margin-top:24px;">
     <h2 class="card-title">Breakdown</h2>
     {breakdown_body}
   </section>
 </main>
+{_bottom_nav_html(active="home")}
 <script>
 function breakdownRow(title) {{
   const row = document.createElement('div'); row.className='breakdown-row'; row.draggable=true;
@@ -1025,17 +1284,33 @@ def _fetch_work_pattern(pattern_id: str) -> dict: return dict(_work_patterns_api
 def _pattern_rows(steps: list[dict]) -> str:
     return ''.join('<div class="pattern-row" draggable="true"><button class="drag" type="button">☷</button><div><input name="step_title" required value="'+html.escape(str(s.get("title") or ""),quote=True)+'" placeholder="Task title"><input name="step_context" value="'+html.escape(str(s.get("context") or ""),quote=True)+'" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button></div>' for s in steps)
 
-def _pattern_shell(title: str, body: str) -> str:
-    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} · AIOS</title><style>body{{margin:0;background:#f7f7f3;color:#17242d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{width:min(820px,100%);margin:auto;padding:28px 18px}}a{{color:#264155;font-weight:750}}h1,h2{{color:#264155}}.card,.pattern-row{{background:white;border:1px solid #d9dedf;border-radius:12px}}.card{{padding:16px;margin:12px 0}}.pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:8px;padding:8px;margin:8px 0}}.pattern-row>div{{display:grid;gap:6px}}input,textarea{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d9dedf;border-radius:9px;font:inherit}}textarea{{min-height:80px}}button,.button{{border:1px solid #d9dedf;background:white;color:#264155;border-radius:9px;padding:9px 12px;font:inherit;font-weight:750;cursor:pointer;text-decoration:none}}.primary{{background:#264155;color:white}}.actions{{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:14px}}.drag{{cursor:grab;padding:0;font-size:20px}}.trash{{padding:0}}.muted{{color:#66747d}}.pattern-card{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.pattern-card h2{{margin:0;font-size:1.05rem}}.pattern-card p{{margin:5px 0}}.dragging{{opacity:.45}}
+def _pattern_shell(title: str, body: str, *, nav_active: str = "more") -> str:
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1A1A1A"><title>{html.escape(title)} · AIOS</title><style>{_mobile_shell_css()}
+.card,.pattern-row{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-2xl);box-shadow:var(--shadow)}}
+.card{{padding:24px 22px;margin:0 0 20px;line-height:var(--line-relaxed)}}
+.pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:10px;padding:12px;margin:10px 0}}
+.pattern-row>div{{display:grid;gap:8px}}
+input,textarea{{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-2xl);font:inherit;background:var(--highlight);color:var(--ink);line-height:var(--line-body)}}
+textarea{{min-height:96px}}
+button,.button{{border:1px solid var(--border);background:var(--card);color:var(--charcoal);border-radius:var(--radius-2xl);padding:10px 14px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;line-height:var(--line-body)}}
+.primary{{background:var(--charcoal);color:var(--paper);border:0}}
+.actions{{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}}
+.drag{{cursor:grab;padding:0;font-size:20px;border:0;background:transparent}}
+.trash{{padding:0;border:0;background:transparent}}
+.muted{{color:var(--muted)}}
+.pattern-card{{display:flex;justify-content:space-between;gap:14px;align-items:center}}
+.pattern-card h1,.pattern-card h2{{margin:0;color:var(--charcoal);font-size:1.05rem;line-height:var(--line-relaxed)}}
+.pattern-card p{{margin:6px 0;line-height:var(--line-relaxed)}}
+.dragging{{opacity:.45}}
 .pattern-card .actions{{margin-top:0}}
-.pattern-choice{{text-decoration:none}}
-.pattern-choice:hover{{border-color:#aeb9bd}}
-@media(max-width:640px){{.pattern-card{{align-items:stretch;flex-direction:column}}.pattern-card .actions{{margin-top:8px}}}}
-</style></head><body><main>{body}</main></body></html>'''
+.pattern-choice{{text-decoration:none;color:inherit}}
+.pattern-choice:hover{{box-shadow:var(--shadow-lg)}}
+@media(max-width:640px){{.pattern-card{{align-items:stretch;flex-direction:column}}.pattern-card .actions{{margin-top:10px}}}}
+</style></head><body><main>{body}</main>{_bottom_nav_html(active=nav_active)}</body></html>'''
 
 def _pattern_editor(pattern: dict | None = None) -> str:
     p=dict(pattern or {}); pid=str(p.get("id") or ""); steps=list(p.get("steps") or []) or [{"title":"","context":""}]; action=f"/work-patterns/{pid}" if pid else "/work-patterns"
-    body=f'''<a href="/work-patterns">← Work Patterns</a><h1>{'Edit' if pid else 'New'} Work Pattern</h1><form method="post" action="{action}"><label>Name</label><input name="name" required value="{html.escape(str(p.get('name') or ''),quote=True)}"><p><label>Context <span class="muted">(optional)</span></label></p><textarea name="context">{html.escape(str(p.get('context') or ''))}</textarea><h2>Steps</h2><div data-list>{_pattern_rows(steps)}</div><button type="button" onclick="addRow()">+ Add step</button><div class="actions"><button class="primary" type="submit">Save</button><a href="/work-patterns">Done</a></div></form>'''
+    body=f'''<a class="detail-back" href="/work-patterns">← Work Patterns</a><div class="page-heading"><h1 class="brand">{'Edit' if pid else 'New'} Work Pattern</h1></div><section class="surface-card"><form method="post" action="{action}"><label>Name</label><input name="name" required value="{html.escape(str(p.get('name') or ''),quote=True)}"><p><label>Context <span class="muted">(optional)</span></label></p><textarea name="context">{html.escape(str(p.get('context') or ''))}</textarea><h2>Steps</h2><div data-list>{_pattern_rows(steps)}</div><button type="button" onclick="addRow()">+ Add step</button><div class="actions"><button class="primary" type="submit">Save</button><a class="button" href="/work-patterns">Done</a></div></form></section>'''
     return _pattern_shell("Work Pattern",body+_pattern_js())
 
 def _pattern_js() -> str:
@@ -1043,7 +1318,7 @@ def _pattern_js() -> str:
 
 def _patterns_library(patterns: list[dict]) -> str:
     cards=''.join(f'''<div class="card pattern-card"><div><h2>{html.escape(str(p.get('name') or 'Untitled Pattern'))}</h2><p class="muted">{html.escape(str(p.get('context') or ''))}</p><span class="muted">{int(p.get('step_count') or 0)} steps</span></div><div class="actions"><a href="/work-patterns/{p.get('id')}">Edit</a><form method="post" action="/work-patterns/{p.get('id')}/duplicate"><button>Duplicate</button></form><form method="post" action="/work-patterns/{p.get('id')}/delete"><button>Delete</button></form></div></div>''' for p in patterns) or '<div class="card">No work patterns yet.</div>'
-    return _pattern_shell("Work Patterns",f'<a href="/projects">← Projects</a><div class="pattern-card"><div><h1>Work Patterns</h1><p class="muted">Reusable ordered sets of work.</p></div><a class="button primary" href="/work-patterns/new">+ New Pattern</a></div>{cards}')
+    return _pattern_shell("Work Patterns",f'<div class="page-heading"><h1 class="brand">Work Patterns</h1><p class="subtitle">Reusable ordered sets of work.</p></div><div class="card pattern-card"><div><p class="muted">Create reusable task sequences for projects.</p></div><a class="button primary" href="/work-patterns/new">+ New Pattern</a></div>{cards}')
 
 @app.get("/work-patterns")
 def work_patterns_web(_user: Annotated[str, Depends(_check_basic_auth)]): return HTMLResponse(_patterns_library(_fetch_work_patterns()))
@@ -1416,150 +1691,75 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>AIOS Projects</title>
 <style>
-:root {{
-  --navy:#264155; --paper:#f7f7f3; --ink:#17242d;
-  --muted:#66747d; --border:#d9dedf; --card:#fff; --error:#fae9e7;
-  --review:#fff8dc;
-}}
-* {{ box-sizing:border-box; }}
-body {{
-  margin:0; background:var(--paper); color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main {{
-  width:min(900px,100%); margin:0 auto;
-  padding:max(26px,env(safe-area-inset-top)) 18px 42px;
-}}
-.topbar {{
-  display:flex; justify-content:space-between; align-items:flex-end;
-  gap:16px; margin-bottom:24px;
-}}
-h1 {{
-  margin:0; color:var(--navy); font-size:clamp(2rem,5vw,2.8rem);
-  letter-spacing:-.035em;
-}}
-.subtitle {{ margin:7px 0 0; color:var(--muted); }}
-.nav-link {{ color:var(--navy); text-decoration:none; font-weight:750; }}
-.notice {{ padding:12px 14px; border-radius:12px; margin-bottom:18px; }}
+{_mobile_shell_css()}
+.notice {{ padding:16px 18px; border-radius:var(--radius-2xl); margin-bottom:20px; line-height:var(--line-relaxed); box-shadow:var(--shadow); }}
 .error {{ background:var(--error); }}
 .section {{ margin-top:28px; }}
 .section:first-of-type {{ margin-top:0; }}
 .section h2 {{
-  margin:0 0 12px; color:var(--navy); font-size:1.15rem;
+  margin:0 0 14px; color:var(--charcoal); font-size:1.1rem; font-weight:700;
 }}
 .section-note {{
-  margin:-4px 0 14px; color:var(--muted); font-size:.9rem;
+  margin:-2px 0 16px; color:var(--muted); font-size:.94rem; line-height:var(--line-relaxed);
 }}
-.project-list {{ display:grid; gap:12px; }}
+.project-list {{ display:grid; gap:14px; }}
 .project-card {{
   display:flex; align-items:center; justify-content:space-between;
-  gap:20px; padding:18px 20px; background:var(--card);
-  border:1px solid var(--border); border-radius:16px;
-  color:inherit; text-decoration:none;
+  gap:20px; padding:20px 22px; background:var(--card);
+  border:1px solid var(--border); border-radius:var(--radius-2xl);
+  color:inherit; text-decoration:none; box-shadow:var(--shadow);
+  line-height:var(--line-relaxed);
 }}
 .project-card:hover {{
-  border-color:var(--navy); box-shadow:0 8px 24px rgba(38,65,85,.08);
+  box-shadow:var(--shadow-lg);
 }}
-.project-card-wrap {{
-  display:grid;
-  gap:7px;
-}}
-.project-activate-form {{
-  display:flex;
-  justify-content:flex-end;
-  margin:0 4px 0 0;
-}}
+.project-card-wrap {{ display:grid; gap:10px; }}
+.project-activate-form {{ display:flex; justify-content:flex-end; margin:0 4px 0 0; }}
 .project-activate {{
-  border:1px solid var(--navy);
-  border-radius:9px;
-  padding:7px 11px;
-  background:white;
-  color:var(--navy);
-  font:inherit;
-  font-size:.84rem;
-  font-weight:750;
-  cursor:pointer;
+  border:1px solid var(--charcoal); border-radius:12px; padding:8px 14px;
+  background:var(--card); color:var(--charcoal); font:inherit;
+  font-size:.86rem; font-weight:700; cursor:pointer;
 }}
 .possible-match {{
-  margin-top:12px;
-  padding:11px 12px;
-  border:1px solid var(--border);
-  border-radius:10px;
-  background:#fff;
+  margin-top:14px; padding:14px 16px; border:1px solid var(--border);
+  border-radius:12px; background:var(--highlight);
 }}
-.possible-match-label {{
-  color:var(--muted);
-  font-size:.78rem;
-  font-weight:750;
+.possible-match-label {{ color:var(--muted); font-size:.8rem; font-weight:700; }}
+.possible-match-name {{ margin-top:6px; color:var(--ink); font-size:.92rem; font-weight:600; line-height:var(--line-relaxed); }}
+.possible-match-actions {{ display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; }}
+.possible-match-actions form {{ margin:0; }}
+.possible-match-use, .possible-match-keep {{
+  border-radius:10px; padding:8px 12px; font:inherit; font-size:.84rem; font-weight:700; cursor:pointer;
 }}
-.possible-match-name {{
-  margin-top:3px;
-  color:var(--ink);
-  font-size:.88rem;
-  font-weight:700;
-}}
-.possible-match-actions {{
-  display:flex;
-  gap:8px;
-  margin-top:9px;
-  flex-wrap:wrap;
-}}
-.possible-match-actions form {{
-  margin:0;
-}}
-.possible-match-use,
-.possible-match-keep {{
-  border-radius:8px;
-  padding:6px 10px;
-  font:inherit;
-  font-size:.8rem;
-  font-weight:750;
-  cursor:pointer;
-}}
-.possible-match-use {{
-  border:1px solid var(--navy);
-  background:var(--navy);
-  color:white;
-}}
-.possible-match-keep {{
-  border:1px solid var(--border);
-  background:white;
-  color:var(--navy);
-}}
-.review-card {{ background:var(--review); }}
-.project-card h2 {{ margin:0; color:var(--navy); font-size:1.08rem; }}
-.project-status {{
-  display:inline-block; margin-top:6px; color:var(--muted); font-size:.82rem;
-}}
-.review-reasons {{
-  margin:10px 0 0; padding-left:18px; color:var(--muted);
-  font-size:.86rem; line-height:1.45;
-}}
+.possible-match-use {{ border:1px solid var(--charcoal); background:var(--charcoal); color:var(--paper); }}
+.possible-match-keep {{ border:1px solid var(--border); background:var(--card); color:var(--charcoal); }}
+.review-card {{ background:var(--highlight); }}
+.project-card h2 {{ margin:0; color:var(--charcoal); font-size:1.05rem; font-weight:700; line-height:var(--line-relaxed); }}
+.project-status {{ display:inline-block; margin-top:8px; color:var(--muted); font-size:.86rem; }}
+.review-reasons {{ margin:12px 0 0; padding-left:18px; color:var(--muted); font-size:.9rem; line-height:var(--line-relaxed); }}
 .project-count {{ flex:0 0 auto; display:grid; text-align:right; }}
-.project-count strong {{ color:var(--navy); font-size:1.35rem; line-height:1; }}
-.project-count span {{ color:var(--muted); font-size:.78rem; margin-top:4px; }}
+.project-count strong {{ color:var(--charcoal); font-size:1.35rem; line-height:1; }}
+.project-count span {{ color:var(--muted); font-size:.8rem; margin-top:6px; }}
 .empty-state {{
-  padding:24px; color:var(--muted); background:white;
-  border:1px solid var(--border); border-radius:16px;
+  padding:28px 24px; color:var(--muted); background:var(--card);
+  border:1px solid var(--border); border-radius:var(--radius-2xl);
+  box-shadow:var(--shadow); line-height:var(--line-relaxed);
 }}
 </style>
 </head>
 <body>
 <main>
-  <div class="topbar">
-    <div>
-      <h1>Projects</h1>
-      <p class="subtitle">Projects with unfinished work.</p>
-    </div>
-    <div style="display:flex;gap:10px"><a class="nav-link" href="/work-patterns">Work Patterns</a><a class="nav-link" href="/">Home</a></div>
+  <div class="page-heading">
+    <h1 class="brand">Projects</h1>
+    <p class="subtitle">Projects with unfinished work.</p>
   </div>
 
   {notice}
 
-  <section class="section">
+  <section class="surface-card section">
     <h2>Suggested Projects</h2>
     <p class="section-note">
       AIOS found these projects, but they are not active until you choose to activate them.
@@ -1567,7 +1767,7 @@ h1 {{
     <div class="project-list">{suggested_cards}</div>
   </section>
 
-  <section class="section">
+  <section class="surface-card section">
     <h2>Needs Review</h2>
     <p class="section-note">
       Projects where AIOS sees a mismatch between project state and current work.
@@ -1575,11 +1775,12 @@ h1 {{
     <div class="project-list">{review_cards}</div>
   </section>
 
-  <section class="section">
+  <section class="surface-card section">
     <h2>Active Projects</h2>
     <div class="project-list">{active_cards}</div>
   </section>
 </main>
+{_bottom_nav_html(active="projects")}
 </body>
 </html>"""
 
@@ -1814,35 +2015,18 @@ sessionStorage.removeItem("aios-project-proposal-refresh-count");
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>{name} · AIOS</title>
 <style>
-:root {{
-  --navy:#264155; --paper:#f7f7f3; --ink:#17242d;
-  --muted:#66747d; --border:#d9dedf; --card:#fff;
-}}
-* {{ box-sizing:border-box; }}
-body {{
-  margin:0; background:var(--paper); color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main {{
-  width:min(900px,100%); margin:0 auto;
-  padding:max(26px,env(safe-area-inset-top)) 18px 42px;
-}}
-.back {{ color:var(--navy); text-decoration:none; font-weight:750; }}
-.header {{ margin:22px 0; }}
-h1 {{
-  margin:0; color:var(--navy); font-size:clamp(1.8rem,5vw,2.5rem);
-  letter-spacing:-.03em;
-}}
+{_mobile_shell_css()}
+.header {{ margin:0 0 8px; }}
 .summary {{
-  display:flex; align-items:center; gap:10px;
-  margin-top:8px; color:var(--muted); font-size:.9rem;
+  display:flex; align-items:center; gap:12px;
+  margin-top:10px; color:var(--muted); font-size:.94rem; line-height:var(--line-relaxed);
 }}
 .status {{
-  padding:3px 8px; background:#fff; border:1px solid var(--border);
-  border-radius:999px; font-size:.78rem;
+  padding:4px 10px; background:var(--card); border:1px solid var(--border);
+  border-radius:999px; font-size:.8rem;
 }}
 .task-list {{
   overflow:hidden; background:var(--card);
@@ -1878,7 +2062,7 @@ h1 {{
 .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
 .snooze-icon-button::-webkit-details-marker {{ display:none; }}
 .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
-.task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:260px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+.task-snooze-menu {{ position:absolute; z-index:30; top:42px; left:0; right:auto; width:min(260px, calc(100vw - 24px)); padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
 .task-snooze-menu form {{ display:block; margin:0; }}
 .task-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
 .task-snooze-menu button:hover {{ background:#f3f4f2; }}
@@ -1897,13 +2081,13 @@ h1 {{
 .completed-task-spacer {{ width:44px; min-width:44px; }}
 .chevron {{ color:var(--muted); font-size:1.6rem; }}
 .empty-state {{ padding:24px; color:var(--muted); }}
-.context-card {{
-  margin:0 0 22px; padding:18px;
+.context-card, .proposal-card, .project-task-editor {{
+  margin:0 0 24px; padding:28px 24px;
   background:var(--card); border:1px solid var(--border);
-  border-radius:16px;
+  border-radius:var(--radius-2xl); box-shadow:var(--shadow);
 }}
 .context-card h2 {{
-  margin:0 0 6px; color:var(--navy); font-size:1rem;
+  margin:0 0 6px; color:var(--charcoal); font-size:1rem;
 }}
 .context-note {{
   margin:0 0 12px; color:var(--muted);
@@ -1921,21 +2105,14 @@ h1 {{
 }}
 .context-save {{
   border:0; border-radius:10px;
-  padding:9px 14px; background:var(--navy); color:white;
+  padding:9px 14px; background:var(--charcoal); color:white;
   font:inherit; font-weight:750; cursor:pointer;
 }}
 .context-save:hover {{ opacity:.92; }}
-.proposal-card {{
-  margin:0 0 22px;
-  padding:22px;
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:16px;
-}}
 
 .proposal-card h2 {{
   margin:0 0 6px;
-  color:var(--navy);
+  color:var(--charcoal);
   font-size:1.08rem;
 }}
 
@@ -1959,7 +2136,7 @@ h1 {{
 }}
 
 .proposal-section-label {{
-  color:var(--navy);
+  color:var(--charcoal);
   font-size:.95rem;
   font-weight:800;
 }}
@@ -2032,14 +2209,14 @@ h1 {{
 
 .proposal-accept {{
   border:0;
-  background:var(--navy);
+  background:var(--charcoal);
   color:white;
 }}
 
 .proposal-retry {{
-  border:1px solid var(--navy);
+  border:1px solid var(--charcoal);
   background:white;
-  color:var(--navy);
+  color:var(--charcoal);
 }}
 
 .proposal-dismiss {{
@@ -2085,7 +2262,7 @@ h1 {{
   height:18px;
   flex:0 0 auto;
   border:2px solid var(--border);
-  border-top-color:var(--navy);
+  border-top-color:var(--charcoal);
   border-radius:50%;
   animation:proposal-spin .8s linear infinite;
 }}
@@ -2097,17 +2274,16 @@ h1 {{
 </head>
 <body>
 <main>
-  <div style="display:flex;justify-content:space-between;gap:16px"><a class="back" href="/projects">← Projects</a><a class="back" href="/">Home</a></div>
-  <a href="/tasks/new" style="color:var(--navy);text-decoration:none;font-weight:750;margin-top:10px;margin-left:14px">New Task</a>
-  <div class="header">
-    <h1>{name}</h1>
+  <a class="detail-back" href="/projects">← Projects</a>
+  <div class="page-heading header">
+    <h1 class="brand">{name}</h1>
     <div class="summary">
       <span>{count} open task{"s" if count != 1 else ""}</span>
       {status_html}
     </div>
   </div>
 
-  <section class="context-card">
+  <section class="surface-card context-card">
     <h2>Project outcome</h2>
     <p class="context-note">
       Describe what done looks like for this project. AIOS will use this to reason about remaining work.
@@ -2180,6 +2356,7 @@ h1 {{
     </form>
   </section>
 </main>
+{_bottom_nav_html(active="projects")}
 <script>
 function wireProjectTaskRow(row) {{ const title=row.querySelector('.project-editor-title'); if(title){{ const remember=function(){{row.dataset.editedTitle=title.value;}}; title.addEventListener('input',remember); title.addEventListener('change',remember); remember(); }} const trash=row.querySelector('.project-editor-trash'); if(trash) trash.onclick=function(){{row.remove();}}; row.addEventListener('dragstart',function(e){{row.classList.add('dragging');e.dataTransfer.effectAllowed='move';}}); row.addEventListener('dragend',function(){{row.classList.remove('dragging');}}); }}
 function projectTaskRow(title) {{ const row=document.createElement('div'); row.className='project-editor-row'; row.draggable=true; row.dataset.taskId=''; row.innerHTML='<button class="project-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder">☷</button><span></span><div class="project-editor-main"><input type="hidden" name="task_id" value=""><input class="project-editor-title" name="task_title" type="text" aria-label="Task title"><div class="task-meta">New task</div></div><span></span><button class="project-editor-trash" type="button" title="Remove task" aria-label="Remove task">🗑</button>'; row.querySelector('.project-editor-title').value=title||''; wireProjectTaskRow(row); return row; }}
@@ -2232,29 +2409,25 @@ def _possible_duplicate_new_task_page(review: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>AIOS New Task Review</title>
 <style>
-:root {{--navy:#264155;--paper:#f7f7f3;--ink:#17242d;--muted:#66747d;--border:#d9dedf;--card:#fff;}}
-* {{box-sizing:border-box;}}
-body {{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}}
-main {{width:min(760px,100%);margin:0 auto;padding:max(26px,env(safe-area-inset-top)) 18px 42px;}}
-.back {{color:var(--navy);text-decoration:none;font-weight:750;}}
-h1 {{margin:24px 0 6px;color:var(--navy);font-size:clamp(2rem,6vw,2.7rem);letter-spacing:-.03em;}}
-.intro {{margin:0 0 22px;color:var(--muted);line-height:1.45;}}
-.card {{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-top:16px;}}
-.label {{color:var(--muted);font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;margin-top:16px;}}
+{_mobile_shell_css()}
+.card {{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:28px 24px;margin-top:8px;box-shadow:var(--shadow);line-height:var(--line-relaxed);}}
+.label {{color:var(--muted);font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-top:18px;}}
 .label:first-child {{margin-top:0;}}
-.value {{margin-top:5px;font-size:1rem;line-height:1.45;}}
-.title {{font-size:1.18rem;font-weight:750;color:var(--navy);}}
+.value {{margin-top:8px;font-size:1rem;line-height:var(--line-relaxed);}}
+.title {{font-size:1.18rem;font-weight:700;color:var(--charcoal);}}
 .muted {{color:var(--muted);font-size:.88rem;}}
 </style>
 </head>
 <body>
 <main>
-  <a class="back" href="/reviews">← Review</a>
-  <h1>New task</h1>
-  <p class="intro">This task has not been created yet. AIOS is holding it for your duplicate decision.</p>
+  <a class="detail-back" href="/reviews">← Review</a>
+  <div class="page-heading">
+    <h1 class="brand">New task</h1>
+    <p class="subtitle">This task has not been created yet. AIOS is holding it for your duplicate decision.</p>
+  </div>
   <section class="card">
     <div class="label">Proposed task</div>
     <div class="value title">{title}</div>
@@ -2264,6 +2437,7 @@ h1 {{margin:24px 0 6px;color:var(--navy);font-size:clamp(2rem,6vw,2.7rem);letter
     {reason_html}
   </section>
 </main>
+{_bottom_nav_html(active="reviews")}
 </body>
 </html>'''
 
@@ -2824,76 +2998,56 @@ sessionStorage.removeItem(
 <meta charset="utf-8">
 <meta name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>AIOS Review</title>
 <style>
-:root {{
-  --navy:#264155;
-  --paper:#f7f7f3;
-  --ink:#17242d;
-  --muted:#66747d;
-  --border:#d9dedf;
-  --card:#fff;
-}}
-* {{ box-sizing:border-box; }}
-body {{
-  margin:0;
-  background:var(--paper);
-  color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main {{
-  width:min(760px,100%);
-  margin:0 auto;
-  padding:max(26px,env(safe-area-inset-top)) 18px 42px;
-}}
-.back {{
-  color:var(--navy);
-  text-decoration:none;
-  font-weight:750;
-}}
-h1 {{
-  margin:22px 0 6px;
-}}
-.intro {{
-  margin:0 0 22px;
-  color:var(--muted);
+{_mobile_shell_css()}
+.notice {{
+  margin:0 0 20px;
+  padding:16px 18px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-2xl);
+  line-height:var(--line-relaxed);
+  box-shadow:var(--shadow);
 }}
 .auto-merge-notice {{
   display:none;
-  background:#fff;
+  background:var(--card);
   border:1px solid var(--border);
-  border-left:4px solid var(--navy);
-  border-radius:12px;
-  padding:14px 16px;
-  margin:0 0 16px;
-  line-height:1.45;
+  border-left:4px solid var(--charcoal);
+  border-radius:var(--radius-2xl);
+  padding:18px 20px;
+  margin:0 0 20px;
+  line-height:var(--line-relaxed);
+  box-shadow:var(--shadow);
 }}
 .auto-merge-notice strong {{
-  color:var(--navy);
+  color:var(--charcoal);
 }}
 .auto-merge-notice > strong {{
   display:block;
-  margin-bottom:4px;
+  margin-bottom:6px;
 }}
 .review-task-row {{
   display:flex;
   align-items:flex-start;
   justify-content:space-between;
-  gap:12px;
-  margin-bottom:4px;
+  gap:14px;
+  margin-bottom:8px;
 }}
 .review-task-row .review-task-link {{
   flex:1;
   font-size:1.05rem;
+  line-height:var(--line-relaxed);
 }}
 .review-delete-button {{
-  width:40px;
-  height:40px;
-  flex:0 0 40px;
+  width:44px;
+  height:44px;
+  flex:0 0 44px;
   padding:0;
   border:0;
-  border-radius:9px;
+  border-radius:12px;
   background:transparent;
   cursor:pointer;
   font-size:1rem;
@@ -2902,81 +3056,85 @@ h1 {{
 .review-delete-button:hover,
 .review-delete-button:focus-visible {{
   opacity:1;
-  background:#eceeed;
+  background:var(--accent-soft);
 }}
 .clarification-edit {{
   width:100%;
-  min-height:88px;
-  margin:8px 0 4px;
-  padding:11px 12px;
+  min-height:96px;
+  margin:10px 0 6px;
+  padding:14px 16px;
   border:1px solid var(--border);
-  border-radius:10px;
-  background:#fff;
+  border-radius:var(--radius-2xl);
+  background:var(--highlight);
   color:var(--ink);
   font:inherit;
-  line-height:1.45;
+  line-height:var(--line-relaxed);
   resize:vertical;
 }}
 .clarification-edit:focus {{
-  outline:2px solid rgba(38,65,85,.18);
-  border-color:var(--navy);
+  outline:3px solid rgba(44,44,44,.12);
+  border-color:rgba(44,44,44,.22);
 }}
 .review-card {{
   background:var(--card);
   border:1px solid var(--border);
-  border-radius:14px;
-  padding:18px;
-  margin-bottom:14px;
+  border-radius:var(--radius-2xl);
+  padding:24px 22px;
+  margin-bottom:20px;
+  box-shadow:var(--shadow);
 }}
 .review-label {{
   color:var(--muted);
   font-size:.8rem;
-  font-weight:800;
+  font-weight:700;
   text-transform:uppercase;
-  letter-spacing:.03em;
-  margin-bottom:16px;
+  letter-spacing:.04em;
+  margin-bottom:18px;
 }}
 .review-section-label {{
   color:var(--muted);
-  font-size:.78rem;
-  font-weight:750;
-  margin-top:10px;
+  font-size:.82rem;
+  font-weight:600;
+  margin-top:12px;
+  line-height:var(--line-body);
 }}
 .review-task,
 .review-existing {{
-  margin-top:4px;
+  margin-top:6px;
   font-size:1rem;
-  line-height:1.4;
+  line-height:var(--line-relaxed);
 }}
 .review-existing {{
   display:flex;
-  gap:9px;
+  gap:10px;
   align-items:baseline;
   flex-wrap:wrap;
 }}
 .review-task-link {{
-  color:var(--navy);
+  color:var(--charcoal);
   text-decoration:none;
+  font-weight:600;
 }}
 .review-task-link:hover {{
   text-decoration:underline;
 }}
 .review-score {{
   color:var(--muted);
-  font-size:.82rem;
+  font-size:.84rem;
 }}
 .review-pending {{
   display:flex;
-  gap:12px;
+  gap:14px;
   align-items:center;
-  padding:8px 0;
+  padding:10px 0;
+  line-height:var(--line-relaxed);
 }}
 .review-spinner {{
   width:20px;
   height:20px;
   flex:0 0 20px;
   border:3px solid var(--border);
-  border-top-color:var(--navy);
+  border-top-color:var(--charcoal);
   border-radius:50%;
   animation:review-spin .8s linear infinite;
 }}
@@ -2985,64 +3143,60 @@ h1 {{
 }}
 .review-stale-note {{
   color:var(--muted);
-  font-size:.88rem;
-  line-height:1.4;
-  padding:8px 0;
+  font-size:.9rem;
+  line-height:var(--line-relaxed);
+  padding:10px 0;
 }}
 .review-actions {{
   display:flex;
-  gap:9px;
+  gap:10px;
   flex-wrap:wrap;
-  margin-top:18px;
+  margin-top:22px;
 }}
 .review-actions form {{
   margin:0;
 }}
 .review-primary,
 .review-secondary {{
-  border-radius:9px;
-  padding:8px 12px;
+  border-radius:var(--radius-2xl);
+  padding:10px 16px;
   font:inherit;
-  font-weight:750;
+  font-weight:700;
   cursor:pointer;
+  line-height:var(--line-body);
 }}
 .review-primary {{
-  border:1px solid var(--navy);
-  background:var(--navy);
-  color:white;
+  border:0;
+  background:var(--charcoal);
+  color:var(--paper);
 }}
 .review-secondary {{
   border:1px solid var(--border);
-  background:white;
-  color:var(--navy);
+  background:var(--card);
+  color:var(--charcoal);
 }}
 .empty-state {{
-  padding:20px;
-  background:white;
+  padding:28px 24px;
+  background:var(--card);
   border:1px solid var(--border);
-  border-radius:12px;
+  border-radius:var(--radius-2xl);
   color:var(--muted);
-}}
-.notice {{
-  margin:14px 0;
-  padding:12px;
-  background:white;
-  border:1px solid var(--border);
-  border-radius:10px;
+  line-height:var(--line-relaxed);
+  box-shadow:var(--shadow);
 }}
 </style>
 </head>
 <body>
 <main>
-  <a class="back" href="/">← Home</a>
-  <h1>Review</h1>
-  <p class="intro">
-    Resolve tasks that AIOS thinks may already exist.
-  </p>
+  <div class="page-heading">
+    <h1 class="brand">Review</h1>
+    <p class="subtitle">Resolve tasks that AIOS thinks may already exist.</p>
+  </div>
   {notice}
   {auto_notice_html}
-  {cards}
+  <div class="review-list">{cards}</div>
 </main>
+{_bottom_nav_html(active="reviews")}
 {pending_refresh_script}
 <script>
 (() => {{
@@ -3365,72 +3519,41 @@ def _create_task_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+<meta name="theme-color" content="#1A1A1A">
 <title>New Task · AIOS</title>
 <style>
-:root {{
-  --navy:#264155; --yellow:#ffc93c; --paper:#f7f7f3;
-  --ink:#17242d; --muted:#66747d; --border:#d9dedf;
-  --card:#fff; --error:#fae9e7;
-}}
-* {{ box-sizing:border-box; }}
-body {{
-  margin:0; background:var(--paper); color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main {{
-  width:min(760px,100%); margin:0 auto;
-  padding:max(26px,env(safe-area-inset-top)) 18px 42px;
-}}
-.header {{
-  display:flex; justify-content:space-between; align-items:flex-start;
-  gap:16px; margin-bottom:22px;
-}}
-h1 {{
-  margin:0; color:var(--navy); font-size:clamp(2rem,5vw,2.7rem);
-  letter-spacing:-.035em;
-}}
-.subtitle {{ margin:7px 0 0; color:var(--muted); }}
-.home-link {{
-  color:var(--navy); text-decoration:none; font-weight:750; margin-top:8px;
-}}
-.notice {{ padding:12px 14px; border-radius:12px; margin-bottom:16px; }}
+{_mobile_shell_css()}
+.notice {{ padding:16px 18px; border-radius:var(--radius-2xl); margin-bottom:20px; line-height:var(--line-relaxed); box-shadow:var(--shadow); }}
 .error {{ background:var(--error); }}
 .card {{
   background:var(--card); border:1px solid var(--border);
-  border-radius:18px; padding:22px;
-  box-shadow:0 10px 30px rgba(38,65,85,.06);
+  border-radius:var(--radius-2xl); padding:24px 22px;
+  box-shadow:var(--shadow);
 }}
-.grid {{
-  display:grid; grid-template-columns:1fr 1fr; gap:16px;
-}}
+.grid {{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }}
 .full {{ grid-column:1/-1; }}
 label {{
-  display:grid; gap:7px; color:var(--ink); font-size:.88rem; font-weight:700;
+  display:grid; gap:8px; color:var(--ink); font-size:.92rem; font-weight:600; line-height:var(--line-body);
 }}
 input[type="text"], input[type="date"], select {{
-  width:100%; min-height:46px; border:1px solid var(--border);
-  border-radius:12px; padding:0 13px; background:#fff;
-  color:var(--ink); font:inherit;
+  width:100%; min-height:48px; border:1px solid var(--border);
+  border-radius:var(--radius-2xl); padding:0 16px; background:var(--highlight);
+  color:var(--ink); font:inherit; line-height:var(--line-body);
 }}
 .checkbox-row {{
-  display:flex; align-items:center; gap:10px; min-height:44px;
+  display:flex; align-items:center; gap:12px; min-height:48px; line-height:var(--line-relaxed);
 }}
-.checkbox-row input {{
-  width:20px; height:20px; accent-color:var(--yellow);
-}}
-.actions {{
-  display:flex; gap:10px; margin-top:20px;
-}}
+.checkbox-row input {{ width:20px; height:20px; accent-color:var(--charcoal); }}
+.actions {{ display:flex; gap:12px; margin-top:24px; }}
 button {{
-  min-height:46px; border:0; border-radius:12px;
-  padding:0 18px; background:var(--yellow);
-  color:var(--navy); font:inherit; font-weight:800; cursor:pointer;
+  min-height:48px; border:0; border-radius:var(--radius-2xl);
+  padding:0 20px; background:var(--charcoal);
+  color:var(--paper); font:inherit; font-weight:700; cursor:pointer;
 }}
 .cancel {{
-  min-height:46px; display:inline-flex; align-items:center;
-  padding:0 14px; border:1px solid var(--border); border-radius:12px;
-  color:var(--navy); text-decoration:none; font-weight:700; background:#fff;
+  min-height:48px; display:inline-flex; align-items:center;
+  padding:0 16px; border:1px solid var(--border); border-radius:var(--radius-2xl);
+  color:var(--charcoal); text-decoration:none; font-weight:600; background:var(--card);
 }}
 @media (max-width:600px) {{
   .grid {{ grid-template-columns:1fr; }}
@@ -3440,12 +3563,9 @@ button {{
 </head>
 <body>
 <main>
-  <div class="header">
-    <div>
-      <h1>New Task</h1>
-      <p class="subtitle">Create a task directly when you already know what needs to be done.</p>
-    </div>
-    <a class="home-link" href="/">Home</a>
+  <div class="page-heading">
+    <h1 class="brand">New Task</h1>
+    <p class="subtitle">Create a task directly when you already know what needs to be done.</p>
   </div>
 
   {notice}
@@ -3509,6 +3629,7 @@ button {{
     </section>
   </form>
 </main>
+{_bottom_nav_html(active="new")}
 </body>
 </html>"""
 
@@ -3576,12 +3697,16 @@ def _page(
                 '</div>'
             )
 
-        meta = " · ".join(meta_parts)
-        meta_html = (
-            f'<div class="task-meta">{meta}</div>'
-            if meta
-            else ""
-        )
+        meta_html = ""
+        if meta_parts:
+            meta_html = (
+                '<div class="task-meta">'
+                + "".join(
+                    f'<span class="task-meta-tag">{part}</span>'
+                    for part in meta_parts
+                )
+                + "</div>"
+            )
 
         if search:
             row_return_to = f"/?search={quote_plus(search)}#search-results"
@@ -3595,21 +3720,23 @@ def _page(
         )
 
         return (
-            '<article class="task-row">'
-            + f'<form class="complete-form" method="post" action="/tasks/{task_id}/complete">'
+            f'<article class="task-row" data-task-id="{task_id}">'
+            '<div class="task-title-row">'
+            + f'<form class="complete-form" data-task-id="{task_id}" method="post" action="/tasks/{task_id}/complete">'
             + '<button class="complete-checkbox" type="submit" aria-label="Mark task done" title="Mark done">'
             + '<span aria-hidden="true"></span></button></form>'
-            + '<div class="task-main">'
-            + f'<div class="task-title"><a class="task-link" href="/tasks/{task_id}">{title}</a></div>'
+            + f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
+            + '</div>'
+            + '<div class="task-sub">'
             + parent_html
             + meta_html
-            + '</div>'
+            + '<div class="task-action-bar">'
             + snooze_html
             + f'<form class="delete-form" method="post" action="/tasks/{task_id}/delete" '
             + 'onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             + '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task">'
             + '<span aria-hidden="true">🗑️</span></button></form>'
-            + '</article>'
+            + "</div></div></article>"
         )
 
     def render_completed_task(task: dict) -> str:
@@ -3642,14 +3769,14 @@ def _page(
 
         return (
             '<article class="task-row completed-task-row">'
+            '<div class="task-title-row">'
             '<div class="completed-task-icon" aria-hidden="true">✓</div>'
-            '<div class="task-main">'
-            f'<div class="task-title"><a class="task-link" href="/tasks/{task_id}">{title}</a></div>'
+            f'<a class="task-link" href="/tasks/{task_id}">{title}</a>'
+            '</div>'
+            '<div class="task-sub">'
             + parent_html
-            + f'<div class="task-meta">{html.escape(completed_meta)}</div>'
-            + '</div>'
-            '<div class="completed-task-spacer" aria-hidden="true"></div>'
-            '</article>'
+            + f'<div class="task-meta"><span class="task-meta-tag">{html.escape(completed_meta)}</span></div>'
+            + "</div></article>"
         )
 
     section_specs = (
@@ -3707,11 +3834,11 @@ def _page(
             + (f' id="search-results"' if key == "search_results" else f' id="section-{html.escape(key, quote=True)}"')
             + f'{search_open}>'
             f'<summary class="task-group-heading">'
-            f'<span>{html.escape(heading)}</span>'
+            f'<span class="task-group-label">{html.escape(heading)}</span>'
             f'<span class="section-count">{len(section_tasks)}</span>'
             f'</summary>'
             + completed_summary_html
-            + rows_html
+            + f'<div class="task-list">{rows_html}</div>'
             + "</details>"
         )
 
@@ -3811,16 +3938,22 @@ def _page(
             else ""
         )
 
+        timebox_sub_html = (
+            f'<div class="focus-start-sub-line focus-timebox-inline"><strong>Give it {html.escape(timebox_text)}</strong>'
+            '<span> — only for this starting move.</span></div>'
+        ) if timebox_text else ""
+
         starter_html = ""
 
         if activation_pending:
             starter_html = (
                 '<div class="focus-start">'
-                '<div class="focus-start-label">Start here</div>'
+                '<div class="focus-start-heading">Start here</div>'
+                '<div class="task-title-row">'
+                '<span class="task-check-placeholder" aria-hidden="true"></span>'
                 '<div class="focus-pending">'
                 '<span class="mini-spinner"></span> Finding your next step…'
-                '</div>'
-                '</div>'
+                '</div></div></div>'
             )
 
         if starter:
@@ -3828,14 +3961,14 @@ def _page(
                 safe_activation_id = html.escape(activation_id)
                 starter_html = (
                     '<div class="focus-start">'
-                    '<div class="focus-start-label">Start here</div>'
-                    '<div class="focus-start-row">'
-                    f'<form class="complete-form focus-activation-complete" method="post" action="/tasks/{safe_activation_id}/complete" onsubmit="showFocusUpdating()">'
+                    '<div class="focus-start-heading">Start here</div>'
+                    '<div class="task-title-row">'
+                    f'<form class="complete-form focus-activation-complete" data-task-id="{safe_activation_id}" method="post" action="/tasks/{safe_activation_id}/complete">'
                     '<button class="complete-checkbox" type="submit" aria-label="Complete starting step" title="Complete starting step"><span aria-hidden="true"></span></button>'
                     '</form>'
-                    '<div class="focus-start-main">'
-                    f'<a class="focus-start-step" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
+                    f'<a class="task-link" href="/tasks/{safe_activation_id}">{html.escape(starter)}</a>'
                     '</div>'
+                    '<div class="task-sub">'
                     + (
                         focus_step_actions_html
                         if activation_not_useful
@@ -3848,21 +3981,22 @@ def _page(
                             '</div>'
                         )
                     )
-                    + '</div>'
-                    + '</div>'
+                    + timebox_sub_html
+                    + '</div></div>'
                 )
             else:
                 starter_html = (
                     '<div class="focus-start">'
-                    '<div class="focus-start-label">Start here</div>'
-                    f'<div class="focus-start-step">{html.escape(starter)}</div>'
+                    '<div class="focus-start-heading">Start here</div>'
+                    '<div class="task-title-row">'
+                    '<span class="task-check-placeholder" aria-hidden="true"></span>'
+                    f'<div class="task-link">{html.escape(starter)}</div>'
                     '</div>'
+                    + (f'<div class="task-sub">{timebox_sub_html}</div>' if timebox_sub_html else '')
+                    + '</div>'
                 )
 
-        timebox_html = (
-            f'<div class="focus-timebox">Give it {html.escape(timebox_text)}'
-            '<span> — only for this starting move.</span></div>'
-        ) if timebox_text else ""
+        timebox_html = ""
 
         context_value = focus_context_draft if focus_context_state in {"ready", "answer_pending"} else focus_context
         context_summary = "Edit context" if focus_context else "Add context"
@@ -3893,18 +4027,27 @@ def _page(
             + context_help_button + '</div></details>'
         )
 
+        meta_html = ""
+        if meta:
+            meta_html = (
+                '<div class="focus-meta">'
+                + "".join(f'<span class="focus-meta-tag">{part}</span>' for part in meta)
+                + "</div>"
+            )
+
         focus_card = (
-            '<section class="focus-card" id="focus-card">'
+            f'<section class="focus-card surface-card" id="focus-card" data-task-id="{safe_id}">'
             '<div class="focus-label">⭐ Best Next Action</div>'
-            '<div class="focus-task-row focus-parent-row">'
-            f'<form class="complete-form focus-parent-complete" method="post" action="/tasks/{safe_id}/complete">'
+            '<div class="task-title-row focus-parent-title-row">'
+            f'<form class="complete-form focus-parent-complete" data-task-id="{safe_id}" method="post" action="/tasks/{safe_id}/complete">'
             '<button class="complete-checkbox" type="submit" aria-label="Complete Best Next Action" title="Complete Best Next Action"><span aria-hidden="true"></span></button>'
             '</form>'
-            '<div class="focus-main">'
-            f'<a class="focus-title" href="/tasks/{safe_id}">{title}</a>'
+            f'<a class="task-link" href="/tasks/{safe_id}">{title}</a>'
+            '</div>'
+            '<div class="task-sub focus-parent-sub">'
             + focus_parent_meta
-            + f'<div class="focus-meta">{" · ".join(meta)}</div>'
-            + '</div>'
+            + meta_html
+            + '<div class="focus-action-bar">'
             + _task_snooze_control_html(
                 focus_id,
                 return_to="/?refresh_focus=1#focus-card",
@@ -3912,7 +4055,7 @@ def _page(
             )
             + f'<form class="delete-form focus-delete" method="post" action="/tasks/{safe_id}/delete" onsubmit="return confirm(&quot;Delete this task?&quot;);">'
             '<button class="trash-button" type="submit" aria-label="Delete task" title="Delete task"><span aria-hidden="true">🗑️</span></button></form>'
-            '</div>'
+            + "</div></div>"
             + starter_html
             + timebox_html
             + focus_context_html
@@ -3982,236 +4125,202 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#264155">
-  <title>AIOS Brain Dump</title>
+  <meta name="theme-color" content="#1A1A1A">
+  <meta name="application-name" content="AIOS">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="AIOS">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/pwa/icon-32.png">
+  <link rel="apple-touch-icon" href="/pwa/icon-192.png">
+  <title>AIOS</title>
   <style>
-    :root {{
-      color-scheme: light;
-      --navy: #264155;
-      --yellow: #ffc93c;
-      --paper: #f7f7f3;
-      --ink: #17242d;
-      --muted: #66747d;
-      --border: #d9dedf;
-      --success: #e8f4e8;
-      --error: #fae9e7;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      background: var(--paper);
-      color: var(--ink);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }}
-    main {{
-      width: min(720px, 100%);
-      margin: 0 auto;
-      padding: max(24px, env(safe-area-inset-top)) 18px
-               max(32px, env(safe-area-inset-bottom));
-    }}
-    .app-header {{ display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:24px; }}
-    .app-home {{ color:var(--navy); text-decoration:none; font-weight:850; font-size:1.05rem; letter-spacing:-.02em; white-space:nowrap; }}
-    .dashboard-nav {{ display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-left:auto; }}
-    .dashboard-nav a, .menu-button {{ min-height:40px; display:inline-flex; align-items:center; padding:0 13px; border:0; border-radius:10px; background:transparent; color:var(--navy); text-decoration:none; font:inherit; font-weight:750; white-space:nowrap; cursor:pointer; }}
-    .dashboard-nav a:hover, .menu-button:hover {{ background:#eceeed; }}
-    .dashboard-nav .new-task-link {{ background:var(--yellow); }}
-    .dashboard-nav .new-task-link:hover {{ background:#f6bf2d; }}
-    .nav-menu {{ position:relative; }}
-    .nav-menu summary {{ list-style:none; }}
-    .nav-menu summary::-webkit-details-marker {{ display:none; }}
-    .menu-button {{ font-size:1.2rem; padding:0 11px; }}
-    .menu-panel {{ position:absolute; z-index:30; top:46px; right:0; min-width:190px; padding:7px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 10px 30px rgba(24,40,52,.14); }}
-    .menu-panel a, .menu-panel button {{ width:100%; min-height:42px; display:flex; align-items:center; box-sizing:border-box; padding:0 11px; border:0; border-radius:8px; background:transparent; color:var(--navy); text-decoration:none; font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }}
-    .menu-panel a:hover, .menu-panel button:hover {{ background:#f3f4f2; }}
-    .page-heading {{ margin-bottom:22px; }}
-    .page-heading .brand {{ margin-bottom:4px; }}
-    .dashboard-subtitle {{ margin:0; color:var(--muted); font-size:.98rem; }}
+    {_mobile_shell_css()}
     .capture-heading {{
       display:flex;
       justify-content:space-between;
       align-items:flex-end;
-      margin-bottom:10px;
+      margin-bottom:14px;
     }}
     .capture-heading h2 {{
       margin:0;
-      color:var(--navy);
-      font-size:1.2rem;
+      color:var(--charcoal);
+      font-size:1.15rem;
+      font-weight:700;
     }}
     .capture-heading p {{
-      margin:4px 0 0;
+      margin:6px 0 0;
       color:var(--muted);
-      font-size:.86rem;
+      font-size:.92rem;
+      line-height:var(--line-relaxed);
     }}
-    .bna-card {{
-      margin:0 0 20px;
-      padding:18px 20px;
-      border:1px solid rgba(255,201,60,.72);
-      border-radius:16px;
-      background:#fff8dc;
-      box-shadow:0 4px 18px rgba(38,65,85,.05);
+    .focus-card {{
+      --task-check:20px;
+      --task-check-gap:12px;
+      margin:0 0 24px;
     }}
-    .bna-eyebrow {{ margin-bottom:8px; color:var(--navy); font-size:.88rem; font-weight:800; }}
-    .bna-title {{ display:inline-block; color:var(--ink); text-decoration:none; font-size:1.2rem; line-height:1.3; font-weight:800; }}
-    .bna-title:hover {{ text-decoration:underline; }}
-    .bna-context {{ margin-top:7px; color:var(--muted); font-size:.84rem; }}
-    .bna-why {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:13px; color:var(--ink); font-size:.88rem; }}
-    .bna-why-label {{ color:var(--navy); font-weight:800; }}
-    .bna-open {{ display:inline-block; margin-top:13px; color:var(--navy); text-decoration:none; font-size:.86rem; font-weight:800; }}
-    .bna-open:hover {{ text-decoration:underline; }}
-    .focus-card {{ margin:0 0 20px; padding:18px 20px; border:1px solid rgba(255,201,60,.72); border-radius:16px; background:#fff8dc; box-shadow:0 4px 18px rgba(38,65,85,.05); }}
-    .focus-pending {{ display:flex; align-items:center; gap:10px; color:var(--ink); font-size:1.08rem; margin-top:14px; }}
-    .focus-pending .mini-spinner {{ display:inline-block; flex:0 0 auto; width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--navy); border-radius:50%; animation:dashboard-spin .8s linear infinite; }}
-    @keyframes dashboard-spin {{ to {{ transform:rotate(360deg); }} }}
-    .focus-label {{ margin-bottom:12px; color:var(--navy); font-size:.9rem; font-weight:850; }}
-    .focus-task-row {{ display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:10px; align-items:center; }}
-    .focus-parent-row {{ grid-template-columns:44px minmax(0,1fr) 44px 44px; }}
-    .focus-main {{ min-width:0; }}
-    .focus-title {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.24; font-weight:850; }}
-    .focus-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; line-height:1.35; }}
-    .focus-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
-    .focus-title:hover {{ text-decoration:underline; }}
-    .focus-meta {{ margin-top:5px; color:var(--muted); font-size:.84rem; }}
-    .focus-snooze, .task-snooze, .project-task-snooze {{ position:relative; }}
-    .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
-    .snooze-icon-button::-webkit-details-marker {{ display:none; }}
-    .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
-    .task-snooze-menu {{ position:absolute; z-index:30; top:42px; right:0; width:260px; padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
-    .task-snooze-menu form {{ display:block; margin:0; }}
-    .task-snooze-menu button {{ width:100%; min-height:0; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
-    .task-snooze-menu button:hover {{ background:#f3f4f2; }}
-    .task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
-    .task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:.8rem; }}
-    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
-    .focus-start {{ margin:16px 44px 0 0; padding-top:14px; border-top:1px solid rgba(38,65,85,.12); }}
-    .focus-start-label {{ color:var(--navy); font-size:.82rem; font-weight:850; text-transform:uppercase; letter-spacing:.04em; }}
-    .focus-start-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:center; margin-top:8px; }}
-    .focus-start-main {{ min-width:0; }}
-    .focus-start-step {{ color:var(--ink); text-decoration:none; font-size:1rem; line-height:1.45; font-weight:700; }}
-    .focus-start-step:hover {{ text-decoration:underline; }}
-    .focus-context-panel {{ margin:14px 44px 0 44px; padding-top:12px; border-top:1px solid rgba(38,65,85,.12); }}
-    .focus-context-panel > summary {{ color:var(--navy); font-size:.84rem; font-weight:800; cursor:pointer; width:max-content; }}
-    .focus-context-body {{ margin-top:10px; max-width:720px; }}
-    .focus-context-body p {{ margin:0 0 9px; color:var(--muted); font-size:.84rem; line-height:1.4; }}
-    .focus-context-question {{ margin:0 0 10px; padding:9px 11px; border-radius:9px; background:rgba(255,255,255,.62); color:var(--ink); font-size:.86rem; line-height:1.4; }}
-    .focus-context-body textarea {{ width:100%; resize:vertical; border:1px solid var(--border); border-radius:10px; padding:10px 11px; font:inherit; font-size:.9rem; line-height:1.4; background:white; }}
-    .focus-context-save, .focus-context-help-button, .focus-context-answer-button {{ margin-top:8px; min-height:38px; border:0; border-radius:9px; padding:0 12px; font:inherit; font-size:.84rem; font-weight:800; cursor:pointer; }}
-    .focus-context-save {{ background:var(--navy); color:white; }}
-    .focus-context-help-button {{ background:transparent; color:var(--navy); padding-left:0; }}
-    .focus-context-answer-form {{ margin:0 0 12px; }}
-    .focus-context-answer-form label {{ color:var(--navy); font-size:.82rem; font-weight:800; }}
-    .focus-context-answer-form textarea {{ display:block; margin-top:6px; min-height:72px; }}
-    .focus-context-answer-button {{ width:max-content; background:white; color:var(--navy); border:1px solid var(--border); }}
-    .focus-context-answer {{ font-weight:400 !important; }}
-    .focus-autoexpand {{ overflow-y:hidden; resize:vertical; }}
-    .focus-context-processing {{ display:inline-flex; align-items:center; gap:.55rem; }}
-    .focus-context-spinner {{
-      width:1rem; height:1rem; border:2px solid currentColor;
-      border-right-color:transparent; border-radius:50%;
-      display:inline-block; animation:focus-context-spin .8s linear infinite;
-      flex:0 0 auto;
+    .tasks-section {{
+      --task-check:20px;
+      --task-check-gap:12px;
+      margin-top:0;
     }}
-    @keyframes focus-context-spin {{ to {{ transform:rotate(360deg); }} }}
-    .focus-context-pending {{ display:flex; align-items:center; gap:8px; margin:8px 0; color:var(--muted); font-size:.84rem; }}
-
-    .focus-step-actions {{ display:flex; align-items:center; gap:10px; }}
-    .focus-not-now-form, .focus-not-useful-form {{ display:block; }}
-    .focus-not-now, .focus-not-useful {{
-      border:0; background:transparent; color:var(--muted);
-      font:inherit; font-size:.84rem; font-weight:700;
-      cursor:pointer; padding:7px 4px;
+    .task-title-row {{
+      display:flex;
+      align-items:flex-start;
+      gap:var(--task-check-gap);
+      min-width:0;
     }}
-    .focus-not-now:hover, .focus-not-useful:hover {{ color:var(--navy); text-decoration:underline; }}
-    .focus-rejected-note {{ color:var(--muted); font-weight:800; font-size:.86rem; white-space:nowrap; }}
-    .focus-timebox {{ margin:10px 44px 0 54px; color:var(--navy); font-size:.88rem; font-weight:800; }}
-    .focus-timebox span {{ color:var(--muted); font-weight:500; }}
-    .brand {{
-      margin: 0 0 8px;
-      font-size: clamp(2rem, 8vw, 3.25rem);
-      letter-spacing: -0.04em;
-      color: var(--navy);
+    .task-title-row .complete-form,
+    .task-title-row .focus-activation-complete {{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 var(--task-check);
+      width:var(--task-check);
+      min-width:var(--task-check);
+      margin:1px 0 0;
+      padding:0;
     }}
-    .subtitle {{
-      margin: 0 0 28px;
-      color: var(--muted);
-      font-size: 1rem;
+    .task-check-placeholder {{
+      flex:0 0 var(--task-check);
+      width:var(--task-check);
+      min-width:var(--task-check);
+      height:var(--task-check);
     }}
-    form {{
-      display: grid;
-      gap: 14px;
+    .task-title-row .complete-checkbox {{
+      width:var(--task-check);
+      height:var(--task-check);
+      min-height:0;
+      padding:0;
+      flex-shrink:0;
     }}
-    textarea {{
-      width: 100%;
-      min-height: 150px;
-      max-height: 280px;
-      resize: vertical;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 18px;
-      background: white;
-      color: var(--ink);
-      font: inherit;
-      font-size: 1.08rem;
-      line-height: 1.5;
-      box-shadow: 0 1px 2px rgba(0,0,0,.03);
+    .task-title-row .complete-checkbox span {{
+      width:var(--task-check);
+      height:var(--task-check);
+      border:1.5px solid rgba(26, 26, 26, 0.28);
+      border-radius:50%;
+      background:var(--card);
+      box-sizing:border-box;
+      display:block;
     }}
-    textarea:focus {{
-      outline: 3px solid rgba(255,201,60,.35);
-      border-color: var(--yellow);
+    .task-title-row .complete-checkbox:hover span,
+    .task-title-row .complete-checkbox:focus-visible span {{
+      border-color:rgba(26, 26, 26, 0.52);
+      box-shadow:none;
     }}
-    button {{
-      min-height: 54px;
-      border: 0;
-      border-radius: 14px;
-      background: var(--yellow);
-      color: #17242d;
-      font: inherit;
-      font-weight: 750;
-      font-size: 1.05rem;
-      cursor: pointer;
+    .task-title-row .complete-checkbox.is-completing span {{
+      background:var(--charcoal);
+      border-color:var(--charcoal);
     }}
-    button:disabled {{
-      opacity: .65;
-      cursor: wait;
+    .task-title-row .complete-checkbox.is-completing span::after {{
+      font-size:11px;
     }}
-    .notice {{
-      margin: 0 0 18px;
-      padding: 13px 15px;
-      border-radius: 12px;
-      line-height: 1.35;
+    .task-link {{
+      flex:1;
+      min-width:0;
+      display:block;
+      color:var(--charcoal);
+      text-decoration:none;
+      font-size:.9375rem;
+      line-height:1.35;
+      font-weight:400;
+      text-wrap:pretty;
+      overflow-wrap:anywhere;
     }}
-    .success {{ background: var(--success); }}
-    .error {{ background: var(--error); }}
-    .hint {{
-      color: var(--muted);
-      font-size: .9rem;
-      text-align: center;
-    }}
-
-    .tasks-section {{ margin-top:38px; padding-top:28px; border-top:1px solid var(--border); }}
-    .tasks-heading {{ margin:0 0 14px; font-size:1.35rem; color:var(--navy); }}
-    .task-group {{ margin-top:24px; }}
-    .task-group:first-of-type {{ margin-top:16px; }}
-    .task-group-heading {{ margin:0; padding:0 0 7px; color:var(--navy); font-size:.92rem; font-weight:750; letter-spacing:.04em; text-transform:uppercase; border-bottom:2px solid var(--yellow); }}
-    .task-search {{ display:flex; gap:10px; margin-bottom:14px; }}
-    .task-search input {{ flex:1; min-width:0; min-height:44px; border:1px solid var(--border); border-radius:12px; padding:0 13px; background:white; color:var(--ink); font:inherit; }}
-    .task-search button {{ min-height:44px; padding:0 16px; border-radius:12px; font-size:.95rem; }}
-    .task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }}
-    .completed-task-row {{ grid-template-columns:44px minmax(0,1fr) 44px; }}
-    .task-title {{ font-size:1rem; line-height:1.35; }}
-    .task-link {{ color:inherit; text-decoration:none; }}
     .task-link:hover {{ text-decoration:underline; }}
-    .task-meta {{ margin-top:5px; color:var(--muted); font-size:.82rem; }}
-    .task-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.82rem; }}
-    .task-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
-    .task-main {{ min-width:0; }}
-    .complete-form, .delete-form {{ display:flex; margin:0; align-items:center; justify-content:center; }}
-    .complete-checkbox, .trash-button {{ width:44px; height:44px; min-height:44px; padding:0; border:0; border-radius:10px; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; }}
-    .complete-checkbox span {{ width:22px; height:22px; border:2px solid var(--navy); border-radius:6px; background:white; display:block; }}
-    .complete-checkbox:hover span, .complete-checkbox:focus-visible span {{ border-color:var(--yellow); box-shadow:0 0 0 3px rgba(255,201,60,.28); }}
+    .task-sub {{
+      margin-top:4px;
+      padding-left:calc(var(--task-check) + var(--task-check-gap));
+      min-width:0;
+    }}
+    .task-sub-line + .task-sub-line,
+    .focus-step-actions + .focus-timebox-inline {{
+      margin-top:2px;
+    }}
+    .focus-pending {{ display:flex; align-items:center; gap:12px; color:var(--ink); font-size:.95rem; line-height:1.4; margin-top:0; }}
+    .focus-pending .mini-spinner {{ display:inline-block; flex:0 0 auto; width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--charcoal); border-radius:50%; animation:dashboard-spin .8s linear infinite; }}
+    @keyframes dashboard-spin {{ to {{ transform:rotate(360deg); }} }}
+    .focus-label {{
+      margin-bottom:12px;
+      color:var(--charcoal);
+      font-size:.72rem;
+      font-weight:700;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+    }}
+    .focus-parent-meta {{ margin-top:0; color:var(--muted); font-size:.8125rem; line-height:1.4; overflow-wrap:anywhere; }}
+    .focus-parent-meta + .focus-meta {{ margin-top:5px; }}
+    .focus-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
+    .focus-meta {{
+      display:flex;
+      flex-wrap:wrap;
+      gap:5px;
+      margin-top:0;
+      min-width:0;
+      max-width:100%;
+    }}
+    .focus-meta-tag {{
+      display:inline-flex;
+      align-items:center;
+      max-width:100%;
+      padding:3px 8px;
+      border-radius:999px;
+      background:var(--highlight);
+      color:var(--muted);
+      font-size:.6875rem;
+      font-weight:600;
+      line-height:1.2;
+      overflow-wrap:anywhere;
+    }}
+    .focus-action-bar,
+    .task-action-bar {{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:0;
+      margin:3px 0 0 -4px;
+    }}
+    .focus-card .trash-button,
+    .focus-card .snooze-icon-button {{
+      width:32px;
+      height:32px;
+      min-height:32px;
+    }}
+    .focus-snooze, .task-snooze, .project-task-snooze {{ position:relative; }}
+    .complete-checkbox,
+    .trash-button {{
+      width:44px;
+      height:44px;
+      min-height:44px;
+      padding:0;
+      border:0;
+      border-radius:12px;
+      background:transparent;
+      color:inherit;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      font-size:inherit;
+      font-weight:inherit;
+      line-height:1;
+    }}
+    .complete-checkbox span {{
+      width:22px;
+      height:22px;
+      border:2px solid var(--charcoal);
+      border-radius:7px;
+      background:var(--card);
+      display:block;
+    }}
+    .complete-checkbox:hover span,
+    .complete-checkbox:focus-visible span {{
+      border-color:var(--charcoal);
+      box-shadow:0 0 0 3px rgba(44,44,44,.12);
+    }}
     .complete-checkbox.is-completing span {{
-      background:var(--yellow);
-      border-color:var(--yellow);
+      background:var(--charcoal);
+      border-color:var(--charcoal);
       position:relative;
     }}
     .complete-checkbox.is-completing span::after {{
@@ -4221,116 +4330,483 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       display:flex;
       align-items:center;
       justify-content:center;
-      color:var(--navy);
+      color:var(--paper);
       font-size:16px;
       font-weight:800;
       line-height:1;
     }}
     .trash-button {{ font-size:1.08rem; opacity:.72; }}
-    .trash-button:hover, .trash-button:focus-visible {{ opacity:1; background:#eceeed; }}
+    .trash-button:hover, .trash-button:focus-visible {{ opacity:1; background:var(--accent-soft); }}
+    .complete-form, .delete-form, .focus-not-now-form, .focus-not-useful-form {{
+      display:flex;
+      margin:0;
+      gap:0;
+    }}
+    .snooze-icon-button {{
+      list-style:none;
+      width:44px;
+      height:44px;
+      min-height:44px;
+      border:0;
+      border-radius:12px;
+      background:transparent;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      font-size:1rem;
+      opacity:.72;
+      padding:0;
+      color:inherit;
+      font-weight:inherit;
+      line-height:1;
+    }}
+    .snooze-icon-button::-webkit-details-marker {{ display:none; }}
+    .snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:var(--accent-soft); }}
+    .task-snooze-menu {{
+      position:absolute;
+      z-index:30;
+      top:42px;
+      left:0;
+      right:auto;
+      width:min(260px, calc(100vw - 24px));
+      padding:10px;
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      background:var(--card);
+      box-shadow:var(--shadow-lg);
+    }}
+    .task-snooze-menu form {{ display:block; margin:0; }}
+    .task-snooze-menu button {{ width:100%; min-height:0; border:0; border-radius:10px; background:transparent; color:var(--ink); font:inherit; font-size:.88rem; font-weight:600; text-align:left; cursor:pointer; padding:10px 12px; line-height:var(--line-body); }}
+    .task-snooze-menu button:hover {{ background:var(--accent-soft); }}
+    .task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
+    .task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font:inherit; font-size:.84rem; }}
+    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
+    .focus-start {{
+      margin:20px 0 0;
+      padding-top:18px;
+      border-top:1px solid var(--border);
+    }}
+    .focus-start-heading {{
+      margin:0 0 12px;
+      color:var(--charcoal);
+      font-size:1.35rem;
+      font-weight:700;
+      letter-spacing:-0.015em;
+      line-height:1.15;
+    }}
+    .focus-timebox-inline {{
+      font-size:.8125rem;
+      line-height:1.35;
+    }}
+    .focus-timebox-inline strong {{ color:var(--muted); font-weight:500; }}
+    .focus-timebox-inline span {{ color:var(--muted); font-weight:400; }}
+    .focus-step-actions {{ display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; margin-top:0; }}
+    .focus-not-now, .focus-not-useful {{
+      border:0;
+      background:transparent;
+      color:var(--muted);
+      font:inherit;
+      font-size:.8125rem;
+      font-weight:600;
+      cursor:pointer;
+      padding:4px 0;
+      line-height:1.3;
+      min-height:0;
+    }}
+    .focus-not-now:hover, .focus-not-useful:hover {{ color:var(--charcoal); text-decoration:underline; }}
+    .focus-timebox {{
+      margin:8px 0 0 calc(var(--focus-check-col) + var(--focus-check-gap));
+      font-size:.8125rem;
+      line-height:1.4;
+    }}
+    .focus-timebox strong {{ color:var(--charcoal); font-weight:650; }}
+    .focus-timebox span {{ color:var(--muted); font-weight:500; }}
+    .focus-context-panel {{
+      margin:14px 0 0;
+      padding-top:12px;
+      padding-left:calc(var(--task-check) + var(--task-check-gap));
+      border-top:1px solid var(--border);
+    }}
+    .focus-context-panel > summary {{
+      color:var(--charcoal);
+      font-size:.8125rem;
+      font-weight:650;
+      cursor:pointer;
+      width:max-content;
+    }}
+    .focus-context-body {{ margin-top:12px; max-width:720px; }}
+    .focus-context-body p {{ margin:0 0 12px; color:var(--muted); font-size:.9rem; line-height:var(--line-relaxed); }}
+    .focus-context-question {{ margin:0 0 12px; padding:12px 14px; border-radius:12px; background:var(--highlight); color:var(--ink); font-size:.9rem; line-height:var(--line-relaxed); }}
+    .focus-context-body textarea {{ width:100%; resize:vertical; border:1px solid var(--border); border-radius:12px; padding:12px 14px; font:inherit; font-size:.95rem; line-height:var(--line-relaxed); background:var(--card); }}
+    .focus-context-save, .focus-context-help-button, .focus-context-answer-button {{ margin-top:10px; min-height:42px; border:0; border-radius:12px; padding:0 14px; font:inherit; font-size:.88rem; font-weight:700; cursor:pointer; }}
+    .focus-context-save {{ background:var(--charcoal); color:var(--paper); }}
+    .focus-context-help-button {{ background:transparent; color:var(--charcoal); padding-left:0; }}
+    .focus-context-answer-form {{ margin:0 0 14px; }}
+    .focus-context-answer-form label {{ color:var(--charcoal); font-size:.84rem; font-weight:700; }}
+    .focus-context-answer-form textarea {{ display:block; margin-top:8px; min-height:80px; }}
+    .focus-context-answer-button {{ width:max-content; background:var(--card); color:var(--charcoal); border:1px solid var(--border); }}
+    .focus-context-answer {{ font-weight:400 !important; }}
+    .focus-autoexpand {{ overflow-y:hidden; resize:vertical; }}
+    .focus-context-processing {{ display:inline-flex; align-items:center; gap:.55rem; }}
+    .focus-context-spinner {{ width:1rem; height:1rem; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; display:inline-block; animation:focus-context-spin .8s linear infinite; flex:0 0 auto; }}
+    @keyframes focus-context-spin {{ to {{ transform:rotate(360deg); }} }}
+    .focus-context-pending {{ display:flex; align-items:center; gap:8px; margin:10px 0; color:var(--muted); font-size:.8125rem; line-height:1.4; }}
+    .focus-rejected-note {{ color:var(--muted); font-weight:650; font-size:.8125rem; white-space:nowrap; }}
+    form:not(.complete-form):not(.delete-form):not(.focus-not-now-form):not(.focus-not-useful-form):not(.menu-form) {{
+      display:grid;
+      gap:16px;
+    }}
+    textarea {{
+      width:100%;
+      min-height:150px;
+      max-height:280px;
+      resize:vertical;
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      padding:20px;
+      background:var(--highlight);
+      color:var(--ink);
+      font:inherit;
+      font-size:1.05rem;
+      line-height:var(--line-relaxed);
+      box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
+    }}
+    textarea:focus {{ outline:3px solid rgba(44,44,44,.12); border-color:rgba(44,44,44,.22); }}
+    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button) {{
+      min-height:54px;
+      border:0;
+      border-radius:var(--radius-2xl);
+      background:var(--charcoal);
+      color:var(--paper);
+      font:inherit;
+      font-weight:700;
+      font-size:1.02rem;
+      cursor:pointer;
+      line-height:1.2;
+    }}
+    .menu-form {{
+      display:block;
+      margin:0;
+    }}
+    .menu-button,
+    .task-snooze-menu .menu-button,
+    .task-snooze-date .menu-button {{
+      width:100%;
+      min-height:0;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      color:var(--ink);
+      font:inherit;
+      font-size:.86rem;
+      font-weight:600;
+      text-align:left;
+      cursor:pointer;
+      padding:10px 12px;
+      line-height:var(--line-body);
+    }}
+    .menu-button:hover {{
+      background:var(--accent-soft);
+    }}
+    .task-snooze-date .menu-button {{
+      width:auto;
+      white-space:nowrap;
+    }}
+    button:disabled {{ opacity:.65; cursor:wait; }}
+    .optimistic-toast {{
+      position:fixed; left:50%; bottom:calc(var(--nav-offset) + 8px); z-index:80;
+      transform:translateX(-50%);
+      display:flex; align-items:center; gap:14px;
+      min-width:260px; max-width:min(520px,calc(100vw - 28px));
+      padding:14px 16px; border-radius:var(--radius-2xl);
+      background:var(--charcoal); color:var(--paper);
+      box-shadow:var(--shadow-lg);
+      font-size:.92rem; font-weight:600; line-height:var(--line-body);
+    }}
+    .optimistic-toast button {{
+      margin-left:auto; border:0; background:transparent; color:var(--paper);
+      font:inherit; font-weight:700; text-decoration:underline; cursor:pointer; min-height:0;
+    }}
+    .optimistic-toast.error {{ background:#5C3333; }}
+    .optimistic-hidden {{ display:none !important; }}
+    .notice {{
+      margin:0 0 20px;
+      padding:16px 18px;
+      border-radius:var(--radius-2xl);
+      line-height:var(--line-relaxed);
+      box-shadow:var(--shadow);
+    }}
+    .success {{ background:var(--success); color:var(--charcoal); }}
+    .error {{ background:var(--error); color:var(--charcoal); }}
+    .hint {{
+      color:var(--muted);
+      font-size:.92rem;
+      text-align:center;
+      line-height:var(--line-relaxed);
+      margin:14px 0 0;
+    }}
+
+    .tasks-heading {{ margin:0; font-size:1.2rem; color:var(--charcoal); font-weight:700; line-height:1.3; }}
+    .task-group {{ margin-top:0; }}
+    .task-list {{ display:grid; gap:0; }}
+    .task-search {{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:10px;
+      margin-bottom:22px;
+    }}
+    .task-search input {{
+      min-width:0;
+      min-height:46px;
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      padding:0 16px;
+      background:var(--highlight);
+      color:var(--ink);
+      font:inherit;
+      line-height:var(--line-body);
+    }}
+    .task-search button {{
+      min-height:46px;
+      padding:0 18px;
+      border-radius:var(--radius-2xl);
+      font-size:.92rem;
+      white-space:nowrap;
+    }}
+    .task-search .search-clear {{
+      grid-column:1/-1;
+      min-height:40px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      background:var(--card);
+      color:var(--charcoal);
+      text-decoration:none;
+      font-size:.88rem;
+      font-weight:600;
+    }}
+    .task-row {{
+      display:block;
+      padding:14px 0;
+      border-bottom:1px solid var(--border);
+      min-width:0;
+    }}
+    .task-row:last-child {{ border-bottom:0; }}
+    .task-sub .task-meta {{ margin-top:0; }}
+    .task-parent-meta + .task-meta {{ margin-top:6px; }}
+    .task-meta {{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:0;
+      min-width:0;
+      max-width:100%;
+    }}
+    .task-meta-tag {{
+      display:inline-flex;
+      align-items:center;
+      max-width:100%;
+      padding:4px 9px;
+      border-radius:999px;
+      background:var(--highlight);
+      color:var(--muted);
+      font-size:.72rem;
+      font-weight:600;
+      line-height:1.25;
+      letter-spacing:.01em;
+      overflow-wrap:anywhere;
+    }}
+    .task-parent-meta {{
+      margin-top:0;
+      color:var(--muted);
+      font-size:.82rem;
+      line-height:var(--line-relaxed);
+      overflow-wrap:anywhere;
+    }}
+    .task-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
+    .task-action-bar .trash-button {{ font-size:1rem; opacity:.62; }}
+    .task-action-bar .trash-button,
+    .task-action-bar .snooze-icon-button {{
+      width:32px;
+      height:32px;
+      min-height:32px;
+      padding:0;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+    }}
+    .task-action-bar .trash-button:hover,
+    .task-action-bar .trash-button:focus-visible {{ opacity:1; background:var(--accent-soft); }}
     .tasks-toolbar {{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:16px;
-      margin-bottom:8px;
+      gap:12px;
+      margin-bottom:20px;
     }}
-    .section-toggle-controls {{
-      display:flex;
-      gap:6px;
-    }}
+    .section-toggle-controls {{ display:flex; gap:6px; flex-shrink:0; }}
     .section-toggle-controls button {{
-      min-height:34px;
+      min-height:32px;
       width:auto;
-      padding:0 10px;
+      padding:0 11px;
       border:1px solid var(--border);
-      border-radius:9px;
-      background:white;
-      color:var(--navy);
+      border-radius:999px;
+      background:var(--card);
+      color:var(--muted);
       font:inherit;
-      font-size:.8rem;
-      font-weight:700;
+      font-size:.74rem;
+      font-weight:600;
       cursor:pointer;
+      line-height:1.2;
     }}
-    details.task-group {{
-      margin-top:18px;
+    .section-toggle-controls button:hover {{
+      color:var(--charcoal);
+      background:var(--accent-soft);
     }}
-    details.task-group > summary {{
-      list-style:none;
-      cursor:pointer;
-      user-select:none;
-    }}
+    details.task-group {{ margin-top:24px; padding-top:24px; border-top:1px solid var(--border); }}
+    details.task-group:first-of-type {{ margin-top:0; padding-top:0; border-top:0; }}
+    details.task-group > summary {{ list-style:none; cursor:pointer; user-select:none; }}
     details.task-group > summary::-webkit-details-marker {{ display:none; }}
     details.task-group > summary.task-group-heading {{
-      display:flex;
-      justify-content:space-between;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 2rem 1rem;
       align-items:center;
-      gap:12px;
-      padding-bottom:9px;
-      border-bottom:3px solid var(--yellow);
+      column-gap:12px;
+      padding:0 0 14px;
+      margin:0;
+      color:var(--charcoal);
+      font-size:.78rem;
+      font-weight:700;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      border-bottom:1px solid var(--border);
+    }}
+    .task-group-label {{
+      min-width:0;
     }}
     details.task-group > summary.task-group-heading::after {{
       content:"▾";
+      grid-column:3;
+      justify-self:end;
       color:var(--muted);
-      font-size:.9rem;
-      margin-left:auto;
+      font-size:.85rem;
     }}
-    details.task-group:not([open]) > summary.task-group-heading::after {{
-      content:"▸";
-    }}
+    details.task-group:not([open]) > summary.task-group-heading::after {{ content:"▸"; }}
     .section-count {{
-      min-width:26px;
-      height:26px;
+      grid-column:2;
+      justify-self:center;
+      min-width:24px;
+      height:24px;
       display:inline-flex;
       align-items:center;
       justify-content:center;
       border-radius:999px;
-      background:#eceeed;
-      color:var(--navy);
-      font-size:.76rem;
-      font-weight:800;
+      background:var(--accent-soft);
+      color:var(--charcoal);
+      font-size:.72rem;
+      font-weight:700;
+      letter-spacing:0;
+      text-transform:none;
+    }}
+    .task-action-bar .snooze-icon-button {{ list-style:none; font-size:.95rem; opacity:.62; }}
+    .task-action-bar .snooze-icon-button::-webkit-details-marker {{ display:none; }}
+    .task-action-bar .snooze-icon-button:hover,
+    .task-action-bar .snooze-icon-button:focus-visible {{ opacity:1; background:var(--accent-soft); }}
+    .task-action-bar .task-snooze {{ position:relative; }}
+    .task-action-bar .task-snooze-menu {{
+      position:absolute;
+      z-index:30;
+      top:38px;
+      left:0;
+      right:auto;
+      width:min(240px, calc(100vw - 24px));
+      padding:8px;
+      border:1px solid var(--border);
+      border-radius:var(--radius-2xl);
+      background:var(--card);
+      box-shadow:var(--shadow-lg);
+    }}
+    .task-snooze-menu form {{ display:block; margin:0; }}
+    .task-snooze-menu button {{
+      width:100%;
+      min-height:0;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      color:var(--ink);
+      font:inherit;
+      font-size:.86rem;
+      font-weight:600;
+      text-align:left;
+      cursor:pointer;
+      padding:10px 12px;
+      line-height:var(--line-body);
+    }}
+    .task-snooze-menu button:hover {{ background:var(--accent-soft); }}
+    .task-snooze-date {{
+      display:grid !important;
+      grid-template-columns:minmax(130px,1fr) auto;
+      gap:8px !important;
+      padding:8px 4px 4px;
+    }}
+    .task-snooze-date input[type="date"] {{
+      width:100%;
+      min-width:0;
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:8px 10px;
+      font:inherit;
+      font-size:.82rem;
+    }}
+    .task-snooze-date button {{ width:auto; white-space:nowrap; }}
+    .completed-task-icon {{
+      flex:0 0 var(--task-check);
+      width:var(--task-check);
+      min-width:var(--task-check);
+      height:var(--task-check);
+      margin:1px 0 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:50%;
+      background:rgba(26, 26, 26, 0.12);
+      color:var(--muted);
+      font-size:11px;
+      font-weight:700;
+    }}
+    .completed-task-row .task-link {{
+      color:var(--muted);
     }}
     @media (max-width:560px) {{
-      .app-header {{ gap:8px; }}
-      .dashboard-nav {{ gap:3px; }}
-      .dashboard-nav > a:not(.new-task-link) {{ display:none; }}
-      .dashboard-nav a, .menu-button {{ padding:0 10px; }}
-      .app-home {{ font-size:1rem; }}
-      .tasks-toolbar {{ align-items:flex-start; }}
-      .section-toggle-controls {{ flex-direction:column; }}
+      main {{ padding-left:16px; padding-right:16px; }}
+      .surface-card {{ padding:20px 18px; }}
+      .focus-card {{ padding:20px 18px; }}
+      .task-search {{ grid-template-columns:1fr; }}
+      .task-search button {{ width:100%; }}
     }}
-    .empty-state {{ padding:18px 0; color:var(--muted); }}
-
-    .completed-today-summary {{ margin:0 16px 10px; padding:11px 13px; border:1px solid rgba(38,65,85,.10); border-radius:10px; background:rgba(255,255,255,.68); }}
-    .completed-today-summary-label {{ font-size:.76rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:var(--muted); margin-bottom:3px; }}
-    .completed-today-summary-text {{ font-size:.9rem; line-height:1.42; color:var(--ink); }}
+    .empty-state {{ padding:24px 0; color:var(--muted); line-height:var(--line-relaxed); }}
+    .completed-today-summary {{ margin:0 0 14px; padding:14px 16px; border:1px solid var(--border); border-radius:12px; background:var(--highlight); }}
+    .completed-today-summary-label {{ font-size:.76rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }}
+    .completed-today-summary-text {{ font-size:.94rem; line-height:var(--line-relaxed); color:var(--ink); }}
     .completed-today-summary.pending .completed-today-summary-text {{ color:var(--muted); font-style:italic; }}
   </style>
 </head>
 <body>
   <main>
-    <header class="app-header">
-      <a class="app-home" href="/">AIOS</a>
-      <nav class="dashboard-nav" aria-label="Primary">
-        <a href="/projects">Projects</a>
-        <a href="/reviews">{f"Reviews ({review_count})" if review_count else "Reviews"}</a>
-        <a class="new-task-link" href="/tasks/new">+ New Task</a>
-        <details class="nav-menu" id="dashboard-nav-menu">
-          <summary class="menu-button" aria-label="More navigation" title="Menu">☰</summary>
-          <div class="menu-panel">
-            <a href="/work-patterns">Work Patterns</a>
-            <a href="/journal">Journal</a>
-            <form method="post" action="/logout"><button type="submit">Sign Out</button></form>
-          </div>
-        </details>
-      </nav>
-    </header>
     <div class="page-heading">
       <h1 class="brand">Dashboard</h1>
       <p class="dashboard-subtitle">Capture, prioritize, and act.</p>
     </div>
     {notice}
     {focus_card}
+    <section class="surface-card">
     <form method="post" action="/submit" onsubmit="submitButton.disabled=true;">
       <div class="capture-heading">
         <div>
@@ -4352,40 +4828,26 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
       </button>
     </form>
     <p class="hint">AIOS will process this automatically.</p>
-    <section class="tasks-section">
+    </section>
+    <section class="surface-card tasks-section">
       <div class="tasks-toolbar">
         <h2 class="tasks-heading">Tasks</h2>
         <div class="section-toggle-controls">
-          <button type="button" id="expandAllSections">Expand all</button>
-          <button type="button" id="collapseAllSections">Collapse all</button>
+          <button type="button" class="toolbar-button" id="expandAllSections">Expand all</button>
+          <button type="button" class="toolbar-button" id="collapseAllSections">Collapse all</button>
         </div>
       </div>
       <form class="task-search" method="get" action="/">
         <input name="search" value="{html.escape(search)}" placeholder="Search open tasks" aria-label="Search open tasks">
         <button type="submit">Search</button>
-        {('<a class="button secondary" href="/">Clear</a>' if search else '')}
+        {('<a class="search-clear" href="/">Clear search</a>' if search else '')}
       </form>
       {task_sections}
     </section>
   </main>
+  {_bottom_nav_html(active="home", review_count=review_count)}
   <script>
     (() => {{
-      const navMenu = document.getElementById("dashboard-nav-menu");
-      if (navMenu) {{
-        document.addEventListener("click", (event) => {{
-          if (navMenu.open && !navMenu.contains(event.target)) {{
-            navMenu.open = false;
-          }}
-        }});
-        document.addEventListener("keydown", (event) => {{
-          if (event.key === "Escape" && navMenu.open) {{
-            navMenu.open = false;
-            const trigger = navMenu.querySelector("summary");
-            if (trigger) trigger.focus();
-          }}
-        }});
-      }}
-
       function resizeFocusTextarea(el) {{
         if (!el || !el.classList.contains("focus-autoexpand")) return;
         el.style.height = "auto";
@@ -4423,22 +4885,141 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         }}
       }};
 
+      let optimisticCompletion = null;
+
+      const clearOptimisticTimer = () => {{
+        if (!optimisticCompletion?.timer) return;
+        window.clearTimeout(optimisticCompletion.timer);
+        optimisticCompletion.timer = null;
+      }};
+
+      const removeOptimisticToast = () => {{
+        document.getElementById("optimisticCompleteToast")?.remove();
+      }};
+
+      const restoreOptimisticNodes = (state) => {{
+        (state?.hiddenNodes || []).forEach((node) => {{
+          node.classList.remove("optimistic-hidden");
+        }});
+        if (state?.focusCard && state.focusHtml !== null) {{
+          state.focusCard.innerHTML = state.focusHtml;
+        }}
+      }};
+
+      const showOptimisticToast = (state, message = "Task completed") => {{
+        removeOptimisticToast();
+        const toast = document.createElement("div");
+        toast.id = "optimisticCompleteToast";
+        toast.className = "optimistic-toast";
+        toast.innerHTML = '<span>' + message + '</span><button type="button">Undo</button>';
+        document.body.appendChild(toast);
+
+        toast.querySelector("button")?.addEventListener("click", async () => {{
+          if (!optimisticCompletion || optimisticCompletion.taskId !== state.taskId) return;
+          clearOptimisticTimer();
+          restoreOptimisticNodes(state);
+          removeOptimisticToast();
+
+          try {{
+            const response = await fetch(`/tasks/${{encodeURIComponent(state.taskId)}}/undo-complete-optimistic`, {{
+              method: "POST",
+              headers: {{ "X-Requested-With": "fetch" }},
+            }});
+            if (!response.ok) throw new Error("Undo failed");
+            window.location.reload();
+          }} catch (_error) {{
+            state.hiddenNodes.forEach((node) => node.classList.add("optimistic-hidden"));
+            const failed = document.createElement("div");
+            failed.id = "optimisticCompleteToast";
+            failed.className = "optimistic-toast error";
+            failed.textContent = "Undo could not be saved. Refreshing…";
+            document.body.appendChild(failed);
+            window.setTimeout(() => window.location.reload(), 1200);
+          }}
+        }});
+      }};
+
+      const finishOptimisticWindow = (state) => {{
+        removeOptimisticToast();
+        optimisticCompletion = null;
+        if (state.affectsFocus) {{
+          window.location.href = "/?refresh_focus=1#focus-card";
+        }}
+      }};
+
       document.querySelectorAll(".complete-form").forEach((form) => {{
         const button = form.querySelector(".complete-checkbox");
-        if (!button) return;
+        const taskId = form.dataset.taskId || form.action.split("/tasks/")[1]?.split("/")[0] || "";
+        if (!button || !taskId) return;
 
-        button.addEventListener("click", (event) => {{
+        form.addEventListener("submit", async (event) => {{
           event.preventDefault();
           if (button.dataset.submitting === "1") return;
           button.dataset.submitting = "1";
-          if (form.closest(".focus-card")) {{
-            sessionStorage.removeItem(scrollKey);
-          }} else {{
-            saveScroll();
+
+          if (optimisticCompletion) {{
+            clearOptimisticTimer();
+            finishOptimisticWindow(optimisticCompletion);
           }}
-          button.classList.add("is-completing");
-          button.setAttribute("aria-label", "Task completed");
-          window.setTimeout(() => form.submit(), 180);
+
+          const focusCard = form.closest(".focus-card");
+          const isFocusParent = form.classList.contains("focus-parent-complete");
+          const isFocusActivation = form.classList.contains("focus-activation-complete");
+          const hiddenNodes = Array.from(
+            document.querySelectorAll(`.task-row[data-task-id="${{CSS.escape(taskId)}}"]`)
+          );
+
+          const state = {{
+            taskId,
+            hiddenNodes,
+            focusCard,
+            focusHtml: focusCard ? focusCard.innerHTML : null,
+            affectsFocus: Boolean(isFocusParent || isFocusActivation),
+            timer: null,
+          }};
+
+          hiddenNodes.forEach((node) => node.classList.add("optimistic-hidden"));
+
+          if (isFocusParent && focusCard) {{
+            focusCard.innerHTML =
+              '<div class="focus-label">⭐ Best Next Action</div>' +
+              '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next focus…</div>';
+          }} else if (isFocusActivation && focusCard) {{
+            const start = focusCard.querySelector(".focus-start");
+            if (start) {{
+              start.innerHTML =
+                '<div class="focus-start-heading">Start here</div>' +
+                '<div class="task-title-row">' +
+                '<span class="task-check-placeholder" aria-hidden="true"></span>' +
+                '<div class="focus-pending"><span class="mini-spinner"></span> Finding your next step…</div>' +
+                '</div>';
+            }}
+          }}
+
+          optimisticCompletion = state;
+          showOptimisticToast(state);
+
+          try {{
+            const response = await fetch(`/tasks/${{encodeURIComponent(taskId)}}/complete-optimistic`, {{
+              method: "POST",
+              headers: {{ "X-Requested-With": "fetch" }},
+            }});
+            if (!response.ok) throw new Error("Completion failed");
+            state.timer = window.setTimeout(() => finishOptimisticWindow(state), 8000);
+          }} catch (_error) {{
+            clearOptimisticTimer();
+            restoreOptimisticNodes(state);
+            removeOptimisticToast();
+            optimisticCompletion = null;
+            button.dataset.submitting = "0";
+
+            const failed = document.createElement("div");
+            failed.id = "optimisticCompleteToast";
+            failed.className = "optimistic-toast error";
+            failed.textContent = "Task could not be completed.";
+            document.body.appendChild(failed);
+            window.setTimeout(removeOptimisticToast, 3000);
+          }}
         }});
       }});
 
@@ -4466,12 +5047,29 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
         document.querySelectorAll("details.task-snooze, details.project-task-snooze, details.focus-snooze")
       );
 
+      const positionSnoozeMenu = (menu) => {{
+        const panel = menu.querySelector(".task-snooze-menu");
+        if (!panel) return;
+        panel.style.left = "0";
+        panel.style.right = "auto";
+        const margin = 12;
+        const panelRect = panel.getBoundingClientRect();
+        if (panelRect.right > window.innerWidth - margin) {{
+          panel.style.left = `${{window.innerWidth - margin - panelRect.right}}px`;
+        }}
+        const nextRect = panel.getBoundingClientRect();
+        if (nextRect.left < margin) {{
+          panel.style.left = `${{margin - menu.getBoundingClientRect().left}}px`;
+        }}
+      }};
+
       snoozeMenus.forEach((menu) => {{
         menu.addEventListener("toggle", () => {{
           if (!menu.open) return;
           snoozeMenus.forEach((other) => {{
             if (other !== menu) other.open = false;
           }});
+          positionSnoozeMenu(menu);
         }});
       }});
 
@@ -4579,11 +5177,41 @@ sessionStorage.removeItem("aios-focus-activation-refresh-count");
   </script>
 {focus_submit_feedback_script}
 {pending_refresh_script}
+<script>
+if ("serviceWorker" in navigator) {{
+  window.addEventListener("load", () => {{
+    navigator.serviceWorker.register("/service-worker.js", {{ scope: "/" }}).catch(() => {{}});
+  }});
+}}
+</script>
 
 
 </body>
 </html>"""
 
+
+_MAIN_PWA_MANIFEST = r'''{
+  "id": "/", "name": "AIOS", "short_name": "AIOS",
+  "description": "AIOS personal task assistant",
+  "start_url": "/", "scope": "/", "display": "standalone",
+  "background_color": "#FAFAF8", "theme_color": "#1A1A1A",
+  "icons": [
+    {"src":"/pwa/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/pwa/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}'''
+
+_MAIN_SERVICE_WORKER = r'''const CACHE="aios-main-shell-v1";
+const STATIC=["/manifest.webmanifest","/pwa/icon-32.png","/pwa/icon-192.png","/pwa/icon-512.png"];
+self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(STATIC)).then(()=>self.skipWaiting()))});
+self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith("aios-main-shell-")&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
+self.addEventListener("fetch",e=>{
+  const r=e.request;if(r.method!=="GET")return;const u=new URL(r.url);if(u.origin!==self.location.origin)return;
+  if(u.pathname==="/capture"||u.pathname.startsWith("/capture/"))return;
+  // Dynamic/authenticated AIOS HTML and data stay network-authoritative in V1.
+  if(!STATIC.includes(u.pathname))return;
+  e.respondWith(caches.match(r).then(c=>c||fetch(r)));
+});'''
 
 _CAPTURE_PWA_MANIFEST = '''{
   "name": "Brain Dump",
@@ -4592,8 +5220,8 @@ _CAPTURE_PWA_MANIFEST = '''{
   "start_url": "/capture",
   "scope": "/capture",
   "display": "standalone",
-  "background_color": "#f7f7f3",
-  "theme_color": "#264155",
+  "background_color": "#FAFAF8",
+  "theme_color": "#1A1A1A",
   "icons": [
     {"src": "/capture/icon-192.png", "sizes": "192x192", "type": "image/png"},
     {"src": "/capture/icon-512.png", "sizes": "512x512", "type": "image/png"}
@@ -4678,7 +5306,7 @@ body{
 }
 .card-title{
   margin:0;
-  color:var(--navy);
+  color:var(--charcoal);
   font-size:1.45rem;
   font-weight:750;
 }
@@ -4885,6 +5513,32 @@ if("serviceWorker" in navigator){
 </script>
 </body>
 </html>'''
+
+
+@app.get('/manifest.webmanifest')
+def main_pwa_manifest():
+    from fastapi.responses import Response
+    return Response(_MAIN_PWA_MANIFEST, media_type='application/manifest+json', headers={'Cache-Control':'no-cache'})
+
+@app.get('/service-worker.js')
+def main_pwa_service_worker():
+    from fastapi.responses import Response
+    return Response(_MAIN_SERVICE_WORKER, media_type='application/javascript', headers={'Cache-Control':'no-cache','Service-Worker-Allowed':'/'})
+
+@app.get('/pwa/icon-32.png')
+def main_pwa_icon_32():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name('static')/'aios-32.png', media_type='image/png')
+
+@app.get('/pwa/icon-192.png')
+def main_pwa_icon_192():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name('static')/'aios-192.png', media_type='image/png')
+
+@app.get('/pwa/icon-512.png')
+def main_pwa_icon_512():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name('static')/'aios-512.png', media_type='image/png')
 
 
 @app.get('/capture', response_class=HTMLResponse)
@@ -5981,6 +6635,38 @@ def cancel_breakdown_web(
     )
 
 
+@app.post("/tasks/{task_id}/complete-optimistic")
+def complete_task_optimistic_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    try:
+        result = _task_action(task_id, "complete")
+        return JSONResponse({"ok": True, **result})
+    except Exception as exc:
+        print("[Optimistic Complete] Save failed:", exc)
+        return JSONResponse(
+            {"ok": False, "detail": "Task could not be completed."},
+            status_code=502,
+        )
+
+
+@app.post("/tasks/{task_id}/undo-complete-optimistic")
+def undo_complete_optimistic_web(
+    task_id: str,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    try:
+        result = _task_action(task_id, "undo-complete")
+        return JSONResponse({"ok": True, **result})
+    except Exception as exc:
+        print("[Optimistic Complete] Undo failed:", exc)
+        return JSONResponse(
+            {"ok": False, "detail": "Completion could not be undone."},
+            status_code=502,
+        )
+
+
 @app.post("/tasks/{task_id}/complete")
 def complete_task_web(
     task_id: str,
@@ -6265,194 +6951,147 @@ def _journal_page(journal_date: str, payload: dict) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1A1A1A">
 <title>{html.escape(heading)} - Daily Journal</title>
 <style>
-:root{{
-  --bg:#f7f7f3;
-  --card:#fff;
-  --ink:#17242d;
-  --navy:#264155;
-  --muted:#66747d;
-  --border:#d9dedf;
-  --ok:#2d6a4f;
-}}
-*{{box-sizing:border-box}}
-body{{
-  margin:0;
-  background:var(--bg);
-  color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}}
-main{{
-  width:min(860px,100%);
-  margin:0 auto;
-  padding:28px 18px 46px;
-}}
-.top{{
-  display:flex;
-  justify-content:space-between;
-  gap:16px;
-  align-items:flex-start;
-  margin-bottom:22px;
-}}
-.back{{
-  color:var(--navy);
-  text-decoration:none;
-  font-weight:750;
-}}
-nav{{display:flex;gap:8px}}
-nav a{{
-  color:var(--navy);
-  text-decoration:none;
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:7px 10px;
-  background:white;
-  font-weight:700;
-}}
-h1{{
-  margin:0;
-  color:var(--navy);
-  font-size:2rem;
-}}
-.label{{
-  margin-top:4px;
-  color:var(--muted);
-}}
-.card{{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:16px;
-  padding:20px;
-  margin-top:18px;
-  box-shadow:0 4px 18px rgba(38,65,85,.04);
-}}
-.summary-label{{
-  color:var(--navy);
-  font-size:.78rem;
-  font-weight:800;
-  text-transform:uppercase;
-  letter-spacing:.05em;
-  margin-bottom:7px;
-}}
-.summary-text{{
-  font-size:1.05rem;
-  line-height:1.55;
-}}
-.summary-text.pending,
-.summary-text.empty{{
-  color:var(--muted);
-}}
-.completed-details{{
-  margin-top:16px;
-  padding-top:12px;
-  border-top:1px solid var(--border);
-}}
-.completed-details summary{{
-  cursor:pointer;
-  color:var(--navy);
-  font-weight:750;
-  list-style:none;
-}}
-.completed-details summary::-webkit-details-marker{{
-  display:none;
-}}
-.completed-details summary::before{{
-  content:"▸";
-  display:inline-block;
-  margin-right:7px;
-  transition:transform .12s ease;
-}}
-.completed-details[open] summary::before{{
-  transform:rotate(90deg);
-}}
-ul{{
-  list-style:none;
-  margin:8px 0 0;
-  padding:0;
-}}
-li{{
-  display:grid;
-  grid-template-columns:28px minmax(0,1fr);
-  gap:10px;
-  padding:10px 0;
-  border-bottom:1px solid var(--border);
-}}
-li:last-child{{border-bottom:0}}
-.check{{
-  color:var(--ok);
-  font-weight:900;
-}}
-.meta{{
+{_mobile_shell_css()}
+.journal-date-nav {{
   display:flex;
   gap:8px;
   flex-wrap:wrap;
-  margin-top:4px;
-  color:var(--muted);
-  font-size:.82rem;
+  margin-bottom:24px;
 }}
-.project{{
-  color:var(--navy);
+.journal-date-nav a {{
+  color:var(--charcoal);
+  text-decoration:none;
+  border:1px solid var(--border);
+  border-radius:var(--radius-2xl);
+  padding:10px 14px;
+  background:var(--card);
+  font-weight:600;
+  font-size:.9rem;
+  box-shadow:var(--shadow);
+  line-height:var(--line-body);
+}}
+.card {{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-2xl);
+  padding:28px 24px;
+  margin-bottom:24px;
+  box-shadow:var(--shadow);
+}}
+.summary-label {{
+  color:var(--charcoal);
+  font-size:.78rem;
   font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  margin-bottom:10px;
 }}
-.empty{{color:var(--muted)}}
-.card h2{{
-  margin:0 0 6px;
-  color:var(--navy);
+.summary-text {{
+  font-size:1.05rem;
+  line-height:var(--line-relaxed);
+}}
+.summary-text.pending,
+.summary-text.empty {{
+  color:var(--muted);
+}}
+.completed-details {{
+  margin-top:20px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+}}
+.completed-details summary {{
+  cursor:pointer;
+  color:var(--charcoal);
+  font-weight:700;
+  list-style:none;
+  line-height:var(--line-body);
+}}
+.completed-details summary::-webkit-details-marker {{ display:none; }}
+.completed-details summary::before {{
+  content:"▸";
+  display:inline-block;
+  margin-right:8px;
+  transition:transform .12s ease;
+}}
+.completed-details[open] summary::before {{ transform:rotate(90deg); }}
+ul {{ list-style:none; margin:12px 0 0; padding:0; }}
+li {{
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr);
+  gap:12px;
+  padding:14px 0;
+  border-bottom:1px solid var(--border);
+  line-height:var(--line-relaxed);
+}}
+li:last-child {{ border-bottom:0; }}
+.check {{ color:#2d6a4f; font-weight:900; }}
+.meta {{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:6px;
+  color:var(--muted);
+  font-size:.86rem;
+  line-height:var(--line-body);
+}}
+.project {{ color:var(--charcoal); font-weight:700; }}
+.empty {{ color:var(--muted); line-height:var(--line-relaxed); }}
+.card h2 {{
+  margin:0 0 10px;
+  color:var(--charcoal);
   font-size:1.2rem;
 }}
-.note{{
-  margin:0 0 14px;
+.note {{
+  margin:0 0 18px;
   color:var(--muted);
+  line-height:var(--line-relaxed);
 }}
-textarea{{
+textarea {{
   display:block;
   width:100%;
   min-height:260px;
   resize:vertical;
   border:1px solid var(--border);
-  border-radius:13px;
-  padding:14px;
-  background:white;
+  border-radius:var(--radius-2xl);
+  padding:18px 20px;
+  background:var(--highlight);
   color:var(--ink);
   font:inherit;
   font-size:1rem;
-  line-height:1.5;
+  line-height:var(--line-relaxed);
 }}
-textarea:focus{{
-  outline:2px solid #0b66d4;
+textarea:focus {{
+  outline:3px solid rgba(44,44,44,.12);
+  border-color:rgba(44,44,44,.22);
 }}
-#saveStatus{{
+#saveStatus {{
   min-height:24px;
-  margin-top:8px;
+  margin-top:12px;
   color:var(--muted);
-  font-size:.86rem;
+  font-size:.88rem;
+  line-height:var(--line-body);
 }}
-#saveStatus.saved{{color:var(--ok)}}
-@media(max-width:560px){{
-  main{{padding:18px 12px 34px}}
-  .top{{flex-direction:column}}
-  nav{{width:100%;justify-content:space-between}}
-  .card{{padding:16px}}
-  textarea{{min-height:34dvh}}
+#saveStatus.saved {{ color:#2d6a4f; }}
+@media(max-width:560px) {{
+  textarea {{ min-height:34dvh; }}
 }}
 </style>
 </head>
 <body>
 <main>
-<div class="top">
-  <div>
-    <a class="back" href="/">← Dashboard</a>
-    <h1>{html.escape(heading)}</h1>
-    <div class="label">Daily Journal</div>
+  <div class="page-heading">
+    <h1 class="brand">{html.escape(heading)}</h1>
+    <p class="subtitle">Daily Journal</p>
   </div>
-  <nav aria-label="Journal dates">
-    <a href="/journal/{prev}" aria-label="Previous day">←</a>
+  <nav class="journal-date-nav" aria-label="Journal dates">
+    <a href="/journal/{prev}" aria-label="Previous day">← Prev</a>
     <a href="/journal/{_journal_today_iso()}">Today</a>
-    <a href="/journal/{nxt}" aria-label="Next day">→</a>
+    <a href="/journal/{nxt}" aria-label="Next day">Next →</a>
   </nav>
-</div>
 
 <section class="card">
   <div class="summary-label">{html.escape(focus_label)}</div>
@@ -6518,6 +7157,7 @@ textarea:focus{{
   }});
 }})();
 </script>
+{_bottom_nav_html(active="journal")}
 </body>
 </html>"""
 

@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
+import time
 
 from aios.api.config import (
     get_api_settings,
@@ -165,6 +166,35 @@ def _request_processor_run() -> dict:
     response_model=HealthResponse,
     tags=["system"],
 )
+
+def _request_processor_run_after_completion(
+    task_id: str,
+    completed_at: str,
+    *,
+    delay_seconds: int = 10,
+) -> None:
+    """Debounce expensive reconciliation after an optimistic completion."""
+    time.sleep(max(0, int(delay_seconds)))
+    try:
+        rows = (
+            _store().client.table("tasks")
+            .select("id,is_done,is_open,completed_at")
+            .eq("id", task_id)
+            .limit(1)
+            .execute().data or []
+        )
+        if not rows:
+            return
+        current = rows[0]
+        if (
+            current.get("is_done")
+            and not current.get("is_open")
+            and str(current.get("completed_at") or "") == str(completed_at)
+        ):
+            _request_processor_run()
+    except Exception as exc:
+        print(f"[Optimistic Complete] Deferred processor trigger failed: {exc}")
+
 def health() -> HealthResponse:
     settings = get_api_settings()
     return HealthResponse(
@@ -678,7 +708,7 @@ def list_open_tasks_http(
 
 
 @app.post("/tasks/{task_id}/complete", tags=["tasks"])
-def complete_task_http(task_id: str) -> dict:
+def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
     store = _store()
     rows = (
         store.client.table("tasks")
@@ -712,14 +742,84 @@ def complete_task_http(task_id: str) -> dict:
         completed_at=completed_at,
     )
 
-    try:
-        _request_processor_run()
-    except Exception:
-        pass
+    background_tasks.add_task(
+        _request_processor_run_after_completion,
+        task_id,
+        completed_at,
+    )
     return {
         "id": task_id,
         "completed": True,
+        "completed_at": completed_at,
         "completed_activation_children": completed_activation_children,
+        "processor_deferred": True,
+    }
+
+
+@app.post("/tasks/{task_id}/undo-complete", tags=["tasks"])
+def undo_complete_task_http(task_id: str) -> dict:
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id,is_done,is_open,is_archived,completed_at")
+        .eq("id", task_id)
+        .limit(1)
+        .execute().data or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    current = rows[0]
+    if current.get("is_archived"):
+        raise HTTPException(status_code=409, detail="Task is archived")
+
+    completed_at = str(current.get("completed_at") or "").strip()
+    if not current.get("is_done"):
+        return {"id": task_id, "undone": True, "already_open": True}
+
+    now = datetime.now(timezone.utc).isoformat()
+    (
+        store.client.table("tasks")
+        .update({
+            "is_done": False,
+            "is_open": True,
+            "completed_at": None,
+            "updated_at": now,
+        })
+        .eq("id", task_id)
+        .execute()
+    )
+
+    restored_activation_children = 0
+    if completed_at:
+        children = (
+            store.client.table("tasks")
+            .select("id")
+            .eq("parent_task_id", task_id)
+            .eq("generated_source", "focus_activation")
+            .eq("is_done", True)
+            .eq("is_open", False)
+            .eq("completed_at", completed_at)
+            .execute().data or []
+        )
+        for child in children:
+            (
+                store.client.table("tasks")
+                .update({
+                    "is_done": False,
+                    "is_open": True,
+                    "completed_at": None,
+                    "updated_at": now,
+                })
+                .eq("id", child["id"])
+                .execute()
+            )
+            restored_activation_children += 1
+
+    return {
+        "id": task_id,
+        "undone": True,
+        "restored_activation_children": restored_activation_children,
     }
 
 
