@@ -362,6 +362,10 @@ interaction, and human-readable labels.
     pending, then patches summary + completed-work list without reload.
 -   **Unified toast timing (v1)** — consistent dismiss durations across review,
     Brain Dump, flash banners, and task-complete feedback.
+-   **Guidance disclosure (v1)** — rank/score hidden from Home focus card and task
+    list rows; task detail keeps ranking in a collapsed **Ranking details** panel.
+-   **Task detail project name (v1)** — project picker on edit; API returns
+    `project_name` instead of exposing raw Project ID.
 
 #### Dashboard fast paths (in-process API work)
 
@@ -420,13 +424,13 @@ the user action cannot affect it.
 
 #### Next opportunities (priority order)
 
-1.  **Project name on task detail** — replace raw Project ID; optional project
-    picker on create/edit.
+1.  **Task detail refactor** — consolidate layout, guidance panel, breakdown, and
+    edit form after stabilization feedback; reduce duplicated markup/CSS and align
+    async feedback with dashboard patterns.
 2.  **Preserve form data on errors** — create-task failures should keep user input.
 3.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices (timing already unified).
-4.  **Hide or collapse BNA Rank/Score** for normal daily use.
-5.  **Service Worker Home shell cache** — see **Dashboard / Home refinements**.
+4.  **Service Worker Home shell cache** — see **Dashboard / Home refinements**.
 
 #### UX principles
 

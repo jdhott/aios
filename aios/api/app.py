@@ -581,7 +581,7 @@ def _is_future_defer_value(
 AIOS_WEB_DASHBOARD_TODAY_VERSION = "v1.3-today-importance-due-sort"
 AIOS_WEB_DASHBOARD_POPULATION_VERSION = "v1.4-dashboard-semantics"
 
-AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
+AIOS_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1.1-project"
 
 
 def _respect_breakdown_step_order(items: list[dict], *, skip_if_project_ordered: bool = False) -> list[dict]:
@@ -1480,6 +1480,7 @@ class TaskDetailUpdate(BaseModel):
     effort: str | None = None
     duration: str | None = None
     is_just_do_it: bool | None = None
+    project_id: str | None = None
 
 
 @app.post("/tasks/{task_id}/breakdown/request", tags=["tasks"])
@@ -1658,6 +1659,24 @@ def get_task_detail_http(task_id: str) -> dict:
             task["parent_title"] = None
     task["surfaced_quick_win"] = bool(state.get("surfaced_quick_win", False))
 
+    project_id = str(task.get("project_id") or "").strip()
+    task["project_name"] = None
+    if project_id:
+        try:
+            project_rows = (
+                _store().client.table("projects")
+                .select("id,name")
+                .eq("id", project_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if project_rows:
+                task["project_name"] = str(project_rows[0].get("name") or "").strip() or None
+        except Exception:
+            task["project_name"] = None
+
     child_rows = (
         _store().client.table("tasks")
         .select("id,title,is_open,is_done,is_archived,step_order")
@@ -1701,6 +1720,9 @@ def update_task_detail_http(task_id: str, update: TaskDetailUpdate) -> dict:
         value = getattr(update, field)
         if value is not None:
             values[field] = value
+
+    if update.project_id is not None:
+        values["project_id"] = str(update.project_id).strip() or None
 
     if "title" in values:
         values["title"] = str(values["title"]).strip()

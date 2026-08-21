@@ -31,13 +31,13 @@ WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v3"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v2"
 WEB_OPTIMISTIC_DELETE_VERSION = "optimistic-delete-v2"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "home-v2.6-completed-today-actions"
+WEB_DASHBOARD_UI_VERSION = "home-v2.7-guidance-disclosure"
 WEB_HOME_FAST_NAV_VERSION = "home-fast-nav-v1"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
-WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
-WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.3-form-layout-fix"
+WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1.1-project"
+WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.4-project-name"
 WEB_PROJECTS_VERSION = "projects-v1.1-optimistic-actions"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v2"
@@ -1920,6 +1920,7 @@ def _task_edit_form_payload(
     effort: str = "",
     duration: str = "",
     is_just_do_it: str | None = None,
+    project_id: str = "",
 ) -> dict:
     return {
         "title": title.strip(),
@@ -1931,7 +1932,28 @@ def _task_edit_form_payload(
         "effort": effort,
         "duration": duration,
         "is_just_do_it": is_just_do_it == "true",
+        "project_id": project_id.strip() or None,
     }
+
+
+def _project_select_options(
+    projects: list[dict],
+    *,
+    selected_id: str = "",
+) -> str:
+    selected_id = str(selected_id or "").strip()
+    options = '<option value="">No project</option>'
+    for project in projects:
+        project_id = str(project.get("id") or "").strip()
+        if not project_id:
+            continue
+        name = html.escape(str(project.get("name") or "Untitled Project"))
+        selected = ' selected' if project_id == selected_id else ""
+        options += (
+            f'<option value="{html.escape(project_id, quote=True)}"{selected}>'
+            f"{name}</option>"
+        )
+    return options
 
 
 def _breakdown_list_editor_html(*, titles: list[str], form_action: str, return_to: str, submit_label: str, cancel_action: str | None = None) -> str:
@@ -2192,6 +2214,8 @@ def _breakdown_panel_view(task: dict, *, return_to: str = "/") -> dict[str, obje
 
 def _task_detail_page(
     task: dict,
+    *,
+    projects: list[dict] | None = None,
     message: str = "",
     error: str = "",
     return_to: str = "/",
@@ -2234,7 +2258,11 @@ def _task_detail_page(
     bna = "Yes" if task.get("best_next_action") else "No"
     quick_win = "Yes" if task.get("is_quick_win") else "No"
     surfaced_qw = "Yes" if task.get("surfaced_quick_win") else "No"
-    project_id = html.escape(str(task.get("project_id") or "—"))
+    raw_project_id = str(task.get("project_id") or "").strip()
+    project_options = _project_select_options(
+        projects or [],
+        selected_id=raw_project_id,
+    )
 
     breakdown_view = _breakdown_panel_view(task, return_to=return_to)
     breakdown_body = str(breakdown_view["html"])
@@ -2325,6 +2353,7 @@ label {{
 input[type="text"],
 input[type="date"],
 input[type="datetime-local"],
+select,
 textarea {{
   width:100%;
   max-width:100%;
@@ -2362,7 +2391,7 @@ textarea {{
   padding:14px 16px;
   resize:vertical;
 }}
-input:focus, textarea:focus {{
+input:focus, textarea:focus, select:focus {{
   border-color:var(--focus-ring);
   box-shadow:0 0 0 3px var(--focus-ring-shadow);
 }}
@@ -2471,11 +2500,40 @@ input:focus, textarea:focus {{
   font-size:.84rem;
   font-weight:600;
 }}
+.guidance-details {{
+  margin-top:4px;
+}}
+.guidance-details > summary {{
+  cursor:pointer;
+  list-style:none;
+  font-weight:700;
+  color:var(--charcoal);
+  padding:12px 0;
+}}
+.guidance-details > summary::-webkit-details-marker {{
+  display:none;
+}}
+.guidance-details > summary::before {{
+  content:"▸";
+  display:inline-block;
+  width:1em;
+  margin-right:6px;
+  color:var(--muted);
+}}
+.guidance-details[open] > summary::before {{
+  content:"▾";
+}}
+.guidance-details .meta-list {{
+  padding-bottom:4px;
+}}
 .readonly-note {{
   margin:-4px 0 18px;
   color:var(--muted);
   font-size:.9rem;
   line-height:var(--line-relaxed);
+}}
+select {{
+  appearance:auto;
 }}
 @media (max-width:960px) {{
   .layout {{ grid-template-columns:1fr; }}
@@ -2545,6 +2603,11 @@ input:focus, textarea:focus {{
           <label>
             Duration
             <input type="text" name="duration" value="{duration}">
+          </label>
+
+          <label class="full">
+            Project
+            <select name="project_id">{project_options}</select>
           </label>
 
           <label class="full">
@@ -2667,9 +2730,11 @@ input:focus, textarea:focus {{
 
     <aside class="card">
       <h2 class="card-title">AIOS</h2>
-      <p class="readonly-note">These values are calculated by AIOS and are not edited here.</p>
+      <p class="readonly-note">Ranking and signal labels are calculated by AIOS.</p>
 
-      <div class="meta-list">
+      <details class="guidance-details">
+        <summary>Ranking details</summary>
+        <div class="meta-list">
         <div class="meta-row">
           <span class="meta-label">Execution Score</span>
           <span class="meta-value">{score}</span>
@@ -2690,11 +2755,8 @@ input:focus, textarea:focus {{
           <span class="meta-label">Surfaced Quick Win</span>
           <span class="meta-value">{surfaced_qw}</span>
         </div>
-        <div class="meta-row">
-          <span class="meta-label">Project ID</span>
-          <span class="meta-value project-value">{project_id}</span>
         </div>
-      </div>
+      </details>
     </aside>
   </div>
 
@@ -3937,13 +3999,9 @@ def _project_detail_page(
         raw_task_id = str(task.get("id") or "")
         task_id = html.escape(raw_task_id)
         title = html.escape(str(task.get("title") or "Untitled task"), quote=True)
-        score = task.get("execution_score")
-        rank = task.get("execution_rank")
         due = str(task.get("due_at") or "").strip()
         importance = str(task.get("importance") or "").strip()
         meta = []
-        if rank is not None: meta.append(f"Rank {html.escape(str(rank))}")
-        if score is not None: meta.append(f"Score {html.escape(str(score))}")
         if importance: meta.append(html.escape(importance))
         if due: meta.append("Due " + html.escape(due[:10]))
         if task.get("best_next_action"): meta.append("Best Next Action")
@@ -5627,12 +5685,7 @@ def _create_task_page(
     *,
     error: str = "",
 ) -> str:
-    options = '<option value="">No project</option>'
-
-    for project in projects:
-        project_id = html.escape(str(project.get("id") or ""))
-        name = html.escape(str(project.get("name") or "Untitled Project"))
-        options += f'<option value="{project_id}">{name}</option>'
+    options = _project_select_options(projects)
 
     notice = (
         '<div class="notice error">' + html.escape(error) + '</div>'
@@ -5846,10 +5899,6 @@ def _focus_card_view(
         focus_context_draft = str(focus.get("focus_context_draft") or "").strip()
         focus_context_question = str(focus.get("focus_context_question") or "").strip()
         meta = []
-        if focus.get("execution_rank") is not None:
-            meta.append(f"Rank {html.escape(str(focus.get('execution_rank')))}")
-        if focus.get("execution_score") is not None:
-            meta.append(f"Score {html.escape(str(focus.get('execution_score')))}")
         if focus.get("importance"):
             meta.append(html.escape(str(focus.get("importance"))))
 
@@ -6108,20 +6157,8 @@ def _render_dashboard_task_row(
     task_id = html.escape(str(task.get("id") or ""))
     due_at = str(task.get("effective_due_at") or task.get("due_at") or "").strip()
     importance = str(task.get("importance") or "").strip()
-    score = task.get("execution_score")
-    rank = task.get("execution_rank")
 
     meta_parts = []
-
-    if score is not None:
-        meta_parts.append(
-            f"Score {html.escape(str(score))}"
-        )
-
-    if rank is not None:
-        meta_parts.append(
-            f"Rank {html.escape(str(rank))}"
-        )
 
     if importance:
         meta_parts.append(
@@ -9981,9 +10018,15 @@ def task_detail_web(
 ):
     try:
         task = _fetch_task_detail(task_id)
+        try:
+            projects = _fetch_projects()
+        except Exception as project_exc:
+            print("[Task Detail] Projects could not be loaded:", project_exc)
+            projects = []
         return HTMLResponse(
             _task_detail_page(
                 task,
+                projects=projects,
                 message=message,
                 error=error,
                 return_to=return_to,
@@ -10041,6 +10084,7 @@ def edit_task_web(
     effort: Annotated[str, Form()] = "",
     duration: Annotated[str, Form()] = "",
     is_just_do_it: Annotated[str | None, Form()] = None,
+    project_id: Annotated[str, Form()] = "",
     return_to: Annotated[str, Form()] = "/",
 ):
     payload = _task_edit_form_payload(
@@ -10053,6 +10097,7 @@ def edit_task_web(
         effort=effort,
         duration=duration,
         is_just_do_it=is_just_do_it,
+        project_id=project_id,
     )
     safe_return = _safe_return_to(return_to)
     try:
@@ -10085,6 +10130,8 @@ def edit_task_optimistic_web(
     urgency: Annotated[str, Form()] = "",
     effort: Annotated[str, Form()] = "",
     duration: Annotated[str | None, Form()] = None,
+    is_just_do_it: Annotated[str | None, Form()] = None,
+    project_id: Annotated[str, Form()] = "",
 ) -> JSONResponse:
     payload = _task_edit_form_payload(
         title=title,
@@ -10096,6 +10143,7 @@ def edit_task_optimistic_web(
         effort=effort,
         duration=duration,
         is_just_do_it=is_just_do_it,
+        project_id=project_id,
     )
     try:
         _update_task_detail(task_id, payload)
