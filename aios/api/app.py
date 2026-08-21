@@ -81,7 +81,7 @@ AIOS_API_VERSION = "cloud-run-api-v1-scaffold"
 AIOS_API_SECURITY_VERSION = "cloud-run-api-v1.1-security"
 AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
 AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
-AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"
+AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1.1-inbox-deferred"
 AIOS_FOCUS_ACTIVATION_REFRESH_VERSION = FOCUS_ACTIVATION_REFRESH_VERSION
 AIOS_FOCUS_CONTEXT_REFRESH_VERSION = FOCUS_CONTEXT_REFRESH_VERSION
 AIOS_SCHEDULED_COMPAT_TRIGGER_VERSION = "scheduled-compat-trigger-v1"
@@ -478,6 +478,7 @@ def health() -> HealthResponse:
 )
 def capture_inbox(
     request: InboxCaptureRequest,
+    background_tasks: BackgroundTasks,
 ) -> InboxCaptureResponse:
     row = _inbox_repository().create_brain_dump_item(
         raw_text=request.text,
@@ -488,9 +489,8 @@ def capture_inbox(
         },
     )
 
-    # Triggering is best-effort only. The durable Supabase inbox row is
-    # authoritative; a Cloud Run trigger failure must never lose capture.
-    _request_processor_run()
+    # Return immediately after the durable inbox write; processor runs async.
+    background_tasks.add_task(_request_processor_run)
 
     return InboxCaptureResponse(
         id=str(row["id"]),

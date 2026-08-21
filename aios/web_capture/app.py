@@ -47,7 +47,7 @@ WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
 WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.9-capture-ack"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 WEB_DAILY_JOURNAL_VERSION = "daily-journal-v1.2"
@@ -1095,10 +1095,32 @@ def _brain_dump_sheet_script() -> str:
       removeToast();
       const toast = document.createElement("div");
       toast.id = "brain-dump-toast";
-      toast.className = "brain-dump-toast" + (isError ? " error" : "");
+      toast.className = "brain-dump-toast" + (isError ? " error" : " ok");
       toast.textContent = message;
       document.body.appendChild(toast);
       window.setTimeout(removeToast, isError ? __TOAST_ACTION_MS__ : __TOAST_SUCCESS_MS__);
+    };
+
+    const countCaptureItems = (value) =>
+      normalizeBullets(value)
+        .split("\\n")
+        .map((line) => line.replace(/^\\s*•\\s*/, "").trim())
+        .filter(Boolean).length;
+
+    const ackCapture = (itemCount) => {
+      const label = itemCount === 1 ? "Captured ✓" : `Captured ✓ — ${itemCount} items`;
+      localStorage.removeItem(DRAFT_KEY);
+      box.value = "• ";
+      status.textContent = "";
+      status.className = "brain-dump-sheet-status";
+      syncClearButton();
+      closeSheet();
+      showToast(label);
+    };
+
+    const restoreFailedCapture = (draftBackup) => {
+      localStorage.setItem(DRAFT_KEY, draftBackup);
+      showToast("Could not save capture. Reopen Brain Dump to retry.", true);
     };
 
     const openSheet = () => {
@@ -1179,7 +1201,8 @@ def _brain_dump_sheet_script() -> str:
 
       syncDraftNormalization();
 
-      const text = normalizeBullets(box.value)
+      const draftBackup = box.value;
+      const text = normalizeBullets(draftBackup)
         .split("\\n")
         .map((line) => line.replace(/^\\s*•\\s*/, ""))
         .join("\\n")
@@ -1191,10 +1214,9 @@ def _brain_dump_sheet_script() -> str:
         return;
       }
 
+      const itemCount = countCaptureItems(draftBackup);
       form.dataset.submitting = "1";
-      button.disabled = true;
-      status.textContent = "Sending…";
-      status.className = "brain-dump-sheet-status";
+      ackCapture(itemCount);
 
       try {
         const response = await fetch("/capture/submit", {
@@ -1206,22 +1228,10 @@ def _brain_dump_sheet_script() -> str:
           }),
         });
         if (!response.ok) throw new Error("Capture failed");
-
-        const payload = await response.json();
-        const sent = Number(payload?.sent || 0);
-        localStorage.removeItem(DRAFT_KEY);
-        box.value = "• ";
-        closeSheet();
-        const label = sent === 1 ? "item" : "items";
-        showToast(sent ? `${sent} ${label} sent to AIOS.` : "Sent to AIOS.");
       } catch (_error) {
-        status.textContent = "Could not send. Your text is saved—try again.";
-        status.className = "brain-dump-sheet-status";
-        showToast("Brain Dump could not be sent.", true);
-        localStorage.setItem(DRAFT_KEY, box.value);
+        restoreFailedCapture(draftBackup);
       } finally {
         form.dataset.submitting = "0";
-        button.disabled = false;
       }
     });
   })();
@@ -8963,7 +8973,8 @@ form.addEventListener("submit",async e=>{
 
   syncDraftNormalization();
 
-  const text=normalizeBullets(box.value)
+  const draftBackup=box.value;
+  const text=normalizeBullets(draftBackup)
     .split("\n")
     .map(line=>line.replace(/^\s*•\s*/, ""))
     .join("\n")
@@ -8975,8 +8986,16 @@ form.addEventListener("submit",async e=>{
     return;
   }
 
-  button.disabled=true;
-  status.textContent="Adding…";
+  const itemCount=normalizeBullets(draftBackup)
+    .split("\n")
+    .map(line=>line.replace(/^\s*•\s*/,"").trim())
+    .filter(Boolean).length;
+
+  localStorage.removeItem(key);
+  box.value="• ";
+  status.textContent=itemCount===1?"Captured ✓":`Captured ✓ — ${itemCount} items`;
+  status.className="status ok";
+  box.focus();
 
   try{
     const r=await fetch("/capture/submit",{
@@ -8987,22 +9006,16 @@ form.addEventListener("submit",async e=>{
 
     if(!r.ok) throw new Error();
 
-    localStorage.removeItem(key);
-    box.value="• ";
-    status.textContent="✓ Added to AIOS";
-    status.className="status ok";
-    box.focus();
-
     setTimeout(()=>{
       status.textContent="";
       status.className="status";
     },2200);
 
   }catch(err){
-    status.textContent="Couldn’t add it. Your text is saved here—try again.";
-    localStorage.setItem(key,box.value);
-  }finally{
-    button.disabled=false;
+    box.value=draftBackup;
+    localStorage.setItem(key,draftBackup);
+    status.textContent="Couldn't save capture. Try again.";
+    status.className="status";
   }
 });
 

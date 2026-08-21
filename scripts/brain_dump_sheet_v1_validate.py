@@ -8,7 +8,7 @@ from pathlib import Path
 WEB = (Path(__file__).resolve().parents[1] / "aios" / "web_capture" / "app.py").read_text()
 
 checks = [
-    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"' in WEB),
+    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.9-capture-ack"' in WEB),
     ("sheet matches app width", "width: min(720px, calc(100% - 40px))" in WEB),
     ("column scrim", 'class="brain-dump-sheet-scrim"' in WEB),
     ("transparent backdrop", "background: transparent" in WEB and ".brain-dump-sheet-backdrop" in WEB),

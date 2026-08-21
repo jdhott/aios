@@ -390,17 +390,21 @@ Shared modules: `dashboard_focus.py`, `focus_activation_refresh.py`,
 
 **Next fast-path opportunities (priority order):**
 
-1.  **Brain dump capture ack** — instant “Captured ✓” in UI; keep full processor for
-    task creation pipeline (do not thin the pipeline itself).
-2.  **Review resolution** — lightweight fragment refresh for review inbox counts/lists
+1.  **Review resolution** — lightweight fragment refresh for review inbox counts/lists
     where a full processor run is only needed for downstream AI re-evaluation.
-3.  **Shared post-action task-list sync** — one helper invoked after any optimistic
+2.  **Shared post-action task-list sync** — one helper invoked after any optimistic
     dashboard mutation (complete, delete, snooze) to reduce duplicated poll logic.
-4.  **Lightweight execution refresh** — only if rank/focus changes need recomputation
+3.  **Lightweight execution refresh** — only if rank/focus changes need recomputation
     beyond `resolve_dashboard_focus_task` (bulk imports, large batch completes).
     Not needed for normal single-task complete/delete/snooze today.
-5.  **SSE (Phase 3)** — replace poll timers when processor can emit typed events;
+4.  **SSE (Phase 3)** — replace poll timers when processor can emit typed events;
     see **Real-time UI updates** below.
+
+**Shipped (August 21, 2026):**
+
+-   **Brain dump capture ack** — instant “Captured ✓” toast/status after submit;
+    inbox row is written durably; processor trigger deferred to background (full
+    task-creation pipeline unchanged).
 
 **Still requires full processor:**
 
@@ -719,7 +723,7 @@ is still higher than desired, consider these in rough priority order:
 7.  **Focus guidance vs activation overlap** — **addressed August 21, 2026**: legacy
     `ensure_focus_guidance` runs only when activation generation fails.
 8.  **Reduce processor triggers from dashboard actions** — **ongoing**; see
-    **Dashboard fast paths**. Next: project pages, review fragments, capture ack.
+    **Dashboard fast paths**. Next: review fragments, shared task-list sync.
 
 #### Principles (unchanged)
 
