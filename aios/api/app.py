@@ -188,6 +188,72 @@ def _completion_processor_delay_seconds() -> int:
     return int(os.getenv("AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS", "5"))
 
 
+def _task_is_dashboard_focus(store: SupabaseStore, task_id: str) -> bool:
+    focus_state = (
+        store.client.table("task_execution_state")
+        .select("execution_rank")
+        .eq("task_id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return bool(focus_state and focus_state[0].get("execution_rank") == 1)
+
+
+def _refresh_non_focus_completion_after_action(
+    task_id: str,
+    completed_at: str,
+    *,
+    delay_seconds: int | None = None,
+) -> None:
+    """Refresh Completed Today summary after a list-only completion."""
+    if delay_seconds is None:
+        delay_seconds = _completion_processor_delay_seconds()
+    time.sleep(max(0, int(delay_seconds)))
+
+    try:
+        store = _store()
+        rows = (
+            store.client.table("tasks")
+            .select("id,is_done,is_open,completed_at")
+            .eq("id", task_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return
+        current = dict(rows[0])
+        if (
+            not current.get("is_done")
+            or current.get("is_open")
+            or str(current.get("completed_at") or "") != str(completed_at)
+        ):
+            return
+
+        client = get_openai_client()
+        if client is None:
+            print(
+                "[Non-Focus Complete] OPENAI_API_KEY not configured; "
+                "completion summary may lag until the next processor run."
+            )
+            return
+
+        result = refresh_daily_completion_summary(
+            store,
+            client,
+            timezone_name=os.getenv("AIOS_LOCAL_TIMEZONE", "America/Toronto"),
+        )
+        print(
+            "[Non-Focus Complete] Refreshed completion summary "
+            f"after task {task_id} ({result.get('status')})."
+        )
+    except Exception as exc:
+        print(f"[Non-Focus Complete] Fast refresh failed: {exc}")
+
+
 def _refresh_focus_context_after_action(task_id: str) -> None:
     """Run context coaching in-process instead of waiting for the processor."""
     task_key = str(task_id or "").strip()
@@ -925,19 +991,7 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
         raise HTTPException(status_code=409, detail="Task is archived")
 
     task = dict(rows[0])
-    focus_state = (
-        store.client.table("task_execution_state")
-        .select("execution_rank,best_next_action")
-        .eq("task_id", task_id)
-        .limit(1)
-        .execute()
-        .data
-        or []
-    )
-    was_dashboard_focus = bool(
-        focus_state
-        and focus_state[0].get("execution_rank") == 1
-    )
+    was_dashboard_focus = _task_is_dashboard_focus(store, task_id)
 
     completed_at = datetime.now(timezone.utc).isoformat()
     (
@@ -981,20 +1035,23 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
             refresh_summary=True,
         )
     else:
+        delay = _completion_processor_delay_seconds()
         background_tasks.add_task(
-            _request_processor_run_after_completion,
+            _refresh_non_focus_completion_after_action,
             task_id,
             completed_at,
+            delay_seconds=delay,
         )
     return {
         "id": task_id,
         "completed": True,
         "completed_at": completed_at,
         "completed_activation_children": completed_activation_children,
-        "processor_deferred": not activation_parent_id and not was_dashboard_focus,
+        "processor_deferred": False,
         "focus_activation_refresh_scheduled": bool(
             activation_parent_id or was_dashboard_focus
         ),
+        "task_list_refresh_scheduled": not activation_parent_id and not was_dashboard_focus,
     }
 
 
@@ -1305,13 +1362,31 @@ def save_focus_context_http(task_id: str, request: FocusContextSaveRequest, back
 
 
 @app.post("/tasks/{task_id}/delete", tags=["tasks"])
-def delete_task_http(task_id: str) -> dict:
-    rows=(_store().client.table("tasks").select("id").eq("id",task_id).limit(1).execute().data or [])
-    if not rows: raise HTTPException(status_code=404, detail="Task not found")
-    (_store().client.table("tasks").update({"is_archived":True,"is_open":False}).eq("id",task_id).execute())
-    try: _request_processor_run()
-    except Exception: pass
-    return {"id":task_id,"deleted":True,"mode":"soft_archive"}
+def delete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
+    store = _store()
+    rows = (
+        store.client.table("tasks")
+        .select("id")
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    was_dashboard_focus = _task_is_dashboard_focus(store, task_id)
+
+    store.client.table("tasks").update({
+        "is_archived": True,
+        "is_open": False,
+    }).eq("id", task_id).execute()
+
+    if was_dashboard_focus:
+        background_tasks.add_task(_refresh_dashboard_focus_after_action)
+
+    return {"id": task_id, "deleted": True, "mode": "soft_archive"}
 
 
 

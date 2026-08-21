@@ -360,11 +360,64 @@ interaction, and human-readable labels.
 -   **Unified toast timing (v1)** — consistent dismiss durations across review,
     Brain Dump, flash banners, and task-complete feedback.
 
+#### Dashboard fast paths (in-process API work)
+
+**Status:** Active — August 21, 2026. Prefer targeted in-API refresh over queuing a
+full Cloud Run processor job when the user action has a narrow, known outcome.
+
+**Shipped:**
+
+| Action | Fast path | Full processor |
+|--------|-----------|----------------|
+| Complete **Start Here** | Activation LLM in API (after undo window) | Skipped |
+| Complete **BNA (rank 1)** | New focus + Start Here + Completed Today summary | Skipped |
+| Complete **non-focus task** | Completed Today summary in API; task-list fragment poll in web | Skipped |
+| **Delete** task (optimistic UI) | Row hidden immediately; viewport preserved | Skipped unless BNA delete needs new focus |
+| **Delete BNA** | Dashboard focus + Start Here refresh | Skipped |
+| **Not now** on Start Here | Activation refresh | Skipped |
+| **Not useful** | Context coaching LLM | Skipped until user saves context |
+| **Context help / answer** | Context coaching LLM | Skipped |
+| **Save context** | Activation refresh | Skipped |
+| **Snooze** task | Re-resolve dashboard focus + Start Here | Skipped |
+
+Shared modules: `dashboard_focus.py`, `focus_activation_refresh.py`,
+`focus_context_refresh.py`. Web uses `/api/dashboard-tasks` fragment polling with
+`summary_pending` follow-up after non-focus completes.
+
+**Next fast-path opportunities (priority order):**
+
+1.  **Project page complete/snooze/delete** — reuse dashboard optimistic + fragment
+    patterns on project task lists.
+2.  **Brain dump capture ack** — instant “Captured ✓” in UI; keep full processor for
+    task creation pipeline (do not thin the pipeline itself).
+3.  **Review resolution** — lightweight fragment refresh for review inbox counts/lists
+    where a full processor run is only needed for downstream AI re-evaluation.
+4.  **Shared post-action task-list sync** — one helper invoked after any optimistic
+    dashboard mutation (complete, delete, snooze) to reduce duplicated poll logic.
+5.  **Lightweight execution refresh** — only if rank/focus changes need recomputation
+    beyond `resolve_dashboard_focus_task` (bulk imports, large batch completes).
+    Not needed for normal single-task complete/delete/snooze today.
+6.  **SSE (Phase 3)** — replace poll timers when processor can emit typed events;
+    see **Real-time UI updates** below.
+
+**Still requires full processor:**
+
+-   Inbox / brain dump **task creation** pipeline.
+-   Project candidate discovery and automatic **project work** refresh (heavy
+    maintenance).
+-   **Breakdown** generation and task-detail AI panels.
+-   Bulk reconciliation or explicit **Force processor** debugging (`AIOS_FORCE_HEAVY_MAINTENANCE`).
+
+Principle: **thin the path, not the quality** — same prompts and models as the
+processor; skip unrelated work (execution engine, project discovery, inbox) when
+the user action cannot affect it.
+
 #### Next opportunities (priority order)
 
 1.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-2.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+2.  **Project page optimistic complete/snooze/delete** — align with dashboard fast
+    paths (see **Dashboard fast paths**).
 3.  **Preserve form data on errors** — create-task failures should keep user input.
 4.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices (timing already unified).
@@ -613,9 +666,11 @@ should be a thin client over the same Supabase/API architecture.
 **Status:** Active — first optimizations shipped August 21, 2026; observe in
 normal use for at least a few days before the next pass.
 
-All live model calls run through the Cloud Run processor (`run_aios.py`) using
-OpenAI `gpt-4.1-mini`. The web app and API enqueue processor runs; they do not
-call models directly.
+All live model calls run through the Cloud Run processor (`run_aios.py`) **or** the
+Cloud Run API fast-path modules (`focus_activation_refresh.py`,
+`focus_context_refresh.py`, `refresh_daily_completion_summary`) using the same
+`gpt-4.1-mini` models. The web app enqueues work via optimistic JSON endpoints;
+most dashboard actions no longer wait for a full processor job.
 
 #### Implemented (August 21, 2026)
 
@@ -661,9 +716,10 @@ is still higher than desired, consider these in rough priority order:
 6.  **Project work generate + validate** — two calls per generation by design
     (fail-closed grounding). Consider a single-call path for low-stakes automatic
     gap-filling only; keep the two-call path for manual generation.
-7.  **Focus guidance vs activation overlap** — review whether legacy
-    `ensure_focus_guidance` is still needed now that activation children are
-    canonical; guidance is fingerprint-cached but may be redundant on BNA change.
+7.  **Focus guidance vs activation overlap** — **addressed August 21, 2026**: legacy
+    `ensure_focus_guidance` runs only when activation generation fails.
+8.  **Reduce processor triggers from dashboard actions** — **ongoing**; see
+    **Dashboard fast paths**. Next: project pages, review fragments, capture ack.
 
 #### Principles (unchanged)
 
@@ -751,14 +807,17 @@ sequence is:
 8.  Design Recurring Tasks before implementation.
 9.  Observe AI spend optimizations in normal use for a few days; revisit
     **AI usage / credit efficiency** next opportunities if needed.
-10. Continue **UX polish** — project name on task detail is next.
-11. **Service Worker Home shell cache** — after fast-nav + sessionStorage prove
+10. Continue **UX polish** — project page fast paths are next; project name on task
+    detail remains queued.
+11. Extend **dashboard fast paths** to project pages and review fragments where
+    polling already exists.
+12. **Service Worker Home shell cache** — after fast-nav + sessionStorage prove
     useful in daily use.
-12. Consider SSE (Phase 3) only if polling validation shows latency or
+13. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
-13. When stabilization load allows, begin **workspace tenancy Phase 2**
+14. When stabilization load allows, begin **workspace tenancy Phase 2**
     (query scoping through API/processor).
-14. Choose subsequent improvements based on actual AIOS usage rather
+15. Choose subsequent improvements based on actual AIOS usage rather
     than adding features speculatively.
 
 ------------------------------------------------------------------------
@@ -796,6 +855,9 @@ Recent milestones that materially changed the architecture:
     toast (August 21, 2026).
 -   Journal summary polling, Home fast navigation (`/?fast=1` +
     sessionStorage), and **Show All** on progressive Home (August 21, 2026).
+-   Dashboard fast paths: in-API Start Here, context coaching, focus resolution,
+    non-focus completion summary, optimistic delete, and processor skip for
+    routine dashboard actions (August 21, 2026).
 
 ------------------------------------------------------------------------
 
