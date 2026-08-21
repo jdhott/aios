@@ -30,10 +30,10 @@ WEB_DASHBOARD_INTERACTION_VERSION = "aios-web-dashboard-v1.3-scroll-checkmark"
 WEB_OPTIMISTIC_COMPLETE_VERSION = "optimistic-complete-v1"
 WEB_OPTIMISTIC_SNOOZE_VERSION = "optimistic-snooze-v1"
 WEB_MAIN_PWA_VERSION = "main-pwa-v1"
-WEB_DASHBOARD_UI_VERSION = "dashboard-v1.4-compact-capture-toggle"
+WEB_DASHBOARD_UI_VERSION = "home-v1"
 WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
-WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix1"
+WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix2"
 WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
 WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.3-form-layout-fix"
 WEB_PROJECTS_VERSION = "projects-v1"
@@ -43,7 +43,8 @@ WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.2"
+WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.4"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -331,7 +332,7 @@ def _web_version_groups() -> list[dict[str, object]]:
             ],
         },
         {
-            "title": "Dashboard",
+            "title": "Home",
             "items": [
                 {"label": "UI", "version": WEB_DASHBOARD_UI_VERSION},
                 {"label": "Focus card", "version": WEB_DASHBOARD_FOCUS_VERSION},
@@ -341,6 +342,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Optimistic complete", "version": WEB_OPTIMISTIC_COMPLETE_VERSION},
                 {"label": "Optimistic snooze", "version": WEB_OPTIMISTIC_SNOOZE_VERSION},
                 {"label": "Focus context loading", "version": WEB_FOCUS_CONTEXT_LOADING_VERSION},
+                {"label": "Empty-state copy", "version": WEB_EMPTY_STATE_COPY_VERSION},
                 {"label": "Brain Dump sheet", "version": WEB_BRAIN_DUMP_SHEET_VERSION},
             ],
         },
@@ -536,7 +538,7 @@ def _about_page(payload: dict[str, object]) -> str:
     <h2 class="about-group-title">Links</h2>
     <div class="about-links">
       <a href="/capture">Brain Dump</a>
-      <a href="/">Dashboard</a>
+      <a href="/">Home</a>
     </div>
   </section>
 </main>
@@ -962,10 +964,10 @@ def _brain_dump_sheet_html() -> str:
         <button type="button" class="brain-dump-sheet-close" id="brain-dump-sheet-close" aria-label="Close">×</button>
       </div>
       <form class="brain-dump-sheet-form" id="brain-dump-sheet-form">
-        <textarea id="brain-dump-sheet-text" maxlength="10000" aria-label="Brain dump text" placeholder="• What do you need to remember or act on?"></textarea>
+        <textarea id="brain-dump-sheet-text" maxlength="10000" autocapitalize="sentences" aria-label="Brain dump text" placeholder="• What do you need to remember or act on?"></textarea>
         <div class="brain-dump-sheet-status" id="brain-dump-sheet-status" role="status" aria-live="polite"></div>
         <div class="brain-dump-sheet-footer">
-          <p class="hint">⌘/Ctrl + Enter to send</p>
+          <p class="hint keyboard-hint">⌘/Ctrl + Enter to send</p>
           <button type="submit" class="brain-dump-sheet-submit" id="brain-dump-sheet-submit">Send to AIOS</button>
         </div>
       </form>
@@ -991,11 +993,39 @@ def _brain_dump_sheet_script() -> str:
     const status = document.getElementById("brain-dump-sheet-status");
     const openers = () => Array.from(document.querySelectorAll("#brain-dump-open, [data-brain-dump-open]"));
 
+    const sentenceCaseBulletLine = (line) =>
+      line.replace(/^(\s*[•*-]\s+)([a-z])/, (_, prefix, ch) => prefix + ch.toUpperCase());
+
     const normalizeBullets = (value) =>
       value.split("\\n").map((line) => {
         if (!line.trim()) return line;
-        return /^\\s*[•*-]\\s+/.test(line) ? line.replace(/^\\s*[•*-]\\s+/, "• ") : "• " + line;
+        const normalized = /^\\s*[•*-]\\s+/.test(line)
+          ? line.replace(/^\\s*[•*-]\\s+/, "• ")
+          : "• " + line;
+        return sentenceCaseBulletLine(normalized);
       }).join("\\n");
+
+    const applySentenceCaseAtCursor = (element) => {
+      const value = element.value;
+      const cursor = element.selectionStart;
+      const lines = value.split("\\n");
+      let offset = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineStart = offset;
+        const lineEnd = offset + line.length;
+        if (cursor >= lineStart && cursor <= lineEnd) {
+          const updated = sentenceCaseBulletLine(line);
+          if (updated !== line) {
+            lines[i] = updated;
+            element.value = lines.join("\\n");
+            element.selectionStart = element.selectionEnd = cursor;
+          }
+          break;
+        }
+        offset = lineEnd + 1;
+      }
+    };
 
     const readDraft = () => {
       const saved = localStorage.getItem(DRAFT_KEY) || "";
@@ -1059,6 +1089,7 @@ def _brain_dump_sheet_script() -> str:
     });
 
     box?.addEventListener("input", () => {
+      applySentenceCaseAtCursor(box);
       localStorage.setItem(DRAFT_KEY, box.value);
     });
 
@@ -1083,7 +1114,7 @@ def _brain_dump_sheet_script() -> str:
       event.preventDefault();
       if (form.dataset.submitting === "1") return;
 
-      const text = box.value
+      const text = normalizeBullets(box.value)
         .split("\\n")
         .map((line) => line.replace(/^\\s*•\\s*/, ""))
         .join("\\n")
@@ -1190,11 +1221,14 @@ def _mobile_shell_css() -> str:
       line-height: 1.2;
     }}
     .page-heading .subtitle,
-    .dashboard-subtitle {{
+    .home-subtitle {{
       margin: 0;
       color: var(--muted);
       font-size: 1.02rem;
       line-height: var(--line-relaxed);
+    }}
+    .home-page-heading {{
+      margin-bottom: 20px;
     }}
     {_bottom_nav_css()}
     .fragment-poll-timeout {{
@@ -1233,6 +1267,11 @@ def _mobile_shell_css() -> str:
       color:var(--muted);
       text-decoration:underline;
       padding:10px 0;
+    }}
+    @media (max-width: 560px) {{
+      .keyboard-hint {{
+        display: none !important;
+      }}
     }}
     """
 
@@ -1278,7 +1317,7 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
         <p class="bottom-nav-sheet-label">Capture</p>
         <button type="button" class="bottom-nav-sheet-item" data-brain-dump-open>
           <span>Quick capture</span>
-          <span class="bottom-nav-sheet-meta">⌘⇧B</span>
+          <span class="bottom-nav-sheet-meta keyboard-hint">⌘⇧B</span>
         </button>
         <a class="bottom-nav-sheet-item" href="/capture">
           <span>Capture app</span>
@@ -4386,8 +4425,8 @@ def _build_review_cards(reviews: list[dict]) -> dict[str, object]:
     if not cards:
         cards = (
             '<div class="empty-state">'
-            'No possible duplicate reviews need attention.'
-            '</div>'
+            + html.escape(_reviews_empty_message())
+            + '</div>'
         )
 
     pending = bool(
@@ -5388,6 +5427,16 @@ def _tasks_section_specs(*, search: str = "") -> list[tuple[str, str]]:
     ]
 
 
+def _dashboard_tasks_empty_message(*, search: str = "") -> str:
+    if search.strip():
+        return "No tasks match your search."
+    return "You're all caught up. No open tasks in your lists right now."
+
+
+def _reviews_empty_message() -> str:
+    return "All caught up. Nothing needs your review right now."
+
+
 def _tasks_sections_fingerprint(
     tasks: dict[str, list[dict]] | None,
     *,
@@ -5630,8 +5679,8 @@ def _tasks_sections_view(
     if not task_sections:
         task_sections = (
             '<div class="empty-state">'
-            'No matching tasks found.'
-            '</div>'
+            + html.escape(_dashboard_tasks_empty_message(search=search))
+            + '</div>'
         )
 
     wrapped = f'<div id="dashboard-task-groups">{task_sections}</div>'
@@ -5836,13 +5885,26 @@ def _page(
     .focus-pending {{ display:flex; align-items:center; gap:12px; color:var(--ink); font-size:.95rem; line-height:1.4; margin-top:0; }}
     .focus-pending .mini-spinner {{ display:inline-block; flex:0 0 auto; width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--charcoal); border-radius:50%; animation:dashboard-spin .8s linear infinite; }}
     @keyframes dashboard-spin {{ to {{ transform:rotate(360deg); }} }}
-    .focus-label {{
-      margin-bottom:12px;
-      color:var(--navy);
+    .focus-label,
+    .focus-start-heading {{
+      margin:0 0 10px;
       font-size:.72rem;
       font-weight:700;
       letter-spacing:.06em;
       text-transform:uppercase;
+      line-height:1.3;
+    }}
+    .focus-label {{
+      margin-bottom:12px;
+      color:var(--charcoal);
+    }}
+    .focus-start-heading {{
+      color:var(--muted);
+    }}
+    .focus-card .focus-parent-title-row .task-link {{
+      font-size:1.06rem;
+      font-weight:600;
+      line-height:1.35;
     }}
     .focus-parent-meta {{ margin-top:0; color:var(--muted); font-size:.8125rem; line-height:1.4; overflow-wrap:anywhere; }}
     .focus-parent-meta + .focus-meta {{ margin-top:5px; }}
@@ -5982,14 +6044,6 @@ def _page(
       margin:20px 0 0;
       padding-top:18px;
       border-top:1px solid var(--border);
-    }}
-    .focus-start-heading {{
-      margin:0 0 12px;
-      color:var(--navy);
-      font-size:1.35rem;
-      font-weight:700;
-      letter-spacing:-0.015em;
-      line-height:1.15;
     }}
     .focus-timebox-inline {{
       font-size:.8125rem;
@@ -6437,9 +6491,8 @@ def _page(
 </head>
 <body>
   <main>
-    <div class="page-heading">
-      <h1 class="brand">Dashboard</h1>
-      <p class="dashboard-subtitle">Prioritize and act. Press ⌘⇧B to capture anything.</p>
+    <div class="page-heading home-page-heading">
+      <p class="home-subtitle">Do the next thing.<span class="keyboard-hint"> Press ⌘⇧B to capture anything.</span></p>
     </div>
     {notice}
     {focus_card}
@@ -7544,7 +7597,7 @@ button:disabled{opacity:.55}
 
     <form id="captureForm" class="capture-form">
       <div class="input-area">
-        <textarea id="captureText" maxlength="10000" autofocus placeholder="• What do you need to remember or act on?"></textarea>
+        <textarea id="captureText" maxlength="10000" autocapitalize="sentences" autofocus placeholder="• What do you need to remember or act on?"></textarea>
       </div>
 
       <div class="card-footer">
@@ -7553,7 +7606,7 @@ button:disabled{opacity:.55}
           <span>Appearance</span>
           <span class="theme-toggle-value">System</span>
         </button>
-        <div class="hint">⌘/Ctrl + Enter</div>
+        <div class="hint keyboard-hint">⌘/Ctrl + Enter</div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </div>
     </form>
@@ -7567,19 +7620,47 @@ const form=document.getElementById("captureForm");
 const button=document.getElementById("captureButton");
 const status=document.getElementById("status");
 
+function sentenceCaseBulletLine(line){
+  return line.replace(/^(\s*[•*-]\s+)([a-z])/, (_, prefix, ch) => prefix + ch.toUpperCase());
+}
+
 function normalizeBullets(value){
   return value.split("\n").map(line=>{
     if(!line.trim()) return line;
-    return /^\s*[•*-]\s+/.test(line)
+    const normalized=/^\s*[•*-]\s+/.test(line)
       ? line.replace(/^\s*[•*-]\s+/, "• ")
       : "• "+line;
+    return sentenceCaseBulletLine(normalized);
   }).join("\n");
+}
+
+function applySentenceCaseAtCursor(element){
+  const value=element.value;
+  const cursor=element.selectionStart;
+  const lines=value.split("\n");
+  let offset=0;
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    const lineStart=offset;
+    const lineEnd=offset+line.length;
+    if(cursor>=lineStart && cursor<=lineEnd){
+      const updated=sentenceCaseBulletLine(line);
+      if(updated!==line){
+        lines[i]=updated;
+        element.value=lines.join("\n");
+        element.selectionStart=element.selectionEnd=cursor;
+      }
+      break;
+    }
+    offset=lineEnd+1;
+  }
 }
 
 const savedDraft=localStorage.getItem(key)||"";
 box.value=savedDraft ? normalizeBullets(savedDraft) : "• ";
 
 box.addEventListener("input",()=>{
+  applySentenceCaseAtCursor(box);
   localStorage.setItem(key,box.value);
 });
 
@@ -7606,7 +7687,7 @@ box.addEventListener("keydown",e=>{
 form.addEventListener("submit",async e=>{
   e.preventDefault();
 
-  const text=box.value
+  const text=normalizeBullets(box.value)
     .split("\n")
     .map(line=>line.replace(/^\s*•\s*/, ""))
     .join("\n")

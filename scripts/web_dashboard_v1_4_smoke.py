@@ -14,7 +14,9 @@ with patch.dict(os.environ,env,clear=False), patch.object(web,"_fetch_open_tasks
     with TestClient(web.app) as client:
         r=client.get("/",headers=basic("aios","test-password"))
 assert r.status_code==200
-assert ">Dashboard</h1>" in r.text
+assert ">Dashboard</h1>" not in r.text
+assert 'class="home-subtitle"' in r.text
+assert "Do the next thing." in r.text
 assert 'id="brain-dump-open"' in r.text
 assert 'id="brain-dump-sheet-root"' in r.text
 assert 'id="brainDumpText"' not in r.text

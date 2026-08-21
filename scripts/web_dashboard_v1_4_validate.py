@@ -5,8 +5,9 @@ root = Path(__file__).resolve().parents[1]
 web = (root / "aios/web_capture/app.py").read_text()
 ast.parse(web)
 checks = [
-    ("dashboard v1.4 marker", 'WEB_DASHBOARD_UI_VERSION = "dashboard-v1.4-compact-capture-toggle"' in web),
-    ("Dashboard title", '<h1 class="brand">Dashboard</h1>' in web),
+    ("home shell marker", 'WEB_DASHBOARD_UI_VERSION = "home-v1"' in web),
+    ("home subtitle", 'class="home-subtitle"' in web and "Do the next thing." in web),
+    ("no dashboard title", '<h1 class="brand">Dashboard</h1>' not in web),
     ("global Brain Dump sheet", 'id="brain-dump-sheet-root"' in web),
     ("capture fab", 'id="brain-dump-open"' in web),
     ("bullet parser", "if clean[:1] in {\"•\", \"-\", \"*\"}" in web),

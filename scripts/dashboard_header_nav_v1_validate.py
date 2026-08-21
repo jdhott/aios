@@ -7,11 +7,11 @@ checks = [
     ("Projects available", 'item("/projects", "Projects", "▦", "projects")'),
     ("Reviews available", 'item("/reviews", "Reviews", "◎", "reviews", reviews_badge)'),
     ("New Task available", 'href="/tasks/new"'),
-    ("Work Patterns available", '<a href="/work-patterns">Work Patterns</a>'),
-    ("Journal available", '<a href="/journal">Journal</a>'),
-    ("Sign Out available", '<button type="submit">Sign Out</button>'),
-    ("Dashboard page heading", 'class="page-heading"'),
-    ("Dashboard bottom nav active", '_bottom_nav_html(active="home", review_count=review_count)'),
+    ("Work Patterns available", 'href="/work-patterns">Work Patterns</a>'),
+    ("Journal available", 'href="/journal">Journal</a>'),
+    ("Sign Out available", 'class="bottom-nav-sheet-item sign-out-button"'),
+    ("Home page heading", "home-page-heading"),
+    ("Home bottom nav active", '_bottom_nav_html(active="home", review_count=review_count)'),
 ]
 for label, needle in checks:
     assert needle in s, f"FAIL: {label}"
