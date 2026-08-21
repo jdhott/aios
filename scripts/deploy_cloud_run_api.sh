@@ -41,7 +41,7 @@ gcloud artifacts repositories describe   "$REPOSITORY"   --project "$PROJECT"   
 
 gcloud builds submit   --project "$PROJECT"   --config cloudbuild.api.yaml   --substitutions "_IMAGE=${IMAGE}"   .
 
-gcloud run deploy "$SERVICE"   --project "$PROJECT"   --region "$REGION"   --image "$IMAGE"   --no-allow-unauthenticated   --set-env-vars "AIOS_API_ENV=cloudrun,AIOS_PROCESSOR_TRIGGER_ENABLED=true,GOOGLE_CLOUD_PROJECT=${PROJECT},AIOS_CLOUD_RUN_REGION=${REGION},AIOS_CLOUD_RUN_JOB=aios-processor"   --set-secrets "SUPABASE_URL=${SUPABASE_URL_SECRET}:latest,SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY_SECRET}:latest"   --port 8080
+gcloud run deploy "$SERVICE"   --project "$PROJECT"   --region "$REGION"   --image "$IMAGE"   --no-allow-unauthenticated   --set-env-vars "AIOS_API_ENV=cloudrun,AIOS_PROCESSOR_TRIGGER_ENABLED=true,GOOGLE_CLOUD_PROJECT=${PROJECT},AIOS_CLOUD_RUN_REGION=${REGION},AIOS_CLOUD_RUN_JOB=aios-processor"   --set-secrets "SUPABASE_URL=${SUPABASE_URL_SECRET}:latest,SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY_SECRET}:latest,OPENAI_API_KEY=aios-openai-api-key:latest"   --port 8080
 
 echo "Deployment complete."
 echo "Service is private. Test with:"

@@ -3,10 +3,16 @@ from __future__ import annotations
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from aios.focus_activation import (
+    FOCUS_ACTIVATION_SOURCE,
     complete_open_focus_activation_children,
     get_active_focus_activation,
     list_focus_activation_children,
     mark_focus_activation_not_now,
+)
+from aios.focus_activation_refresh import (
+    FOCUS_ACTIVATION_REFRESH_VERSION,
+    get_openai_client,
+    refresh_focus_activation_for_parent,
 )
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -68,6 +74,7 @@ AIOS_API_SECURITY_VERSION = "cloud-run-api-v1.1-security"
 AIOS_API_REVIEW_RESOLUTION_VERSION = "cloud-run-api-v1.2"
 AIOS_REVIEW_LIFECYCLE_FIX_VERSION = "cloud-workflow-lifecycle-v1.1"
 AIOS_CLOUD_PROCESSOR_TRIGGER_VERSION = "cloud-processor-trigger-v1"
+AIOS_FOCUS_ACTIVATION_REFRESH_VERSION = FOCUS_ACTIVATION_REFRESH_VERSION
 AIOS_SCHEDULED_COMPAT_TRIGGER_VERSION = "scheduled-compat-trigger-v1"
 AIOS_WEB_TASKS_API_VERSION = "web-tasks-v1-read-only"
 
@@ -168,6 +175,78 @@ def _request_processor_run() -> dict:
     tags=["system"],
 )
 
+def _completion_processor_delay_seconds() -> int:
+    return int(os.getenv("AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS", "5"))
+
+
+def _refresh_focus_activation_after_action(
+    parent_task_id: str,
+    *,
+    delay_seconds: int = 0,
+    verify_task_id: str | None = None,
+    verify_completed_at: str | None = None,
+) -> None:
+    """Generate the next Start Here step without waiting for a full processor run."""
+    time.sleep(max(0, int(delay_seconds)))
+
+    parent_id = str(parent_task_id or "").strip()
+    if not parent_id:
+        return
+
+    try:
+        store = _store()
+
+        if verify_task_id and verify_completed_at:
+            rows = (
+                store.client.table("tasks")
+                .select("id,is_done,is_open,completed_at,generated_source,parent_task_id")
+                .eq("id", verify_task_id)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not rows:
+                return
+            current = dict(rows[0])
+            if (
+                current.get("generated_source") != FOCUS_ACTIVATION_SOURCE
+                or not current.get("is_done")
+                or current.get("is_open")
+                or str(current.get("completed_at") or "") != str(verify_completed_at)
+                or str(current.get("parent_task_id") or "") != parent_id
+            ):
+                return
+
+        client = get_openai_client()
+        if client is None:
+            print(
+                "[Focus Activation Refresh] OPENAI_API_KEY not configured; "
+                "falling back to processor."
+            )
+            _request_processor_run()
+            return
+
+        child = refresh_focus_activation_for_parent(
+            store,
+            client,
+            parent_id,
+        )
+        if child:
+            print(
+                "[Focus Activation Refresh] Created or reused Start Here "
+                f"{child.get('id')} for parent {parent_id}."
+            )
+        else:
+            print(
+                "[Focus Activation Refresh] No Start Here generated for "
+                f"parent {parent_id}; processor may retry."
+            )
+            _request_processor_run()
+    except Exception as exc:
+        print(f"[Focus Activation Refresh] Fast refresh failed: {exc}")
+
+
 def _request_processor_run_after_completion(
     task_id: str,
     completed_at: str,
@@ -176,9 +255,7 @@ def _request_processor_run_after_completion(
 ) -> None:
     """Debounce expensive reconciliation after an optimistic completion."""
     if delay_seconds is None:
-        delay_seconds = int(
-            os.getenv("AIOS_COMPLETION_PROCESSOR_DELAY_SECONDS", "5")
-        )
+        delay_seconds = _completion_processor_delay_seconds()
     time.sleep(max(0, int(delay_seconds)))
     try:
         rows = (
@@ -718,7 +795,7 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
     store = _store()
     rows = (
         store.client.table("tasks")
-        .select("id,is_archived")
+        .select("id,is_archived,generated_source,parent_task_id")
         .eq("id", task_id)
         .limit(1)
         .execute().data
@@ -729,6 +806,7 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
     if rows[0].get("is_archived"):
         raise HTTPException(status_code=409, detail="Task is archived")
 
+    task = dict(rows[0])
     completed_at = datetime.now(timezone.utc).isoformat()
     (
         store.client.table("tasks")
@@ -748,6 +826,20 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
         completed_at=completed_at,
     )
 
+    activation_parent_id = None
+    if task.get("generated_source") == FOCUS_ACTIVATION_SOURCE:
+        activation_parent_id = str(task.get("parent_task_id") or "").strip() or None
+
+    if activation_parent_id:
+        delay = _completion_processor_delay_seconds()
+        background_tasks.add_task(
+            _refresh_focus_activation_after_action,
+            activation_parent_id,
+            delay_seconds=delay,
+            verify_task_id=task_id,
+            verify_completed_at=completed_at,
+        )
+
     background_tasks.add_task(
         _request_processor_run_after_completion,
         task_id,
@@ -759,6 +851,7 @@ def complete_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
         "completed_at": completed_at,
         "completed_activation_children": completed_activation_children,
         "processor_deferred": True,
+        "focus_activation_refresh_scheduled": bool(activation_parent_id),
     }
 
 
@@ -830,7 +923,7 @@ def undo_complete_task_http(task_id: str) -> dict:
 
 
 @app.post("/tasks/{task_id}/not-now", tags=["tasks"])
-def not_now_task_http(task_id: str) -> dict:
+def not_now_task_http(task_id: str, background_tasks: BackgroundTasks) -> dict:
     try:
         task = mark_focus_activation_not_now(
             _store(),
@@ -842,15 +935,18 @@ def not_now_task_http(task_id: str) -> dict:
             detail=str(exc),
         ) from exc
 
-    try:
-        _request_processor_run()
-    except Exception:
-        pass
+    parent_id = str(task.get("parent_task_id") or "").strip()
+    if parent_id:
+        background_tasks.add_task(
+            _refresh_focus_activation_after_action,
+            parent_id,
+        )
 
     return {
         "id": task_id,
         "not_now": True,
         "task": task,
+        "focus_activation_refresh_scheduled": bool(parent_id),
     }
 
 
@@ -1058,7 +1154,10 @@ def save_focus_context_http(task_id: str, request: FocusContextSaveRequest, back
       .eq("generated_source", "focus_activation")
       .eq("is_open", True).eq("is_done", False).eq("is_archived", False)
       .execute())
-    background_tasks.add_task(_request_processor_run)
+    background_tasks.add_task(
+        _refresh_focus_activation_after_action,
+        task_id,
+    )
     return {"id": task_id, "context": context, "regenerating_start_here": True}
 
 
