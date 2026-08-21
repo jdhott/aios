@@ -48,6 +48,9 @@ WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
 WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.8"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
+WEB_TOAST_TIMING_VERSION = "toast-timing-v1"
+WEB_TOAST_SUCCESS_MS = 4500
+WEB_TOAST_ACTION_MS = 5000
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -346,6 +349,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Empty-state copy", "version": WEB_EMPTY_STATE_COPY_VERSION},
                 {"label": "Brain Dump sheet", "version": WEB_BRAIN_DUMP_SHEET_VERSION},
                 {"label": "Review toast", "version": WEB_REVIEW_TOAST_VERSION},
+                {"label": "Toast timing", "version": WEB_TOAST_TIMING_VERSION},
             ],
         },
         {
@@ -1008,7 +1012,7 @@ def _brain_dump_sheet_html() -> str:
 
 
 def _brain_dump_sheet_script() -> str:
-    return """
+    script = """
   <script>
   (() => {
     const ROOT_ID = "brain-dump-sheet-root";
@@ -1087,7 +1091,7 @@ def _brain_dump_sheet_script() -> str:
       toast.className = "brain-dump-toast" + (isError ? " error" : "");
       toast.textContent = message;
       document.body.appendChild(toast);
-      window.setTimeout(removeToast, isError ? 5000 : 2600);
+      window.setTimeout(removeToast, isError ? __TOAST_ACTION_MS__ : __TOAST_SUCCESS_MS__);
     };
 
     const openSheet = () => {
@@ -1136,13 +1140,13 @@ def _brain_dump_sheet_script() -> str:
       }
     });
 
-    box?.addEventListener("input", () => {{
+    box?.addEventListener("input", () => {
       persistDraftInput();
-    }});
+    });
 
-    box?.addEventListener("blur", () => {{
+    box?.addEventListener("blur", () => {
       syncDraftNormalization();
-    }});
+    });
 
     box?.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -1216,6 +1220,10 @@ def _brain_dump_sheet_script() -> str:
   })();
   </script>
     """
+    return (
+        script.replace("__TOAST_ACTION_MS__", str(WEB_TOAST_ACTION_MS))
+        .replace("__TOAST_SUCCESS_MS__", str(WEB_TOAST_SUCCESS_MS))
+    )
 
 
 def _mobile_shell_css() -> str:
@@ -1414,18 +1422,18 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
 
 
 def _client_flash_script() -> str:
-    return """
+    return f"""
   <script>
-  (() => {
+  (() => {{
     const raw = sessionStorage.getItem("aios-flash");
     if (!raw) return;
     sessionStorage.removeItem("aios-flash");
     let payload;
-    try {
+    try {{
       payload = JSON.parse(raw);
-    } catch (_error) {
+    }} catch (_error) {{
       return;
-    }
+    }}
     const message = String(payload.message || "").trim();
     if (!message) return;
     const kind = payload.kind === "error" ? "error" : "success";
@@ -1436,15 +1444,16 @@ def _client_flash_script() -> str:
     const main = document.querySelector("main");
     if (!main) return;
     const anchor = main.querySelector(".page-heading, .capture-heading, .detail-back, .journal-heading");
-    if (anchor && anchor.parentNode === main) {
+    if (anchor && anchor.parentNode === main) {{
       anchor.insertAdjacentElement("afterend", notice);
-    } else {
+    }} else {{
       main.insertBefore(notice, main.firstChild);
-    }
-    window.setTimeout(() => {
+    }}
+    const dismissMs = kind === "error" ? {WEB_TOAST_ACTION_MS} : {WEB_TOAST_SUCCESS_MS};
+    window.setTimeout(() => {{
       notice.remove();
-    }, 6000);
-  })();
+    }}, dismissMs);
+  }})();
   </script>
 """
 
@@ -4826,7 +4835,7 @@ def _reviews_page(
 
   window.setTimeout(() => {{
     toast.remove();
-  }}, 4500);
+  }}, {WEB_TOAST_SUCCESS_MS});
 }})();
 </script>
 {_client_flash_script()}
@@ -6822,7 +6831,7 @@ def _page(
           toast.textContent = message;
         }}
         document.body.appendChild(toast);
-        window.setTimeout(removeOptimisticToast, 5000);
+        window.setTimeout(removeOptimisticToast, {WEB_TOAST_ACTION_MS});
       }};
 
       const showFocusUpdating = () => {{
@@ -7084,7 +7093,7 @@ def _page(
               headers: {{ "X-Requested-With": "fetch" }},
             }});
             if (!response.ok) throw new Error("Completion failed");
-            state.timer = window.setTimeout(() => finishOptimisticWindow(state), 8000);
+            state.timer = window.setTimeout(() => finishOptimisticWindow(state), {WEB_TOAST_ACTION_MS});
           }} catch (_error) {{
             clearOptimisticTimer();
             restoreOptimisticNodes(state);
@@ -7097,7 +7106,7 @@ def _page(
             failed.className = "optimistic-toast error";
             failed.textContent = "Task could not be completed.";
             document.body.appendChild(failed);
-            window.setTimeout(removeOptimisticToast, 3000);
+            window.setTimeout(removeOptimisticToast, {WEB_TOAST_ACTION_MS});
           }}
         }});
       }};
@@ -7211,7 +7220,7 @@ def _page(
             failed.textContent = "Task could not be snoozed.";
             document.body.appendChild(failed);
 
-            window.setTimeout(removeOptimisticToast, 3000);
+            window.setTimeout(removeOptimisticToast, {WEB_TOAST_ACTION_MS});
           }}
         }});
       }};
