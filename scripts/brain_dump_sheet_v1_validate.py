@@ -8,7 +8,8 @@ from pathlib import Path
 WEB = (Path(__file__).resolve().parents[1] / "aios" / "web_capture" / "app.py").read_text()
 
 checks = [
-    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1"' in WEB),
+    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.1"' in WEB),
+    ("sheet matches app width", "width: min(720px, calc(100% - 40px))" in WEB),
     ("bottom sheet markup", 'class="brain-dump-sheet"' in WEB),
     ("capture fab", 'id="brain-dump-open"' in WEB),
     ("sheet submit endpoint", 'fetch("/capture/submit"' in WEB),

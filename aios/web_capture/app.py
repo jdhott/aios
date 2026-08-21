@@ -43,7 +43,7 @@ WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.1"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -759,9 +759,10 @@ def _brain_dump_sheet_css() -> str:
     }
     .brain-dump-sheet {
       position: absolute;
-      left: 0;
-      right: 0;
+      left: 50%;
+      right: auto;
       bottom: 0;
+      width: min(720px, calc(100% - 40px));
       max-height: min(88vh, 720px);
       display: flex;
       flex-direction: column;
@@ -769,11 +770,11 @@ def _brain_dump_sheet_css() -> str:
       border-radius: 24px 24px 0 0;
       background: var(--card);
       box-shadow: 0 -18px 48px rgba(18, 24, 32, 0.18);
-      transform: translateY(104%);
+      transform: translate(-50%, 104%);
       transition: transform 0.28s ease;
     }
     .brain-dump-sheet-root.is-open .brain-dump-sheet {
-      transform: translateY(0);
+      transform: translate(-50%, 0);
     }
     .brain-dump-sheet-handle {
       width: 42px;
