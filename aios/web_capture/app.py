@@ -45,7 +45,7 @@ WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_EMPTY_STATE_COPY_VERSION = "empty-state-copy-v1"
 WEB_REVIEW_TOAST_VERSION = "review-toast-v1"
-WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.5"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.7"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -820,7 +820,7 @@ def _brain_dump_sheet_css() -> str:
     }
     .brain-dump-sheet-header {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 12px;
@@ -831,12 +831,6 @@ def _brain_dump_sheet_css() -> str:
       font-size: 1.12rem;
       font-weight: 750;
       color: var(--charcoal);
-    }
-    .brain-dump-sheet-header p {
-      margin: 4px 0 0;
-      color: var(--muted);
-      font-size: 0.86rem;
-      line-height: var(--line-relaxed);
     }
     .brain-dump-sheet-close {
       flex: 0 0 auto;
@@ -883,6 +877,38 @@ def _brain_dump_sheet_css() -> str:
       justify-content: space-between;
       gap: 12px;
       flex: 0 0 auto;
+    }
+    .brain-dump-sheet-footer-start {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .brain-dump-sheet-clear {
+      min-height: 44px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.92rem;
+      font-weight: 600;
+      line-height: var(--line-relaxed);
+      cursor: pointer;
+      padding: 10px 0;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .brain-dump-sheet-clear:hover,
+    .brain-dump-sheet-clear:focus-visible {
+      color: var(--charcoal);
+      outline: none;
+    }
+    .brain-dump-sheet-clear:disabled {
+      opacity: 0.45;
+      cursor: default;
+      text-decoration: none;
     }
     .brain-dump-sheet-footer .hint {
       margin: 0;
@@ -962,17 +988,17 @@ def _brain_dump_sheet_html() -> str:
     <section class="brain-dump-sheet" role="dialog" aria-modal="true" aria-labelledby="brain-dump-sheet-title">
       <div class="brain-dump-sheet-handle" aria-hidden="true"></div>
       <div class="brain-dump-sheet-header">
-        <div>
-          <h2 id="brain-dump-sheet-title">Brain Dump</h2>
-          <p>One task per bullet. Capture from anywhere.</p>
-        </div>
+        <h2 id="brain-dump-sheet-title">Brain Dump</h2>
         <button type="button" class="brain-dump-sheet-close" id="brain-dump-sheet-close" aria-label="Close">×</button>
       </div>
       <form class="brain-dump-sheet-form" id="brain-dump-sheet-form">
         <textarea id="brain-dump-sheet-text" maxlength="10000" autocapitalize="sentences" aria-label="Brain dump text" placeholder="• What do you need to remember or act on?"></textarea>
         <div class="brain-dump-sheet-status" id="brain-dump-sheet-status" role="status" aria-live="polite"></div>
         <div class="brain-dump-sheet-footer">
-          <p class="hint keyboard-hint">⌘/Ctrl + Enter to send</p>
+          <div class="brain-dump-sheet-footer-start">
+            <button type="button" class="brain-dump-sheet-clear" id="brain-dump-sheet-clear">Clear</button>
+            <p class="hint keyboard-hint">⌘/Ctrl + Enter to send</p>
+          </div>
           <button type="submit" class="brain-dump-sheet-submit" id="brain-dump-sheet-submit">Send to AIOS</button>
         </div>
       </form>
@@ -995,6 +1021,7 @@ def _brain_dump_sheet_script() -> str:
     const form = document.getElementById("brain-dump-sheet-form");
     const box = document.getElementById("brain-dump-sheet-text");
     const button = document.getElementById("brain-dump-sheet-submit");
+    const clearButton = document.getElementById("brain-dump-sheet-clear");
     const status = document.getElementById("brain-dump-sheet-status");
     const openers = () => Array.from(document.querySelectorAll("#brain-dump-open, [data-brain-dump-open]"));
 
@@ -1037,6 +1064,26 @@ def _brain_dump_sheet_script() -> str:
       box.value = saved ? normalizeBullets(saved) : "• ";
     };
 
+    const hasDraftContent = () =>
+      normalizeBullets(box.value)
+        .split("\\n")
+        .map((line) => line.replace(/^\\s*•\\s*/, "").trim())
+        .some(Boolean);
+
+    const syncClearButton = () => {
+      if (!clearButton) return;
+      clearButton.disabled = !hasDraftContent();
+    };
+
+    const clearDraft = () => {
+      localStorage.removeItem(DRAFT_KEY);
+      box.value = "• ";
+      status.textContent = "";
+      status.className = "brain-dump-sheet-status";
+      syncClearButton();
+      box.focus();
+    };
+
     const removeToast = () => document.getElementById("brain-dump-toast")?.remove();
 
     const showToast = (message, isError = false) => {
@@ -1057,6 +1104,7 @@ def _brain_dump_sheet_script() -> str:
       document.body.classList.add("brain-dump-sheet-open");
       status.textContent = "";
       status.className = "brain-dump-sheet-status";
+      syncClearButton();
       window.requestAnimationFrame(() => box.focus());
     };
 
@@ -1080,6 +1128,7 @@ def _brain_dump_sheet_script() -> str:
 
     backdrop?.addEventListener("click", closeSheet);
     closeButton?.addEventListener("click", closeSheet);
+    clearButton?.addEventListener("click", clearDraft);
 
     document.addEventListener("keydown", (event) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "b") {
@@ -1093,9 +1142,30 @@ def _brain_dump_sheet_script() -> str:
       }
     });
 
-    box?.addEventListener("input", () => {
+    box?.addEventListener("compositionstart", () => {{
+      box.dataset.composing = "1";
+    }});
+
+    box?.addEventListener("compositionend", () => {{
+      delete box.dataset.composing;
       applySentenceCaseAtCursor(box);
       localStorage.setItem(DRAFT_KEY, box.value);
+      syncClearButton();
+    }});
+
+    box?.addEventListener("input", (event) => {
+      localStorage.setItem(DRAFT_KEY, box.value);
+      if (
+        box.dataset.composing === "1" ||
+        event.isComposing ||
+        /Composition|Dictation|Handwriting/i.test(String(event.inputType || ""))
+      ) {{
+        syncClearButton();
+        return;
+      }}
+      applySentenceCaseAtCursor(box);
+      localStorage.setItem(DRAFT_KEY, box.value);
+      syncClearButton();
     });
 
     box?.addEventListener("keydown", (event) => {
@@ -1113,6 +1183,7 @@ def _brain_dump_sheet_script() -> str:
       const next = start + insert.length;
       box.selectionStart = box.selectionEnd = next;
       localStorage.setItem(DRAFT_KEY, box.value);
+      syncClearButton();
     });
 
     form?.addEventListener("submit", async (event) => {
@@ -6303,7 +6374,7 @@ def _page(
       box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
     }}
     textarea:focus {{ outline:3px solid var(--focus-ring-shadow); border-color:var(--focus-ring); }}
-    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-backdrop):not(.home-tasks-reveal-button) {{
+    button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button):not(.bottom-nav-sheet-item):not(.brain-dump-fab):not(.brain-dump-sheet-close):not(.brain-dump-sheet-clear):not(.brain-dump-sheet-backdrop):not(.home-tasks-reveal-button) {{
       min-height:54px;
       border:0;
       border-radius:var(--radius-2xl);
@@ -7932,7 +8003,21 @@ function applySentenceCaseAtCursor(element){
 const savedDraft=localStorage.getItem(key)||"";
 box.value=savedDraft ? normalizeBullets(savedDraft) : "• ";
 
-box.addEventListener("input",()=>{
+box.addEventListener("compositionstart",()=>{ box.dataset.composing="1"; });
+box.addEventListener("compositionend",()=>{
+  delete box.dataset.composing;
+  applySentenceCaseAtCursor(box);
+  localStorage.setItem(key,box.value);
+});
+box.addEventListener("input",(event)=>{
+  localStorage.setItem(key,box.value);
+  if(
+    box.dataset.composing==="1" ||
+    event.isComposing ||
+    /Composition|Dictation|Handwriting/i.test(String(event.inputType||""))
+  ){
+    return;
+  }
   applySentenceCaseAtCursor(box);
   localStorage.setItem(key,box.value);
 });

@@ -8,7 +8,7 @@ from pathlib import Path
 WEB = (Path(__file__).resolve().parents[1] / "aios" / "web_capture" / "app.py").read_text()
 
 checks = [
-    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.5"' in WEB),
+    ("version marker", 'WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1.7"' in WEB),
     ("sheet matches app width", "width: min(720px, calc(100% - 40px))" in WEB),
     ("column scrim", 'class="brain-dump-sheet-scrim"' in WEB),
     ("transparent backdrop", "background: transparent" in WEB and ".brain-dump-sheet-backdrop" in WEB),
@@ -24,6 +24,9 @@ checks = [
     ("dashboard button exclusions", ":not(.bottom-nav-sheet-item)" in WEB),
     ("sentence case attribute", 'autocapitalize="sentences"' in WEB),
     ("sentence case helper", "sentenceCaseBulletLine" in WEB),
+    ("dictation-safe input", "compositionstart" in WEB and "Dictation" in WEB),
+    ("clear draft control", 'id="brain-dump-sheet-clear"' in WEB and "clearDraft" in WEB),
+    ("sheet subheading removed", "One task per bullet. Capture from anywhere." not in WEB),
     ("mobile keyboard hints hidden", "keyboard-hint" in WEB and "@media (max-width: 560px)" in WEB),
     ("dashboard card removed", 'id="brainDumpText"' not in WEB),
     ("submit accepts interface", "payload.get('capture_interface')" in WEB),
