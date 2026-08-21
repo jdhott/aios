@@ -13,7 +13,7 @@ from typing import Annotated
 from urllib.parse import quote_plus
 
 import google.auth
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from aios.ingestion.capture_metadata import has_meaningful_capture_text
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -35,12 +35,15 @@ WEB_DASHBOARD_BNA_VERSION = "dashboard-bna-v1-fix1"
 WEB_DASHBOARD_FOCUS_VERSION = "dashboard-focus-v1"
 WEB_DASHBOARD_FOCUS_FIX_VERSION = "dashboard-focus-v1-fix1"
 WEB_TASK_DETAIL_EDIT_VERSION = "task-detail-edit-v1"
-WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.1-return-to-list"
+WEB_TASK_DETAIL_UI_VERSION = "task-detail-ui-v1.3-form-layout-fix"
 WEB_PROJECTS_VERSION = "projects-v1"
 WEB_CREATE_TASK_VERSION = "create-task-v1"
 WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
+WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v3"
+WEB_DARK_MODE_VERSION = "dark-mode-v1"
+WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
 app = FastAPI(
     title="AIOS Brain Dump",
@@ -128,10 +131,109 @@ def _safe_login_next(value: str | None) -> str:
     return target
 
 
-def _mobile_design_tokens() -> str:
+_DARK_DESIGN_TOKENS = """
+      --navy: #9fc2d8;
+      --ink: #edf2f2;
+      --muted: #aab6bb;
+      --paper: #111719;
+      --surface: #182126;
+      --border: #34434a;
+      --focus-yellow: #d4a832;
+      --focus-bg: #2a2618;
+      --accent-soft: rgba(159, 194, 216, 0.10);
+      --highlight: #1e282d;
+      --success: #1a2a22;
+      --error: #2a1e1c;
+      --ok: #8bd3a8;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.28);
+      --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.36);
+      --nav-bg: rgba(24, 33, 38, 0.96);
+      --nav-border: rgba(159, 194, 216, 0.12);
+      --nav-shadow: 0 16px 48px rgba(0, 0, 0, 0.38);
+      --nav-add-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+      --focus-ring: rgba(159, 194, 216, 0.35);
+      --focus-ring-shadow: rgba(159, 194, 216, 0.14);
+      --check-border: rgba(159, 194, 216, 0.35);
+      --check-border-hover: rgba(159, 194, 216, 0.65);
+      --check-glow: rgba(159, 194, 216, 0.14);
+      --button-hover: #243038;
+      --row-hover: #1a2328;
+      --menu-hover: #243038;
+      --toast-error: #4a2828;
+      --theme-color: #182126;
+      --focus-card-glow: rgba(212, 168, 50, 0.22);
+"""
+
+
+def _theme_init_script() -> str:
+    return """<script>(function(){try{var t=localStorage.getItem("aios-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>"""
+
+
+def _theme_meta_tags() -> str:
     return """
-    :root {
-      color-scheme: light;
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#264155" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#182126" media="(prefers-color-scheme: dark)">
+"""
+
+
+def _theme_head_extras() -> str:
+    return _theme_init_script() + _theme_meta_tags()
+
+
+def _theme_toggle_script() -> str:
+    return """
+<script>
+(() => {
+  const STORAGE_KEY = "aios-theme";
+
+  function themeLabel(mode) {
+    if (mode === "light") return "Light";
+    if (mode === "dark") return "Dark";
+    return "System";
+  }
+
+  function storedTheme() {
+    try {
+      const value = localStorage.getItem(STORAGE_KEY);
+      return value === "light" || value === "dark" ? value : "system";
+    } catch (_error) {
+      return "system";
+    }
+  }
+
+  function applyTheme(mode, persist) {
+    if (mode === "light" || mode === "dark") {
+      document.documentElement.setAttribute("data-theme", mode);
+      if (persist) localStorage.setItem(STORAGE_KEY, mode);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      if (persist) localStorage.removeItem(STORAGE_KEY);
+    }
+    document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+      button.textContent = "Appearance: " + themeLabel(mode);
+    });
+  }
+
+  function cycleTheme() {
+    const current = storedTheme();
+    const next = current === "light" ? "dark" : current === "dark" ? "system" : "light";
+    applyTheme(next, true);
+  }
+
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.addEventListener("click", cycleTheme);
+  });
+  applyTheme(storedTheme(), false);
+})();
+</script>
+"""
+
+
+def _mobile_design_tokens() -> str:
+    return f"""
+    :root {{
+      color-scheme: light dark;
       --navy: #264155;
       --ink: #25333D;
       --muted: #687780;
@@ -147,14 +249,274 @@ def _mobile_design_tokens() -> str:
       --highlight: #F0EFEA;
       --success: #EEF6F0;
       --error: #FAEFED;
+      --ok: #2d6a4f;
       --shadow: 0 4px 24px rgba(38, 65, 85, 0.08);
       --shadow-lg: 0 12px 40px rgba(38, 65, 85, 0.12);
+      --nav-bg: rgba(255, 255, 255, 0.96);
+      --nav-border: rgba(38, 65, 85, 0.10);
+      --nav-shadow: 0 16px 48px rgba(38, 65, 85, 0.14);
+      --nav-add-shadow: 0 10px 28px rgba(38, 65, 85, 0.22);
+      --focus-ring: rgba(44, 44, 44, 0.22);
+      --focus-ring-shadow: rgba(44, 44, 44, 0.10);
+      --check-border: rgba(37, 51, 61, 0.32);
+      --check-border-hover: rgba(38, 65, 85, 0.58);
+      --check-glow: rgba(38, 65, 85, 0.12);
+      --button-hover: #eceeed;
+      --row-hover: #fbfbf8;
+      --menu-hover: #f3f4f2;
+      --on-accent: #ffffff;
+      --toast-error: #5C3333;
+      --theme-color: #264155;
+      --focus-card-glow: rgba(255, 201, 60, 0.18);
       --radius-2xl: 20px;
       --line-body: 1.7;
       --line-relaxed: 1.85;
       --nav-offset: calc(108px + env(safe-area-inset-bottom));
-    }
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root:not([data-theme="light"]) {{
+        {_DARK_DESIGN_TOKENS}
+      }}
+    }}
+    :root[data-theme="dark"] {{
+        {_DARK_DESIGN_TOKENS}
+    }}
+    :root[data-theme="light"] {{
+      color-scheme: light;
+    }}
     """
+
+
+def _web_build_info() -> dict[str, str | None]:
+    return {
+        "git_sha": (os.getenv("AIOS_WEB_GIT_SHA") or "").strip() or None,
+        "built_at": (os.getenv("AIOS_WEB_BUILD_TIME") or "").strip() or None,
+        "revision": (os.getenv("K_REVISION") or "").strip() or None,
+        "service": (os.getenv("K_SERVICE") or "").strip() or None,
+    }
+
+
+def _web_version_groups() -> list[dict[str, object]]:
+    return [
+        {
+            "title": "App",
+            "items": [
+                {"label": "Web shell", "version": WEB_CAPTURE_VERSION},
+                {"label": "Main PWA", "version": WEB_MAIN_PWA_VERSION},
+                {"label": "About page", "version": WEB_ABOUT_PAGE_VERSION},
+            ],
+        },
+        {
+            "title": "Dashboard",
+            "items": [
+                {"label": "UI", "version": WEB_DASHBOARD_UI_VERSION},
+                {"label": "Focus card", "version": WEB_DASHBOARD_FOCUS_VERSION},
+                {"label": "Task list polling", "version": WEB_DASHBOARD_TASKS_POLL_VERSION},
+                {"label": "Async actions", "version": WEB_DASHBOARD_ASYNC_V2A_VERSION},
+                {"label": "Fragment polling", "version": WEB_PENDING_FRAGMENT_POLL_VERSION},
+                {"label": "Optimistic complete", "version": WEB_OPTIMISTIC_COMPLETE_VERSION},
+                {"label": "Optimistic snooze", "version": WEB_OPTIMISTIC_SNOOZE_VERSION},
+            ],
+        },
+        {
+            "title": "Tasks",
+            "items": [
+                {"label": "Task detail edit", "version": WEB_TASK_DETAIL_EDIT_VERSION},
+                {"label": "Task detail UI", "version": WEB_TASK_DETAIL_UI_VERSION},
+                {"label": "Async save", "version": WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION},
+                {"label": "Create task", "version": WEB_CREATE_TASK_VERSION},
+            ],
+        },
+        {
+            "title": "Experience",
+            "items": [
+                {"label": "Dark mode", "version": WEB_DARK_MODE_VERSION},
+                {"label": "Projects", "version": WEB_PROJECTS_VERSION},
+            ],
+        },
+    ]
+
+
+def _web_about_payload() -> dict[str, object]:
+    build = _web_build_info()
+    return {
+        "status": "ok",
+        "service": "aios-web-capture",
+        "version": WEB_CAPTURE_VERSION,
+        "about_page": WEB_ABOUT_PAGE_VERSION,
+        "build": build,
+        "feature_groups": _web_version_groups(),
+    }
+
+
+def _about_version_rows(groups: list[dict[str, object]]) -> str:
+    sections: list[str] = []
+    for group in groups:
+        title = html.escape(str(group.get("title") or ""))
+        items = group.get("items") or []
+        rows: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = html.escape(str(item.get("label") or ""))
+            version = html.escape(str(item.get("version") or ""))
+            rows.append(
+                f'<div class="about-row"><span class="about-label">{label}</span>'
+                f'<span class="about-value">{version}</span></div>'
+            )
+        if not rows:
+            continue
+        sections.append(
+            f'<section class="surface-card about-group">'
+            f'<h2 class="about-group-title">{title}</h2>'
+            f'<div class="about-list">{"".join(rows)}</div>'
+            f"</section>"
+        )
+    return "".join(sections)
+
+
+def _about_build_rows(build: dict[str, str | None]) -> str:
+    labels = {
+        "git_sha": "Git commit",
+        "built_at": "Built at (UTC)",
+        "revision": "Cloud Run revision",
+        "service": "Cloud Run service",
+    }
+    rows: list[str] = []
+    for key, label in labels.items():
+        value = str(build.get(key) or "").strip()
+        if not value:
+            continue
+        rows.append(
+            f'<div class="about-row"><span class="about-label">{html.escape(label)}</span>'
+            f'<span class="about-value mono">{html.escape(value)}</span></div>'
+        )
+    if not rows:
+        rows.append(
+            '<p class="about-note">Build metadata appears after the next deploy.</p>'
+        )
+        return "".join(rows)
+    return f'<div class="about-list">{"".join(rows)}</div>'
+
+
+def _about_page(payload: dict[str, object]) -> str:
+    build = dict(payload.get("build") or {})
+    groups = list(payload.get("feature_groups") or [])
+    version_sections = _about_version_rows(groups)
+    build_section = _about_build_rows(build)
+    shell_version = html.escape(str(payload.get("version") or ""))
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+{_theme_head_extras()}
+<title>About · AIOS</title>
+<style>
+{_mobile_shell_css()}
+.about-intro {{
+  margin:0 0 24px;
+  color:var(--muted);
+  font-size:.96rem;
+  line-height:var(--line-relaxed);
+}}
+.about-group {{
+  margin-bottom:20px;
+  padding:22px 20px;
+}}
+.about-group-title {{
+  margin:0 0 14px;
+  font-size:1rem;
+  font-weight:700;
+  color:var(--charcoal);
+}}
+.about-list {{
+  display:grid;
+  gap:0;
+}}
+.about-row {{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:16px;
+  align-items:start;
+  padding:12px 0;
+  border-bottom:1px solid var(--border);
+  line-height:var(--line-body);
+}}
+.about-row:last-child {{ border-bottom:0; padding-bottom:0; }}
+.about-label {{
+  color:var(--ink);
+  font-size:.92rem;
+  font-weight:600;
+}}
+.about-value {{
+  color:var(--muted);
+  font-size:.84rem;
+  font-weight:600;
+  text-align:right;
+  overflow-wrap:anywhere;
+}}
+.about-value.mono {{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.78rem;
+}}
+.about-note {{
+  margin:0;
+  color:var(--muted);
+  font-size:.9rem;
+  line-height:var(--line-relaxed);
+}}
+.about-links {{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:8px;
+}}
+.about-links a {{
+  min-height:44px;
+  display:inline-flex;
+  align-items:center;
+  padding:0 16px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  color:var(--charcoal);
+  text-decoration:none;
+  font-weight:600;
+  background:var(--card);
+}}
+</style>
+</head>
+<body>
+<main>
+  <div class="page-heading">
+    <h1 class="brand">About</h1>
+    <p class="subtitle">Running build <span class="about-value mono">{shell_version}</span></p>
+  </div>
+
+  <p class="about-intro">
+    Use this page to confirm which AIOS web build is live after deploy,
+    especially when testing on a phone or installed PWA.
+  </p>
+
+  <section class="surface-card about-group">
+    <h2 class="about-group-title">Build</h2>
+    {build_section}
+  </section>
+
+  {version_sections}
+
+  <section class="surface-card about-group">
+    <h2 class="about-group-title">Links</h2>
+    <div class="about-links">
+      <a href="/capture">Brain Dump</a>
+      <a href="/">Dashboard</a>
+    </div>
+  </section>
+</main>
+{_bottom_nav_html(active="about")}
+</body>
+</html>"""
 
 
 def _bottom_nav_css() -> str:
@@ -171,12 +533,12 @@ def _bottom_nav_css() -> str:
       justify-content: space-around;
       gap: 4px;
       padding: 10px 14px 12px;
-      background: rgba(255, 255, 255, 0.96);
+      background: var(--nav-bg);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(38, 65, 85, 0.10);
+      border: 1px solid var(--nav-border);
       border-radius: 28px;
-      box-shadow: 0 16px 48px rgba(38, 65, 85, 0.14);
+      box-shadow: var(--nav-shadow);
     }
     .bottom-nav-item {
       position: relative;
@@ -224,7 +586,7 @@ def _bottom_nav_css() -> str:
       background: var(--charcoal);
       color: var(--paper);
       text-decoration: none;
-      box-shadow: 0 10px 28px rgba(38, 65, 85, 0.22);
+      box-shadow: var(--nav-add-shadow);
     }
     .bottom-nav-add .nav-icon {
       font-size: 1.65rem;
@@ -243,7 +605,7 @@ def _bottom_nav_css() -> str:
       padding: 0 5px;
       border-radius: 999px;
       background: var(--charcoal);
-      color: white;
+      color: var(--on-accent);
       font-size: 0.62rem;
       font-weight: 700;
       display: inline-flex;
@@ -404,7 +766,7 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
             f"</a>"
         )
 
-    more_active = active in {"journal", "patterns", "more"}
+    more_active = active in {"journal", "patterns", "more", "about"}
     more_cls = "bottom-nav-item active" if more_active else "bottom-nav-item"
     reviews_badge = str(review_count) if review_count else ""
     add_cls = "bottom-nav-add active" if active == "new" else "bottom-nav-add"
@@ -423,6 +785,8 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
         <span class="nav-label">More</span>
       </summary>
       <div class="bottom-nav-sheet">
+        <button type="button" data-theme-toggle>Appearance: System</button>
+        <a href="/about">About</a>
         <a href="/work-patterns">Work Patterns</a>
         <a href="/journal">Journal</a>
         <form method="post" action="/logout"><button type="submit">Sign Out</button></form>
@@ -445,6 +809,7 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
     }});
   }})();
   </script>
+  {_theme_toggle_script()}
 """
 
 
@@ -456,7 +821,7 @@ def _login_page(next_url: str = "/", error: str = "") -> str:
     )
     return f'''<!doctype html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>Sign in · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -543,6 +908,16 @@ def _api_url() -> str:
 
 
 def _identity_token(audience: str) -> str:
+    cache_for = 3000.0
+    now = time.time()
+    cached = getattr(_identity_token, "_cache", None)
+    if cached is None:
+        cached = {}
+        _identity_token._cache = cached  # type: ignore[attr-defined]
+    entry = cached.get(audience)
+    if entry and entry[1] > now:
+        return entry[0]
+
     impersonate_service_account = (os.getenv("AIOS_LOCAL_IMPERSONATE_SERVICE_ACCOUNT") or "").strip()
     if impersonate_service_account:
         result = subprocess.run(
@@ -556,13 +931,15 @@ def _identity_token(audience: str) -> str:
         token = result.stdout.strip()
         if not token:
             raise RuntimeError("gcloud returned an empty identity token")
-        return token
+    else:
+        request = GoogleAuthRequest()
+        token = id_token.fetch_id_token(
+            request,
+            audience,
+        )
 
-    request = GoogleAuthRequest()
-    return id_token.fetch_id_token(
-        request,
-        audience,
-    )
+    cached[audience] = (token, now + cache_for)
+    return token
 
 
 def _fetch_focus() -> dict | None:
@@ -833,6 +1210,58 @@ def _safe_return_to(value: str | None) -> str:
     return target
 
 
+def _with_fast_return_param(value: str | None) -> str:
+    """Mark return targets that should render immediately and hydrate via polling."""
+    target = _safe_return_to(value)
+    if target.startswith("/projects/"):
+        return target
+    if "fast=1" in target:
+        return target
+    joiner = "&" if "?" in target else "?"
+    return f"{target}{joiner}fast=1"
+
+
+def _task_date_input_value(value: object) -> str:
+    from aios.temporal import local_date_for_task_datetime
+
+    local_date = local_date_for_task_datetime(value)
+    return local_date.isoformat() if local_date else ""
+
+
+def _task_datetime_local_input_value(value: object) -> str:
+    from aios.temporal import local_timezone, task_datetime
+
+    dt = task_datetime(value)
+    if dt is None:
+        return ""
+    return dt.astimezone(local_timezone()).strftime("%Y-%m-%dT%H:%M")
+
+
+def _task_edit_form_payload(
+    *,
+    title: str,
+    context: str = "",
+    due_at: str = "",
+    defer_until: str = "",
+    importance: str = "",
+    urgency: str = "",
+    effort: str = "",
+    duration: str = "",
+    is_just_do_it: str | None = None,
+) -> dict:
+    return {
+        "title": title.strip(),
+        "context": context.strip(),
+        "due_at": due_at,
+        "defer_until": defer_until,
+        "importance": importance,
+        "urgency": urgency,
+        "effort": effort,
+        "duration": duration,
+        "is_just_do_it": is_just_do_it == "true",
+    }
+
+
 def _breakdown_list_editor_html(*, titles: list[str], form_action: str, return_to: str, submit_label: str, cancel_action: str | None = None) -> str:
     rows = []
     for title in titles:
@@ -1098,8 +1527,8 @@ def _task_detail_page(
     task_id = html.escape(str(task.get("id") or ""))
     title = html.escape(str(task.get("title") or ""))
     task_context = html.escape(str(task.get("context") or ""))
-    due_at = html.escape(str(task.get("due_at") or "")[:10])
-    defer_until = html.escape(str(task.get("defer_until") or "")[:10])
+    due_at = html.escape(_task_date_input_value(task.get("due_at")))
+    defer_until = html.escape(_task_datetime_local_input_value(task.get("defer_until")))
     importance = html.escape(str(task.get("importance") or ""))
     urgency = html.escape(str(task.get("urgency") or ""))
     effort = html.escape(str(task.get("effort") or ""))
@@ -1153,7 +1582,7 @@ def _task_detail_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>AIOS Task</title>
 <style>
 {_mobile_shell_css()}
@@ -1180,10 +1609,39 @@ def _task_detail_page(
 }}
 .form-grid {{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:1fr;
   gap:20px;
 }}
+.form-grid label {{ min-width:0; }}
 .full {{ grid-column:1/-1; }}
+.datetime-field {{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  align-items:center;
+}}
+.field-clear {{
+  flex:0 0 auto;
+  min-height:40px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:0 12px;
+  background:var(--card);
+  color:var(--muted);
+  font:inherit;
+  font-size:.82rem;
+  font-weight:600;
+  cursor:pointer;
+  white-space:nowrap;
+}}
+.field-clear.icon {{
+  width:40px;
+  min-width:40px;
+  padding:0;
+  font-size:1.25rem;
+  line-height:1;
+}}
+.field-clear:hover {{ color:var(--charcoal); border-color:var(--charcoal); }}
 label {{
   display:grid;
   gap:10px;
@@ -1194,8 +1652,12 @@ label {{
 }}
 input[type="text"],
 input[type="date"],
+input[type="datetime-local"],
 textarea {{
   width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  min-width:0;
   min-height:48px;
   border:1px solid var(--border);
   border-radius:var(--radius-2xl);
@@ -1206,6 +1668,22 @@ textarea {{
   font-weight:500;
   line-height:var(--line-body);
   outline:none;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}}
+input[type="date"],
+input[type="datetime-local"] {{
+  padding:0 12px;
+  font-size:1rem;
+}}
+@media (max-width:640px) {{
+  .datetime-field {{
+    grid-template-columns:minmax(0,1fr) 40px;
+  }}
+  input[type="date"],
+  input[type="datetime-local"] {{
+    font-size:16px;
+  }}
 }}
 textarea {{
   min-height:96px;
@@ -1213,8 +1691,8 @@ textarea {{
   resize:vertical;
 }}
 input:focus, textarea:focus {{
-  border-color:rgba(44,44,44,.22);
-  box-shadow:0 0 0 3px rgba(44,44,44,.10);
+  border-color:var(--focus-ring);
+  box-shadow:0 0 0 3px var(--focus-ring-shadow);
 }}
 .checkbox-row {{
   display:flex;
@@ -1327,10 +1805,8 @@ input:focus, textarea:focus {{
   font-size:.9rem;
   line-height:var(--line-relaxed);
 }}
-@media (max-width:760px) {{
+@media (max-width:960px) {{
   .layout {{ grid-template-columns:1fr; }}
-  .form-grid {{ grid-template-columns:1fr; }}
-  .full {{ grid-column:auto; }}
   .card {{ padding:22px 20px; }}
 }}
 </style>
@@ -1346,7 +1822,7 @@ input:focus, textarea:focus {{
   {notice}
 
   <div class="layout">
-    <form method="post" action="/tasks/{task_id}/edit">
+    <form method="post" action="/tasks/{task_id}/edit" id="taskEditForm" data-async-save="{WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION}">
       <input type="hidden" name="return_to" value="{return_to}">
       <section class="card">
         <h2 class="card-title">Task Details</h2>
@@ -1362,14 +1838,20 @@ input:focus, textarea:focus {{
             <textarea name="context" rows="4" placeholder="Supporting detail, constraints, or useful context that does not belong in the task title.">{task_context}</textarea>
           </label>
 
-          <label>
+          <label class="full">
             Due date
-            <input type="date" name="due_at" value="{due_at}">
+            <span class="datetime-field">
+              <input type="date" name="due_at" value="{due_at}">
+              <button type="button" class="field-clear icon" data-clear-for="due_at" aria-label="Clear due date">×</button>
+            </span>
           </label>
 
-          <label>
+          <label class="full">
             Defer until
-            <input type="date" name="defer_until" value="{defer_until}">
+            <span class="datetime-field">
+              <input type="datetime-local" name="defer_until" value="{defer_until}">
+              <button type="button" class="field-clear icon" data-clear-for="defer_until" aria-label="Clear defer until">×</button>
+            </span>
           </label>
 
           <label>
@@ -1407,6 +1889,54 @@ input:focus, textarea:focus {{
         </div>
       </section>
     </form>
+<script>
+(() => {{
+  const form = document.getElementById("taskEditForm");
+  if (!form) return;
+
+  form.addEventListener("submit", (event) => {{
+    event.preventDefault();
+    if (form.dataset.saving === "1") return;
+    form.dataset.saving = "1";
+
+    const returnTo = form.querySelector('input[name="return_to"]')?.value || "/";
+    const body = new FormData(form);
+
+    try {{
+      fetch(form.action, {{
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        keepalive: true,
+      }}).catch(() => {{}});
+    }} catch (_error) {{}}
+
+    let returned = false;
+    try {{
+      const targetPath = new URL(returnTo, window.location.origin).pathname;
+      const referrerPath = document.referrer
+        ? new URL(document.referrer, window.location.origin).pathname
+        : "";
+      if (referrerPath && referrerPath === targetPath && window.history.length > 1) {{
+        window.history.back();
+        returned = true;
+      }}
+    }} catch (_error) {{}}
+
+    if (!returned) {{
+      let fastReturn = returnTo;
+      try {{
+        const url = new URL(returnTo, window.location.origin);
+        if (!url.pathname.startsWith("/projects/")) {{
+          url.searchParams.set("fast", "1");
+        }}
+        fastReturn = url.pathname + url.search + url.hash;
+      }} catch (_error) {{}}
+      window.location.assign(fastReturn);
+    }}
+  }});
+}})();
+</script>
 
     <aside class="card">
       <h2 class="card-title">AIOS</h2>
@@ -1465,8 +1995,27 @@ function syncProjectTasks(form) {{ const tasks=Array.from(form.querySelectorAll(
 document.addEventListener('DOMContentLoaded',function(){{ window.aiosInitBreakdownPanel(document.getElementById('breakdown-panel')); document.querySelectorAll('.project-editor-row').forEach(wireProjectTaskRow); document.querySelectorAll('[data-project-task-list]').forEach(function(list){{ list.addEventListener('dragover',function(e){{e.preventDefault(); const dragging=list.querySelector('.dragging'); if(!dragging)return; const candidates=Array.from(list.querySelectorAll('.project-editor-row:not(.dragging)')); const after=candidates.reduce(function(best,child){{const box=child.getBoundingClientRect(),offset=e.clientY-box.top-box.height/2; return offset<0&&offset>best.offset?{{offset:offset,element:child}}:best;}},{{offset:Number.NEGATIVE_INFINITY,element:null}}).element; if(after)list.insertBefore(dragging,after);else list.appendChild(dragging);}});}}); }});
 </script>
 {breakdown_poll_script}
+<script>
+(() => {{
+  document.querySelectorAll(".field-clear").forEach((button) => {{
+    button.addEventListener("click", () => {{
+      const name = button.dataset.clearFor;
+      if (!name) return;
+      const input = document.querySelector(`#taskEditForm [name="${{name}}"]`);
+      if (input) input.value = "";
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>"""
+
+
+def _save_task_detail_background(task_id: str, payload: dict) -> None:
+    try:
+        _update_task_detail(task_id, payload)
+    except Exception as exc:
+        print(f"[Task Edit Background] Save failed for {task_id}:", exc)
 
 
 def _fetch_projects() -> list[dict]:
@@ -1526,7 +2075,7 @@ def _pattern_rows(steps: list[dict]) -> str:
     return ''.join('<div class="pattern-row" draggable="true"><button class="drag" type="button">☷</button><div><input name="step_title" required value="'+html.escape(str(s.get("title") or ""),quote=True)+'" placeholder="Task title"><input name="step_context" value="'+html.escape(str(s.get("context") or ""),quote=True)+'" placeholder="Optional task context"></div><button class="trash" type="button">🗑</button></div>' for s in steps)
 
 def _pattern_shell(title: str, body: str, *, nav_active: str = "more") -> str:
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#264155"><title>{html.escape(title)} · AIOS</title><style>{_mobile_shell_css()}
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{_theme_head_extras()}<title>{html.escape(title)} · AIOS</title><style>{_mobile_shell_css()}
 .card,.pattern-row{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-2xl);box-shadow:var(--shadow)}}
 .card{{padding:24px 22px;margin:0 0 20px;line-height:var(--line-relaxed)}}
 .pattern-row{{display:grid;grid-template-columns:40px 1fr 44px;gap:10px;padding:12px;margin:10px 0}}
@@ -1932,7 +2481,7 @@ def _projects_page(projects: list[dict], error: str = "") -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>AIOS Projects</title>
 <style>
 {_mobile_shell_css()}
@@ -2289,7 +2838,7 @@ def _project_detail_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>{name} · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -2314,37 +2863,37 @@ def _project_detail_page(
 .project-task-row {{ display:grid; grid-template-columns:44px minmax(0,1fr) 44px; gap:10px; }}
 .project-task-editor {{ margin-top:24px; }}
 .project-editor-list {{ display:flex; flex-direction:column; gap:10px; }}
-.project-editor-row {{ display:grid; grid-template-columns:38px 44px minmax(0,1fr) auto 44px 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid #d8dee2; }}
+.project-editor-row {{ display:grid; grid-template-columns:38px 44px minmax(0,1fr) auto 44px 44px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }}
 .project-editor-row.dragging {{ opacity:.45; }}
-.project-drag {{ border:0; background:transparent; cursor:grab; font-size:24px; color:#6a7780; }}
-.project-editor-title {{ width:100%; box-sizing:border-box; font:inherit; font-weight:700; color:#17252e; border:1px solid transparent; border-radius:8px; padding:8px; background:transparent; }}
-.project-editor-title:focus {{ border-color:#9aabb5; background:#fff; outline:none; }}
+.project-drag {{ border:0; background:transparent; cursor:grab; font-size:24px; color:var(--muted); }}
+.project-editor-title {{ width:100%; box-sizing:border-box; font:inherit; font-weight:700; color:var(--ink); border:1px solid transparent; border-radius:8px; padding:8px; background:transparent; }}
+.project-editor-title:focus {{ border-color:var(--border); background:var(--surface); outline:none; }}
 .project-editor-trash {{ border:0; background:transparent; cursor:pointer; font-size:20px; }}
 .project-task-open {{ font-weight:700; white-space:nowrap; }}
 .project-editor-actions {{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:16px; flex-wrap:wrap; }}
-.project-add-task {{ background:#fff; border:1px solid #cbd4d9; border-radius:12px; padding:11px 16px; font-weight:700; cursor:pointer; }}
+.project-add-task {{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:11px 16px; font-weight:700; cursor:pointer; }}
 
 .project-task-main {{ min-width:0; }}
 .project-task-link {{ color:inherit; text-decoration:none; }}
 .project-task-link:hover {{ text-decoration:underline; }}
 .complete-form, .delete-form {{ display:flex; margin:0; align-items:center; justify-content:center; }}
 .complete-checkbox, .trash-button {{ width:44px; height:44px; min-height:44px; padding:0; border:0; border-radius:10px; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; }}
-.complete-checkbox span {{ width:20px; height:20px; border:2px solid #89959b; border-radius:6px; display:block; }}
-.complete-checkbox:hover, .complete-checkbox:focus-visible, .trash-button:hover, .trash-button:focus-visible {{ background:#eceeed; }}
+.complete-checkbox span {{ width:20px; height:20px; border:2px solid var(--muted); border-radius:6px; display:block; }}
+.complete-checkbox:hover, .complete-checkbox:focus-visible, .trash-button:hover, .trash-button:focus-visible {{ background:var(--button-hover); }}
 .trash-button {{ font-size:1.08rem; opacity:.72; }}
 .task-snooze, .project-task-snooze {{ position:relative; }}
 .snooze-icon-button {{ list-style:none; width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1rem; opacity:.72; }}
 .snooze-icon-button::-webkit-details-marker {{ display:none; }}
-.snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:#eceeed; }}
-.task-snooze-menu {{ position:absolute; z-index:30; top:42px; left:0; right:auto; width:min(260px, calc(100vw - 24px)); padding:8px; border:1px solid var(--border); border-radius:12px; background:white; box-shadow:0 8px 24px rgba(38,65,85,.14); }}
+.snooze-icon-button:hover, .snooze-icon-button:focus-visible {{ opacity:1; background:var(--button-hover); }}
+.task-snooze-menu {{ position:absolute; z-index:30; top:42px; left:0; right:auto; width:min(260px, calc(100vw - 24px)); padding:8px; border:1px solid var(--border); border-radius:12px; background:var(--card); box-shadow:var(--shadow-lg); }}
 .task-snooze-menu form {{ display:block; margin:0; }}
 .task-snooze-menu button {{ width:100%; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:.86rem; font-weight:700; text-align:left; cursor:pointer; padding:9px 10px; }}
-.task-snooze-menu button:hover {{ background:#f3f4f2; }}
+.task-snooze-menu button:hover {{ background:var(--menu-hover); }}
 .task-snooze-date {{ display:grid !important; grid-template-columns:minmax(145px,1fr) auto; gap:8px !important; padding:8px 4px 4px; }}
 .task-snooze-date input[type="date"] {{ width:100%; min-width:145px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; font:inherit; font-size:.8rem; }}
 .task-snooze-date button {{ width:auto; white-space:nowrap; }}
 .task-row:last-child {{ border-bottom:0; }}
-.task-row:hover {{ background:#fbfbf8; }}
+.task-row:hover {{ background:var(--row-hover); }}
 .task-title {{ font-weight:700; }}
 .task-parent-meta {{ margin-top:5px; color:var(--muted); font-size:.8rem; line-height:1.35; }}
 .task-parent-meta a {{ color:inherit; text-decoration:underline; font-weight:inherit; }}
@@ -2371,7 +2920,7 @@ def _project_detail_page(
   width:100%; min-height:130px; resize:vertical;
   padding:12px 13px; border:1px solid var(--border);
   border-radius:10px; font:inherit; line-height:1.45;
-  color:var(--ink); background:#fff;
+  color:var(--ink); background:var(--surface);
 }}
 .context-actions {{
   display:flex; justify-content:flex-end;
@@ -2379,7 +2928,7 @@ def _project_detail_page(
 }}
 .context-save {{
   border:0; border-radius:10px;
-  padding:9px 14px; background:var(--charcoal); color:white;
+  padding:9px 14px; background:var(--charcoal); color:var(--on-accent);
   font:inherit; font-weight:750; cursor:pointer;
 }}
 .context-save:hover {{ opacity:.92; }}
@@ -2435,7 +2984,7 @@ def _project_detail_page(
   padding:12px 14px;
   border:1px solid var(--border);
   border-radius:12px;
-  background:#fff;
+  background:var(--surface);
   color:var(--ink);
   font:inherit;
   line-height:1.45;
@@ -2489,7 +3038,7 @@ def _project_detail_page(
 
 .proposal-retry {{
   border:1px solid var(--charcoal);
-  background:white;
+  background:var(--surface);
   color:var(--charcoal);
 }}
 
@@ -2668,7 +3217,7 @@ def _possible_duplicate_new_task_page(review: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>AIOS New Task Review</title>
 <style>
 {_mobile_shell_css()}
@@ -3321,7 +3870,7 @@ def _reviews_page(
 <meta charset="utf-8">
 <meta name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>AIOS Review</title>
 <style>
 {_mobile_shell_css()}
@@ -3395,8 +3944,8 @@ def _reviews_page(
   resize:vertical;
 }}
 .clarification-edit:focus {{
-  outline:3px solid rgba(44,44,44,.12);
-  border-color:rgba(44,44,44,.22);
+  outline:3px solid var(--focus-ring-shadow);
+  border-color:var(--focus-ring);
 }}
 .review-card {{
   background:var(--card);
@@ -3842,7 +4391,7 @@ def _create_task_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>New Task · AIOS</title>
 <style>
 {_mobile_shell_css()}
@@ -4505,15 +5054,25 @@ def _page(
     focus: dict | None = None,
     refresh_focus: bool = False,
     review_count: int = 0,
+    fast_shell: bool = False,
 ) -> str:
     tasks = tasks or {}
     focus_id = str(focus.get("id") or "") if focus else ""
 
-    tasks_view = _tasks_sections_view(tasks, search=search, focus_id=focus_id)
-    task_sections = str(tasks_view["html"])
-    initial_tasks_fingerprint = str(tasks_view["fingerprint"])
+    if fast_shell:
+        task_sections = (
+            '<div id="dashboard-task-groups">'
+            '<div class="focus-pending"><span class="mini-spinner"></span> Loading tasks…</div>'
+            '</div>'
+        )
+        initial_tasks_fingerprint = "fast-shell"
+        tasks_view = {"summary_pending": False}
+    else:
+        tasks_view = _tasks_sections_view(tasks, search=search, focus_id=focus_id)
+        task_sections = str(tasks_view["html"])
+        initial_tasks_fingerprint = str(tasks_view["fingerprint"])
 
-    focus_view = _focus_card_view(focus, refresh_focus=refresh_focus)
+    focus_view = _focus_card_view(focus, refresh_focus=refresh_focus or fast_shell)
     focus_card = str(focus_view["html"])
     refresh_needed = bool(focus_view["pending"])
     initial_focus_fingerprint = str(focus_view["fingerprint"])
@@ -4544,8 +5103,8 @@ function showFocusUpdating() {
 """
 
     focus_poll_config = {
-        "enabled": refresh_needed,
-        "refreshFocus": refresh_focus,
+        "enabled": refresh_needed or fast_shell,
+        "refreshFocus": refresh_focus or fast_shell,
         "initialFocusId": focus_id or None,
         "initialFingerprint": initial_focus_fingerprint,
         "maxAttempts": 15,
@@ -4567,7 +5126,7 @@ function showFocusUpdating() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#264155">
+  {_theme_head_extras()}
   <meta name="application-name" content="AIOS">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -4604,7 +5163,7 @@ function showFocusUpdating() {
     .focus-card.surface-card {{
       background:var(--focus-bg);
       border-color:var(--focus-yellow);
-      box-shadow:0 4px 24px rgba(255, 201, 60, 0.18), var(--shadow);
+      box-shadow:0 4px 24px var(--focus-card-glow), var(--shadow);
     }}
     .tasks-section {{
       --task-check:20px;
@@ -4644,7 +5203,7 @@ function showFocusUpdating() {
     .task-title-row .complete-checkbox span {{
       width:var(--task-check);
       height:var(--task-check);
-      border:1.5px solid rgba(37, 51, 61, 0.32);
+      border:1.5px solid var(--check-border);
       border-radius:50%;
       background:var(--surface);
       box-sizing:border-box;
@@ -4652,7 +5211,7 @@ function showFocusUpdating() {
     }}
     .task-title-row .complete-checkbox:hover span,
     .task-title-row .complete-checkbox:focus-visible span {{
-      border-color:rgba(38, 65, 85, 0.58);
+      border-color:var(--check-border-hover);
       box-shadow:none;
     }}
     .task-title-row .complete-checkbox.is-completing span {{
@@ -4763,7 +5322,7 @@ function showFocusUpdating() {
     .complete-checkbox:hover span,
     .complete-checkbox:focus-visible span {{
       border-color:var(--navy);
-      box-shadow:0 0 0 3px rgba(38, 65, 85, 0.12);
+      box-shadow:0 0 0 3px var(--check-glow);
     }}
     .complete-checkbox.is-completing span {{
       background:var(--navy);
@@ -4919,7 +5478,7 @@ function showFocusUpdating() {
       line-height:var(--line-relaxed);
       box-shadow:inset 0 1px 2px rgba(26,26,26,.03);
     }}
-    textarea:focus {{ outline:3px solid rgba(44,44,44,.12); border-color:rgba(44,44,44,.22); }}
+    textarea:focus {{ outline:3px solid var(--focus-ring-shadow); border-color:var(--focus-ring); }}
     button:not(.complete-checkbox):not(.trash-button):not(.snooze-icon-button):not(.focus-not-now):not(.focus-not-useful):not(.focus-context-help-button):not(.focus-context-answer-button):not(.menu-button):not(.toolbar-button) {{
       min-height:54px;
       border:0;
@@ -4975,7 +5534,7 @@ function showFocusUpdating() {
       margin-left:auto; border:0; background:transparent; color:var(--paper);
       font:inherit; font-weight:700; text-decoration:underline; cursor:pointer; min-height:0;
     }}
-    .optimistic-toast.error {{ background:#5C3333; }}
+    .optimistic-toast.error {{ background:var(--toast-error); }}
     .focus-poll-timeout {{
       display:grid;
       gap:12px;
@@ -6061,6 +6620,15 @@ function showFocusUpdating() {
       if (window.__AIOS_FOCUS_POLL__?.enabled) {{
         startFocusPolling(window.__AIOS_FOCUS_POLL__);
       }}
+
+      if (new URL(window.location.href).searchParams.get("fast") === "1") {{
+        syncDashboardFragments({{ refreshFocus: true }}).finally(() => {{
+          const url = new URL(window.location.href);
+          url.searchParams.delete("fast");
+          const next = url.pathname + (url.search ? url.search : "") + url.hash;
+          window.history.replaceState(null, "", next);
+        }});
+      }}
     }})();
   </script>
 {focus_submit_feedback_script}
@@ -6120,38 +6688,23 @@ _CAPTURE_PWA_MANIFEST = '''{
 _CAPTURE_SERVICE_WORKER = '''const CACHE="aios-capture-v1";const SHELL=["/capture","/capture/manifest.webmanifest"];self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)));self.skipWaiting()});self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})'''
 
 def _capture_pwa_page() -> str:
-    return r'''<!doctype html>
+    return (
+        r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+"""
+        + _theme_head_extras()
+        + r"""
 <link rel="manifest" href="/capture/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/capture/favicon.png">
 <link rel="apple-touch-icon" href="/capture/icon-192.png">
 <title>Brain Dump</title>
 <style>
-:root{
-  color-scheme:light dark;
-  --bg:#F7F6F1;
-  --card:#FFFFFF;
-  --ink:#25333D;
-  --navy:#264155;
-  --muted:#687780;
-  --border:#D9DDDC;
-  --ok:#2d6a4f;
-}
-@media(prefers-color-scheme:dark){
-  :root{
-    --bg:#111719;
-    --card:#182126;
-    --ink:#edf2f2;
-    --navy:#9fc2d8;
-    --muted:#aab6bb;
-    --border:#34434a;
-    --ok:#8bd3a8;
-  }
-}
+"""
+        + _mobile_design_tokens()
+        + r"""
 *{box-sizing:border-box}
 html,body{
   margin:0;
@@ -6162,7 +6715,7 @@ html,body{
   overflow:hidden;
 }
 body{
-  background:var(--bg);
+  background:var(--paper);
   color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
@@ -6187,7 +6740,7 @@ body{
   background:var(--card);
   border:1px solid var(--border);
   border-radius:16px;
-  box-shadow:0 4px 16px rgba(0,0,0,.05);
+  box-shadow:var(--shadow);
 }
 .card-header{
   flex:0 0 auto;
@@ -6227,7 +6780,7 @@ textarea{
   line-height:1.5;
 }
 textarea:focus{
-  outline:2px solid #0b66d4;
+  outline:2px solid var(--focus-ring);
   outline-offset:0;
 }
 .card-footer{
@@ -6236,17 +6789,25 @@ textarea:focus{
   align-items:center;
   gap:10px;
   margin-top:10px;
+  flex-wrap:wrap;
 }
 button{
   border:0;
   border-radius:11px;
-  background:#264155;
-  color:white;
+  background:var(--charcoal);
+  color:var(--on-accent);
   font:inherit;
   font-weight:750;
   padding:9px 16px;
   min-height:40px;
   cursor:pointer;
+}
+.theme-toggle{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--muted);
+  font-size:.82rem;
+  font-weight:600;
 }
 button:disabled{opacity:.55}
 .status{
@@ -6298,6 +6859,7 @@ button:disabled{opacity:.55}
 
       <div class="card-footer">
         <button id="captureButton" type="submit">Capture</button>
+        <button type="button" class="theme-toggle" data-theme-toggle>Appearance: System</button>
         <div class="hint">⌘/Ctrl + Enter</div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </div>
@@ -6400,8 +6962,12 @@ if("serviceWorker" in navigator){
   });
 }
 </script>
+"""
+        + _theme_toggle_script()
+        + """
 </body>
-</html>'''
+</html>"""
+    )
 
 
 @app.get('/manifest.webmanifest')
@@ -6483,11 +7049,27 @@ async def capture_pwa_submit(request: Request, _user: Annotated[str, Depends(_ch
 
 @app.get("/health")
 def health() -> dict:
+    payload = _web_about_payload()
     return {
-        "status": "ok",
-        "service": "aios-web-capture",
-        "version": WEB_CAPTURE_VERSION,
+        "status": payload["status"],
+        "service": payload["service"],
+        "version": payload["version"],
+        "about_page": payload["about_page"],
     }
+
+
+@app.get("/api/about")
+def about_api(
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> JSONResponse:
+    return JSONResponse(_web_about_payload())
+
+
+@app.get("/about", response_class=HTMLResponse)
+def about_web(
+    _user: Annotated[str, Depends(_check_basic_auth)],
+) -> HTMLResponse:
+    return HTMLResponse(_about_page(_web_about_payload()))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -6498,45 +7080,53 @@ def index(
     message=request.query_params.get("message", "")
     error=request.query_params.get("error", "")
     search=request.query_params.get("search", "").strip()
-    try:
-        tasks=_fetch_open_tasks(search=search, limit=50)
-    except Exception:
-        tasks=[]
-        if not error: error="Open tasks could not be loaded."
-    try:
-        focus=_fetch_focus()
-    except Exception as focus_exc:
-        print("[Dashboard Focus] Focus could not be loaded:", focus_exc)
-        focus=None
-
-    try:
-        review_count = len(
-            [
-                review
-                for review in _fetch_reviews()
-                if review.get("state") != "resolved"
-            ]
-        )
-    except Exception as review_exc:
-        print(
-            "[Dashboard] Review count could not be loaded:",
-            review_exc,
-        )
+    fast_shell = request.query_params.get("fast") == "1"
+    if fast_shell:
+        tasks = {}
+        focus = None
         review_count = 0
+        refresh_focus = True
+    else:
+        try:
+            tasks=_fetch_open_tasks(search=search, limit=50)
+        except Exception:
+            tasks=[]
+            if not error: error="Open tasks could not be loaded."
+        try:
+            focus=_fetch_focus()
+        except Exception as focus_exc:
+            print("[Dashboard Focus] Focus could not be loaded:", focus_exc)
+            focus=None
 
-    refresh_focus = (
-        request.query_params.get("refresh_focus") == "1"
-    )
+        try:
+            review_count = len(
+                [
+                    review
+                    for review in _fetch_reviews()
+                    if review.get("state") != "resolved"
+                ]
+            )
+        except Exception as review_exc:
+            print(
+                "[Dashboard] Review count could not be loaded:",
+                review_exc,
+            )
+            review_count = 0
+
+        refresh_focus = (
+            request.query_params.get("refresh_focus") == "1"
+        )
 
     return HTMLResponse(
         _page(
             message=message,
             error=error,
-            tasks=tasks,
+            tasks=tasks if not fast_shell else {},
             search=search,
-            focus=focus,
+            focus=focus if not fast_shell else None,
             refresh_focus=refresh_focus,
             review_count=review_count,
+            fast_shell=fast_shell,
         )
     )
 
@@ -7368,7 +7958,8 @@ def task_detail_web(
                 message=message,
                 error=error,
                 return_to=return_to,
-            )
+            ),
+            headers={"Cache-Control": "no-store"},
         )
     except Exception as exc:
         print("[Task Detail] Render failed:", exc)
@@ -7411,8 +8002,10 @@ def focus_context_save_web(task_id: str, _user: Annotated[str, Depends(_check_ba
 @app.post("/tasks/{task_id}/edit")
 def edit_task_web(
     task_id: str,
+    background_tasks: BackgroundTasks,
     _user: Annotated[str, Depends(_check_basic_auth)],
     title: Annotated[str, Form()],
+    context: Annotated[str, Form()] = "",
     due_at: Annotated[str, Form()] = "",
     defer_until: Annotated[str, Form()] = "",
     importance: Annotated[str, Form()] = "",
@@ -7422,32 +8015,52 @@ def edit_task_web(
     is_just_do_it: Annotated[str | None, Form()] = None,
     return_to: Annotated[str, Form()] = "/",
 ):
-    payload = {
-        "title": title.strip(),
-        "due_at": due_at,
-        "defer_until": defer_until,
-        "importance": importance,
-        "urgency": urgency,
-        "effort": effort,
-        "duration": duration,
-        "is_just_do_it": is_just_do_it == "true",
-    }
-    try:
-        _update_task_detail(task_id, payload)
-        return RedirectResponse(
-            url=_safe_return_to(return_to),
-            status_code=303,
-        )
-    except Exception:
-        safe_return = _safe_return_to(return_to)
-        return RedirectResponse(
-            url=(
-                f"/tasks/{task_id}"
-                f"?error=Task+could+not+be+updated."
-                f"&return_to={safe_return}"
-            ),
-            status_code=303,
-        )
+    payload = _task_edit_form_payload(
+        title=title,
+        context=context,
+        due_at=due_at,
+        defer_until=defer_until,
+        importance=importance,
+        urgency=urgency,
+        effort=effort,
+        duration=duration,
+        is_just_do_it=is_just_do_it,
+    )
+    background_tasks.add_task(_save_task_detail_background, task_id, payload)
+    return RedirectResponse(
+        url=_with_fast_return_param(return_to),
+        status_code=303,
+    )
+
+
+@app.post("/tasks/{task_id}/edit-optimistic")
+def edit_task_optimistic_web(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    _user: Annotated[str, Depends(_check_basic_auth)],
+    title: Annotated[str, Form()],
+    context: Annotated[str, Form()] = "",
+    due_at: Annotated[str, Form()] = "",
+    defer_until: Annotated[str, Form()] = "",
+    importance: Annotated[str, Form()] = "",
+    urgency: Annotated[str, Form()] = "",
+    effort: Annotated[str, Form()] = "",
+    duration: Annotated[str, Form()] = "",
+    is_just_do_it: Annotated[str | None, Form()] = None,
+) -> JSONResponse:
+    payload = _task_edit_form_payload(
+        title=title,
+        context=context,
+        due_at=due_at,
+        defer_until=defer_until,
+        importance=importance,
+        urgency=urgency,
+        effort=effort,
+        duration=duration,
+        is_just_do_it=is_just_do_it,
+    )
+    background_tasks.add_task(_save_task_detail_background, task_id, payload)
+    return JSONResponse({"ok": True, "accepted": True})
 
 
 @app.post("/tasks/{task_id}/breakdown/request")
@@ -7864,7 +8477,7 @@ def _journal_page(journal_date: str, payload: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#264155">
+{_theme_head_extras()}
 <title>{html.escape(heading)} - Daily Journal</title>
 <style>
 {_mobile_shell_css()}
@@ -7940,7 +8553,7 @@ li {{
   line-height:var(--line-relaxed);
 }}
 li:last-child {{ border-bottom:0; }}
-.check {{ color:#2d6a4f; font-weight:900; }}
+.check {{ color:var(--ok); font-weight:900; }}
 .meta {{
   display:flex;
   gap:8px;
@@ -7977,8 +8590,8 @@ textarea {{
   line-height:var(--line-relaxed);
 }}
 textarea:focus {{
-  outline:3px solid rgba(44,44,44,.12);
-  border-color:rgba(44,44,44,.22);
+  outline:3px solid var(--focus-ring-shadow);
+  border-color:var(--focus-ring);
 }}
 #saveStatus {{
   min-height:24px;
@@ -7987,7 +8600,7 @@ textarea:focus {{
   font-size:.88rem;
   line-height:var(--line-body);
 }}
-#saveStatus.saved {{ color:#2d6a4f; }}
+#saveStatus.saved {{ color:var(--ok); }}
 @media(max-width:560px) {{
   textarea {{ min-height:34dvh; }}
 }}

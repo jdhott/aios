@@ -26,6 +26,8 @@ if [ -z "$API_URL" ]; then
 fi
 
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/aios-web:$(git rev-parse --short HEAD)-$(date +%H%M%S)"
+GIT_SHA="$(git rev-parse --short HEAD)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo "=== AIOS WEB CAPTURE V1 DEPLOY ==="
 echo "Project: $PROJECT"
@@ -46,7 +48,7 @@ gcloud run deploy "$WEB_SERVICE" \
   --image "$IMAGE" \
   --service-account "$WEB_RUNTIME_SA" \
   --allow-unauthenticated \
-  --set-env-vars "AIOS_WEB_USERNAME=${WEB_USERNAME},AIOS_API_URL=${API_URL}" \
+  --set-env-vars "AIOS_WEB_USERNAME=${WEB_USERNAME},AIOS_API_URL=${API_URL},AIOS_WEB_GIT_SHA=${GIT_SHA},AIOS_WEB_BUILD_TIME=${BUILD_TIME}" \
   --set-secrets "AIOS_WEB_PASSWORD=${PASSWORD_SECRET}:latest,AIOS_WEB_SESSION_SECRET=${SESSION_SECRET}:latest" \
   --port 8080 \
   --memory 256Mi \
