@@ -7,10 +7,9 @@ ast.parse(web)
 checks = [
     ("dashboard v1.4 marker", 'WEB_DASHBOARD_UI_VERSION = "dashboard-v1.4-compact-capture-toggle"' in web),
     ("Dashboard title", '<h1 class="brand">Dashboard</h1>' in web),
-    ("compact Brain Dump heading", '<h2>Brain Dump</h2>' in web),
-    ("bullet textarea default", '>• </textarea>' in web),
-    ("bullet parser", 'for prefix in ("• ", "- ", "* ")' in web),
-    ("compact textarea", "min-height: 150px;" in web),
+    ("global Brain Dump sheet", 'id="brain-dump-sheet-root"' in web),
+    ("capture fab", 'id="brain-dump-open"' in web),
+    ("bullet parser", "if clean[:1] in {\"•\", \"-\", \"*\"}" in web),
     ("collapsible sections", '<details class="task-group"' in web),
     ("expand all", 'id="expandAllSections"' in web),
     ("collapse all", 'id="collapseAllSections"' in web),

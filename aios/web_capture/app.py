@@ -43,6 +43,7 @@ WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
 WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
+WEB_BRAIN_DUMP_SHEET_VERSION = "brain-dump-sheet-v1"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -340,6 +341,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Optimistic complete", "version": WEB_OPTIMISTIC_COMPLETE_VERSION},
                 {"label": "Optimistic snooze", "version": WEB_OPTIMISTIC_SNOOZE_VERSION},
                 {"label": "Focus context loading", "version": WEB_FOCUS_CONTEXT_LOADING_VERSION},
+                {"label": "Brain Dump sheet", "version": WEB_BRAIN_DUMP_SHEET_VERSION},
             ],
         },
         {
@@ -702,9 +704,407 @@ def _bottom_nav_css() -> str:
     """
 
 
+def _brain_dump_sheet_css() -> str:
+    return """
+    .brain-dump-fab {
+      position: fixed;
+      right: max(14px, calc(50% - 320px + 14px));
+      bottom: calc(var(--nav-offset) + 2px);
+      z-index: 99;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 14px;
+      border: 1px solid var(--nav-border);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--charcoal);
+      box-shadow: var(--shadow);
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .brain-dump-fab:hover,
+    .brain-dump-fab:focus-visible {
+      background: var(--accent-soft);
+      outline: none;
+    }
+    .brain-dump-fab .fab-icon {
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .brain-dump-sheet-root {
+      position: fixed;
+      inset: 0;
+      z-index: 120;
+      display: none;
+      pointer-events: none;
+    }
+    .brain-dump-sheet-root.is-open {
+      display: block;
+      pointer-events: auto;
+    }
+    .brain-dump-sheet-backdrop {
+      position: absolute;
+      inset: 0;
+      border: 0;
+      margin: 0;
+      padding: 0;
+      background: rgba(18, 24, 32, 0.42);
+      cursor: pointer;
+    }
+    .brain-dump-sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: min(88vh, 720px);
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+      border-radius: 24px 24px 0 0;
+      background: var(--card);
+      box-shadow: 0 -18px 48px rgba(18, 24, 32, 0.18);
+      transform: translateY(104%);
+      transition: transform 0.28s ease;
+    }
+    .brain-dump-sheet-root.is-open .brain-dump-sheet {
+      transform: translateY(0);
+    }
+    .brain-dump-sheet-handle {
+      width: 42px;
+      height: 4px;
+      margin: 0 auto 12px;
+      border-radius: 999px;
+      background: var(--border);
+      flex: 0 0 auto;
+    }
+    .brain-dump-sheet-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex: 0 0 auto;
+    }
+    .brain-dump-sheet-header h2 {
+      margin: 0;
+      font-size: 1.12rem;
+      font-weight: 750;
+      color: var(--charcoal);
+    }
+    .brain-dump-sheet-header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: var(--line-relaxed);
+    }
+    .brain-dump-sheet-close {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--charcoal);
+      font: inherit;
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .brain-dump-sheet-form {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .brain-dump-sheet-form textarea {
+      flex: 1 1 auto;
+      min-height: 180px;
+      max-height: min(46vh, 420px);
+      width: 100%;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--paper);
+      color: var(--ink);
+      padding: 14px 16px;
+      font: inherit;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+    .brain-dump-sheet-form textarea:focus {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 0;
+    }
+    .brain-dump-sheet-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex: 0 0 auto;
+    }
+    .brain-dump-sheet-footer .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .brain-dump-sheet-submit {
+      min-height: 44px;
+      border: 0;
+      border-radius: 999px;
+      padding: 0 18px;
+      background: var(--charcoal);
+      color: var(--paper);
+      font: inherit;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .brain-dump-sheet-submit[disabled] {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .brain-dump-sheet-status {
+      min-height: 1.2em;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+    .brain-dump-sheet-status.ok {
+      color: var(--ok);
+    }
+    body.brain-dump-sheet-open {
+      overflow: hidden;
+    }
+    .brain-dump-toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(var(--nav-offset) + 52px);
+      z-index: 130;
+      transform: translateX(-50%);
+      max-width: min(92vw, 420px);
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: var(--charcoal);
+      color: var(--paper);
+      box-shadow: var(--shadow-lg);
+      font-size: 0.88rem;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .brain-dump-toast.error {
+      background: var(--toast-error, #8b2e2e);
+    }
+    @media (max-width: 560px) {
+      .brain-dump-fab-label {
+        display: none;
+      }
+      .brain-dump-fab {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        justify-content: center;
+        border-radius: 999px;
+      }
+    }
+    """
+
+
+def _brain_dump_sheet_html() -> str:
+    return """
+  <div class="brain-dump-sheet-root" id="brain-dump-sheet-root" hidden aria-hidden="true">
+    <button type="button" class="brain-dump-sheet-backdrop" id="brain-dump-sheet-backdrop" aria-label="Close Brain Dump"></button>
+    <section class="brain-dump-sheet" role="dialog" aria-modal="true" aria-labelledby="brain-dump-sheet-title">
+      <div class="brain-dump-sheet-handle" aria-hidden="true"></div>
+      <div class="brain-dump-sheet-header">
+        <div>
+          <h2 id="brain-dump-sheet-title">Brain Dump</h2>
+          <p>One task per bullet. Capture from anywhere.</p>
+        </div>
+        <button type="button" class="brain-dump-sheet-close" id="brain-dump-sheet-close" aria-label="Close">×</button>
+      </div>
+      <form class="brain-dump-sheet-form" id="brain-dump-sheet-form">
+        <textarea id="brain-dump-sheet-text" maxlength="10000" aria-label="Brain dump text" placeholder="• What do you need to remember or act on?"></textarea>
+        <div class="brain-dump-sheet-status" id="brain-dump-sheet-status" role="status" aria-live="polite"></div>
+        <div class="brain-dump-sheet-footer">
+          <p class="hint">⌘/Ctrl + Enter to send</p>
+          <button type="submit" class="brain-dump-sheet-submit" id="brain-dump-sheet-submit">Send to AIOS</button>
+        </div>
+      </form>
+    </section>
+  </div>
+    """
+
+
+def _brain_dump_sheet_script() -> str:
+    return """
+  <script>
+  (() => {
+    const ROOT_ID = "brain-dump-sheet-root";
+    const DRAFT_KEY = "aios-capture-draft-v1";
+    const root = document.getElementById(ROOT_ID);
+    if (!root) return;
+
+    const backdrop = document.getElementById("brain-dump-sheet-backdrop");
+    const closeButton = document.getElementById("brain-dump-sheet-close");
+    const form = document.getElementById("brain-dump-sheet-form");
+    const box = document.getElementById("brain-dump-sheet-text");
+    const button = document.getElementById("brain-dump-sheet-submit");
+    const status = document.getElementById("brain-dump-sheet-status");
+    const openers = () => Array.from(document.querySelectorAll("#brain-dump-open, [data-brain-dump-open]"));
+
+    const normalizeBullets = (value) =>
+      value.split("\\n").map((line) => {
+        if (!line.trim()) return line;
+        return /^\\s*[•*-]\\s+/.test(line) ? line.replace(/^\\s*[•*-]\\s+/, "• ") : "• " + line;
+      }).join("\\n");
+
+    const readDraft = () => {
+      const saved = localStorage.getItem(DRAFT_KEY) || "";
+      box.value = saved ? normalizeBullets(saved) : "• ";
+    };
+
+    const removeToast = () => document.getElementById("brain-dump-toast")?.remove();
+
+    const showToast = (message, isError = false) => {
+      removeToast();
+      const toast = document.createElement("div");
+      toast.id = "brain-dump-toast";
+      toast.className = "brain-dump-toast" + (isError ? " error" : "");
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      window.setTimeout(removeToast, isError ? 5000 : 2600);
+    };
+
+    const openSheet = () => {
+      readDraft();
+      root.hidden = false;
+      root.classList.add("is-open");
+      root.setAttribute("aria-hidden", "false");
+      document.body.classList.add("brain-dump-sheet-open");
+      status.textContent = "";
+      status.className = "brain-dump-sheet-status";
+      window.requestAnimationFrame(() => box.focus());
+    };
+
+    const closeSheet = () => {
+      root.classList.remove("is-open");
+      root.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("brain-dump-sheet-open");
+      window.setTimeout(() => {
+        if (!root.classList.contains("is-open")) root.hidden = true;
+      }, 280);
+    };
+
+    window.aiosOpenBrainDumpSheet = openSheet;
+
+    openers().forEach((el) => {
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        openSheet();
+      });
+    });
+
+    backdrop?.addEventListener("click", closeSheet);
+    closeButton?.addEventListener("click", closeSheet);
+
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        if (!root.classList.contains("is-open")) openSheet();
+        return;
+      }
+      if (event.key === "Escape" && root.classList.contains("is-open")) {
+        event.preventDefault();
+        closeSheet();
+      }
+    });
+
+    box?.addEventListener("input", () => {
+      localStorage.setItem(DRAFT_KEY, box.value);
+    });
+
+    box?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        form?.requestSubmit();
+        return;
+      }
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const start = box.selectionStart;
+      const end = box.selectionEnd;
+      const insert = "\\n• ";
+      box.value = box.value.slice(0, start) + insert + box.value.slice(end);
+      const next = start + insert.length;
+      box.selectionStart = box.selectionEnd = next;
+      localStorage.setItem(DRAFT_KEY, box.value);
+    });
+
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (form.dataset.submitting === "1") return;
+
+      const text = box.value
+        .split("\\n")
+        .map((line) => line.replace(/^\\s*•\\s*/, ""))
+        .join("\\n")
+        .trim();
+
+      if (!text) {
+        status.textContent = "Enter something first.";
+        box.focus();
+        return;
+      }
+
+      form.dataset.submitting = "1";
+      button.disabled = true;
+      status.textContent = "Sending…";
+      status.className = "brain-dump-sheet-status";
+
+      try {
+        const response = await fetch("/capture/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            capture_interface: "capture_sheet_v1",
+          }),
+        });
+        if (!response.ok) throw new Error("Capture failed");
+
+        const payload = await response.json();
+        const sent = Number(payload?.sent || 0);
+        localStorage.removeItem(DRAFT_KEY);
+        box.value = "• ";
+        closeSheet();
+        const label = sent === 1 ? "item" : "items";
+        showToast(sent ? `${sent} ${label} sent to AIOS.` : "Sent to AIOS.");
+      } catch (_error) {
+        status.textContent = "Could not send. Your text is saved—try again.";
+        status.className = "brain-dump-sheet-status";
+        showToast("Brain Dump could not be sent.", true);
+        localStorage.setItem(DRAFT_KEY, box.value);
+      } finally {
+        form.dataset.submitting = "0";
+        button.disabled = false;
+      }
+    });
+  })();
+  </script>
+    """
+
+
 def _mobile_shell_css() -> str:
     return f"""
     {_mobile_design_tokens()}
+    {_brain_dump_sheet_css()}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
@@ -825,6 +1225,11 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
     add_cls = "bottom-nav-add active" if active == "new" else "bottom-nav-add"
 
     return f"""
+  <button type="button" class="brain-dump-fab" id="brain-dump-open" aria-label="Brain Dump (⌘⇧B)">
+    <span class="fab-icon" aria-hidden="true">✎</span>
+    <span class="brain-dump-fab-label">Capture</span>
+  </button>
+  {_brain_dump_sheet_html()}
   <nav class="bottom-nav" aria-label="Primary">
     {item("/", "Home", "⌂", "home")}
     {item("/projects", "Projects", "▦", "projects")}
@@ -842,6 +1247,8 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
           <span>Appearance</span>
           <span class="theme-toggle-value">System</span>
         </button>
+        <button type="button" data-brain-dump-open>Brain Dump</button>
+        <a href="/capture">Brain Dump app</a>
         <a href="/about">About</a>
         <a href="/work-patterns">Work Patterns</a>
         <a href="/journal">Journal</a>
@@ -868,6 +1275,7 @@ def _bottom_nav_html(*, active: str = "home", review_count: int = 0) -> str:
     }});
   }})();
   </script>
+  {_brain_dump_sheet_script()}
   {_theme_toggle_script()}
   {_client_flash_script()}
 """
@@ -5992,33 +6400,10 @@ def _page(
   <main>
     <div class="page-heading">
       <h1 class="brand">Dashboard</h1>
-      <p class="dashboard-subtitle">Capture, prioritize, and act.</p>
+      <p class="dashboard-subtitle">Prioritize and act. Press ⌘⇧B to capture anything.</p>
     </div>
     {notice}
     {focus_card}
-    <section class="surface-card">
-    <form method="post" action="/submit" onsubmit="submitButton.disabled=true;">
-      <div class="capture-heading">
-        <div>
-          <h2>Brain Dump</h2>
-          <p>One task per bullet. Send several at once.</p>
-        </div>
-      </div>
-      <textarea
-        id="brainDumpText"
-        name="text"
-        required
-        autofocus
-        maxlength="10000"
-        placeholder="• First task&#10;• Second task"
-        aria-label="Brain dump text"
-      >• </textarea>
-      <button id="submitButton" name="submitButton" type="submit">
-        Submit to AIOS
-      </button>
-    </form>
-    <p class="hint">AIOS will process this automatically.</p>
-    </section>
     <section class="surface-card tasks-section">
       <div class="tasks-toolbar">
         <h2 class="tasks-heading">Tasks</h2>
@@ -6807,26 +7192,6 @@ def _page(
         }});
       }});
 
-      const brainDump = document.getElementById("brainDumpText");
-      if (brainDump) {{
-        brainDump.addEventListener("keydown", (event) => {{
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-
-          const start = brainDump.selectionStart;
-          const end = brainDump.selectionEnd;
-          const value = brainDump.value;
-          const insertion = "\\n• ";
-
-          brainDump.value =
-            value.slice(0, start) + insertion + value.slice(end);
-
-          const next = start + insertion.length;
-          brainDump.selectionStart = next;
-          brainDump.selectionEnd = next;
-        }});
-      }}
-
       const sectionStateKey = "aios-dashboard-section-state-v1";
       const taskSections = () =>
         Array.from(document.querySelectorAll("details.task-group"));
@@ -7321,11 +7686,12 @@ def capture_service_worker():
 async def capture_pwa_submit(request: Request, _user: Annotated[str, Depends(_check_basic_auth)]):
     payload = await request.json()
     text = str(payload.get('text') or '').strip()
+    capture_interface = str(payload.get('capture_interface') or 'capture_pwa_v1').strip() or 'capture_pwa_v1'
     lines = _split_brain_dump(text)
     if not lines:
         raise HTTPException(status_code=400, detail='Please enter something.')
 
-    sent, failures = _capture_many(lines, capture_interface='capture_pwa_v1')
+    sent, failures = _capture_many(lines, capture_interface=capture_interface)
     if failures:
         if sent == 0:
             raise HTTPException(status_code=502, detail='AIOS could not accept the capture.')

@@ -15,13 +15,14 @@ with patch.dict(os.environ,env,clear=False), patch.object(web,"_fetch_open_tasks
         r=client.get("/",headers=basic("aios","test-password"))
 assert r.status_code==200
 assert ">Dashboard</h1>" in r.text
-assert "<h2>Brain Dump</h2>" in r.text
-assert 'id="brainDumpText"' in r.text
+assert 'id="brain-dump-open"' in r.text
+assert 'id="brain-dump-sheet-root"' in r.text
+assert 'id="brainDumpText"' not in r.text
 assert 'id="expandAllSections"' in r.text
 assert 'id="collapseAllSections"' in r.text
 assert '<details class="task-group"' in r.text
 assert web._split_brain_dump("• One\n• Two\n- Three") == ["One","Two","Three"]
-print("Compact dashboard capture renders: PASS")
+print("Global Brain Dump sheet renders: PASS")
 print("Bullet Brain Dump parsing: PASS")
 print("Collapsible task sections render: PASS")
 print("RESULT: DASHBOARD V1.4 SMOKE TEST PASSED")

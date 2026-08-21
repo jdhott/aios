@@ -210,20 +210,20 @@ Source-neutral capture is now the working model:
 
 **Any capture surface → Supabase inbox → AIOS processing pipeline**
 
-Recent work includes multiline PWA capture using the same shared Brain Dump
-splitter as the web application.
+**Implemented (August 21, 2026):**
 
-Next UI exploration:
+-   **Global Brain Dump bottom sheet (v1)** — Capture FAB + `⌘⇧B` on every main-app
+    page opens a bottom sheet that posts to `/capture/submit` with async feedback.
+    Dashboard card removed; standalone `/capture` PWA retained for home-screen use.
+    Sheet and PWA share the `aios-capture-draft-v1` draft key.
 
--   Consider removing the permanently visible Brain Dump box from the Dashboard.
--   Treat Brain Dump as a global action rather than dashboard information.
--   Add a compact Dashboard/header control that opens Brain Dump in a modal or
-    popover using the existing capture pipeline.
--   Consider a keyboard shortcut for fast capture.
--   Keep the standalone PWA as a thin quick-capture surface rather than launching
-    it from the web app.
+**Still open:**
 
-The goal is one capture model with multiple lightweight entry points.
+-   Preserve capture text on sheet submit errors (partially done via localStorage draft).
+-   Optional Web Share Target / richer PWA install prompts.
+-   Deprecate legacy `POST /submit` dashboard form path when no longer needed.
+
+The goal remains one capture model with multiple lightweight entry points.
 
 ------------------------------------------------------------------------
 
@@ -273,8 +273,8 @@ Possible later refinements:
 
 -   User-selectable task sorting only if normal use demonstrates a real need;
     avoid a complex custom-sort builder.
--   Consider Brain Dump as a global modal/popover action rather than a permanent
-    dashboard section.
+-   Consider Brain Dump as a global bottom-sheet action rather than a permanent
+    dashboard section. **Shipped** — see **Brain Dump everywhere**.
 
 Search is considered complete for now.
 
