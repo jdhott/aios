@@ -42,6 +42,7 @@ WEB_DASHBOARD_TASKS_POLL_VERSION = "dashboard-tasks-poll-v1"
 WEB_DASHBOARD_ASYNC_V2A_VERSION = "dashboard-async-v2a"
 WEB_PENDING_FRAGMENT_POLL_VERSION = "pending-fragment-poll-v2b"
 WEB_TASK_DETAIL_OPTIMISTIC_SAVE_VERSION = "task-detail-async-save-v4"
+WEB_FOCUS_CONTEXT_LOADING_VERSION = "focus-context-loading-v1"
 WEB_DARK_MODE_VERSION = "dark-mode-v2-warm-slate"
 WEB_ABOUT_PAGE_VERSION = "about-page-v1"
 
@@ -338,6 +339,7 @@ def _web_version_groups() -> list[dict[str, object]]:
                 {"label": "Fragment polling", "version": WEB_PENDING_FRAGMENT_POLL_VERSION},
                 {"label": "Optimistic complete", "version": WEB_OPTIMISTIC_COMPLETE_VERSION},
                 {"label": "Optimistic snooze", "version": WEB_OPTIMISTIC_SNOOZE_VERSION},
+                {"label": "Focus context loading", "version": WEB_FOCUS_CONTEXT_LOADING_VERSION},
             ],
         },
         {
@@ -4867,7 +4869,7 @@ def _focus_card_view(
         context_help_button = (
             ""
             if focus_context_state in {"pending", "answer_pending", "ready"}
-            else f'<form method="post" action="/tasks/{safe_id}/focus-context/help"><button class="focus-context-help-button" type="submit">Help me improve this context</button></form>'
+            else f'<form class="focus-context-help-form" method="post" action="/tasks/{safe_id}/focus-context/help"><button class="focus-context-help-button" type="submit">Help me improve this context</button></form>'
         )
         focus_context_html = (
             '<details class="focus-context-panel"'
@@ -4877,7 +4879,7 @@ def _focus_card_view(
             + '<p>Tell AIOS what is already decided, what matters, or what would make the next step more relevant.</p>'
             + context_question_html
             + context_help_status
-            + f'<form method="post" action="/tasks/{safe_id}/focus-context">'
+            + f'<form class="focus-context-save-form" method="post" action="/tasks/{safe_id}/focus-context">'
             + f'<textarea name="context" rows="4" placeholder="What should AIOS know about this task?" class="focus-autoexpand">{html.escape(context_value)}</textarea>'
             + '<button class="focus-context-save" type="submit">Save context &amp; refresh Start Here</button></form>'
             + context_help_button
@@ -5243,17 +5245,6 @@ def _page(
             + "</div>"
         )
 
-    focus_submit_feedback_script = """
-<script>
-function showFocusUpdating() {
-  const card = document.querySelector('.focus-card');
-  if (!card) return true;
-  card.innerHTML = '<div class="focus-label">⭐ Best Next Action</div><div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>';
-  return true;
-}
-</script>
-"""
-
     focus_poll_config = {
         "enabled": refresh_needed or fast_shell,
         "refreshFocus": refresh_focus or fast_shell,
@@ -5597,6 +5588,10 @@ function showFocusUpdating() {
     .focus-context-body p {{ margin:0 0 12px; color:var(--muted); font-size:.9rem; line-height:var(--line-relaxed); }}
     .focus-context-question {{ margin:0 0 12px; padding:12px 14px; border-radius:12px; background:var(--highlight); color:var(--ink); font-size:.9rem; line-height:var(--line-relaxed); }}
     .focus-context-body textarea {{ width:100%; resize:vertical; border:1px solid var(--border); border-radius:12px; padding:12px 14px; font:inherit; font-size:.95rem; line-height:var(--line-relaxed); background:var(--card); }}
+    .focus-context-save[disabled], .focus-context-help-button[disabled], .focus-context-answer-button[disabled] {{
+      opacity:.65;
+      cursor:wait;
+    }}
     .focus-context-save, .focus-context-help-button, .focus-context-answer-button {{ margin-top:10px; min-height:42px; border:0; border-radius:12px; padding:0 14px; font:inherit; font-size:.88rem; font-weight:700; cursor:pointer; }}
     .focus-context-save {{ background:var(--charcoal); color:var(--paper); }}
     .focus-context-help-button {{ background:transparent; color:var(--charcoal); padding-left:0; }}
@@ -6122,6 +6117,131 @@ function showFocusUpdating() {
         window.setTimeout(removeOptimisticToast, 5000);
       }};
 
+      const showFocusUpdating = () => {{
+        const card = document.getElementById("focus-card");
+        if (!card) return;
+        card.innerHTML =
+          '<div class="focus-label">⭐ Best Next Action</div>' +
+          '<div class="focus-pending"><span class="mini-spinner"></span> Updating your focus…</div>';
+      }};
+
+      const showFocusContextCoachingPending = (form) => {{
+        const panel = form?.closest(".focus-context-panel");
+        if (!panel) return;
+        panel.open = true;
+        const body = panel.querySelector(".focus-context-body");
+        if (!body) return;
+        let pending = body.querySelector(".focus-context-pending");
+        if (!pending) {{
+          pending = document.createElement("div");
+          pending.className = "focus-context-pending";
+          pending.innerHTML =
+            '<span class="mini-spinner"></span> ' +
+            '<span class="focus-context-processing">' +
+            '<span class="focus-context-spinner" aria-hidden="true"></span>' +
+            "Improving your context…</span>";
+          const anchor =
+            body.querySelector(".focus-context-question") ||
+            body.querySelector("p");
+          if (anchor) {{
+            anchor.insertAdjacentElement("afterend", pending);
+          }} else {{
+            body.prepend(pending);
+          }}
+        }}
+        pending.hidden = false;
+        body.querySelectorAll('button[type="submit"]').forEach((button) => {{
+          button.disabled = true;
+          if (button.classList.contains("focus-context-answer-button")) {{
+            button.textContent = "Sending…";
+          }} else if (button.classList.contains("focus-context-help-button")) {{
+            button.textContent = "Starting…";
+          }}
+        }});
+        body.querySelectorAll("textarea").forEach((field) => {{
+          field.readOnly = true;
+        }});
+      }};
+
+      const showFocusContextSaving = (form) => {{
+        const button = form?.querySelector('button[type="submit"]');
+        if (button) {{
+          button.disabled = true;
+          button.textContent = "Saving…";
+        }}
+        showFocusUpdating();
+      }};
+
+      const bindFocusContextForm = (form) => {{
+        if (form.dataset.aiosFocusContextBound === "1") return;
+        form.dataset.aiosFocusContextBound = "1";
+        form.addEventListener("submit", async (event) => {{
+          event.preventDefault();
+          if (form.dataset.submitting === "1") return;
+          form.dataset.submitting = "1";
+
+          const action = form.getAttribute("action") || "";
+          const isHelp = action.includes("/focus-context/help");
+          const isAnswer = action.includes("/focus-context/answer");
+          const isCoaching = isHelp || isAnswer;
+          const card = document.getElementById("focus-card");
+          const focusHtml = card ? card.innerHTML : null;
+          const panel = form.closest(".focus-context-panel");
+          const panelHtml = panel ? panel.innerHTML : null;
+
+          if (isCoaching) {{
+            showFocusContextCoachingPending(form);
+          }} else {{
+            showFocusContextSaving(form);
+          }}
+
+          const formData = new FormData(form);
+          const submitter = event.submitter;
+          if (submitter?.name) {{
+            formData.set(submitter.name, submitter.value);
+          }}
+
+          try {{
+            const response = await fetch(action, {{
+              method: "POST",
+              headers: {{ "X-Requested-With": "fetch" }},
+              body: formData,
+            }});
+            if (!response.ok) throw new Error("Focus context request failed");
+
+            const taskId =
+              card?.dataset.taskId ||
+              action.split("/tasks/")[1]?.split("/")[0] ||
+              null;
+            startFocusPolling({{
+              refreshFocus: true,
+              initialFocusId: taskId,
+              maxAttempts: isCoaching ? 24 : 15,
+            }});
+            const nextUrl = new URL(window.location.href);
+            nextUrl.pathname = "/";
+            nextUrl.search = "?refresh_focus=1";
+            nextUrl.hash = "focus-card";
+            window.history.replaceState(null, "", nextUrl.toString());
+          }} catch (_error) {{
+            form.dataset.submitting = "0";
+            if (isCoaching && panel && panelHtml !== null) {{
+              panel.innerHTML = panelHtml;
+              initFocusCard(card);
+            }} else if (!isCoaching && card && focusHtml !== null) {{
+              card.innerHTML = focusHtml;
+              initFocusCard(card);
+            }}
+            const message = isAnswer
+              ? "Your answer could not be sent."
+              : isHelp
+                ? "Context help could not be started."
+                : "Context could not be saved.";
+            showOptimisticErrorToast(message, () => form.requestSubmit());
+          }}
+        }});
+      }};
+
       const syncDashboardFragments = async ({{ refreshFocus = false }} = {{}}) => {{
         const focusUrl = new URL("/api/focus-card", window.location.origin);
         if (refreshFocus) {{
@@ -6437,6 +6557,9 @@ function showFocusUpdating() {
         card.querySelectorAll(".delete-form").forEach(bindDeleteForm);
         card.querySelectorAll(".task-snooze-menu form").forEach(bindSnoozeForm);
         card.querySelectorAll("details.task-snooze, details.focus-snooze").forEach(bindSnoozeMenu);
+        card.querySelectorAll(
+          ".focus-context-save-form, .focus-context-help-form, .focus-context-answer-form"
+        ).forEach(bindFocusContextForm);
         initFocusTextareas(card);
       }};
 
@@ -6783,7 +6906,6 @@ function showFocusUpdating() {
       }}
     }})();
   </script>
-{focus_submit_feedback_script}
 {focus_poll_script}
 {dashboard_tasks_script}
 <script>

@@ -293,25 +293,27 @@ interaction, and human-readable labels.
     `/edit-optimistic`, shows **Saving…** on the button, surfaces inline errors on
     failure, and displays a **Task saved.** flash on return (including
     `history.back()` via `sessionStorage`).
+-   **Focus context loading feedback (v1)** — Dashboard focus-context save, help,
+    and answer forms submit via fetch with immediate loading UI (**Saving…**,
+    **Updating your focus…**, **Improving your context…**), then poll the focus
+    card until processor work completes. Errors show a retry toast.
 
 #### Next opportunities (priority order)
 
-1.  **Focus context loading feedback** — wire existing `showFocusUpdating()` or
-    fetch + poll when submitting context coaching forms.
-2.  **Empty-state copy fixes** — dashboard “No matching tasks” when no search;
+1.  **Empty-state copy fixes** — dashboard “No matching tasks” when no search;
     reviews “All caught up” when both queues are empty.
-3.  **Review resolution confirmation** — brief success toast/banner after
+2.  **Review resolution confirmation** — brief success toast/banner after
     accepting or dismissing a review card.
-4.  **Journal summary polling** — auto-refresh pending daily summary on today’s
+3.  **Journal summary polling** — auto-refresh pending daily summary on today’s
     journal page.
-5.  **Project name on task detail** — replace raw Project ID; optional project
+4.  **Project name on task detail** — replace raw Project ID; optional project
     picker on create/edit.
-6.  **Project page optimistic complete/snooze** — align with dashboard patterns.
-7.  **Preserve form data on errors** — create-task and dashboard Brain Dump
+5.  **Project page optimistic complete/snooze** — align with dashboard patterns.
+6.  **Preserve form data on errors** — create-task and dashboard Brain Dump
     failures should keep user input.
-8.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
+7.  **Shared toast/banner system** — unify scattered `?message=` / `?error=`
     query-param notices.
-9.  **Hide or collapse BNA Rank/Score** for normal daily use.
+8.  **Hide or collapse BNA Rank/Score** for normal daily use.
 
 #### UX principles
 
@@ -669,8 +671,8 @@ sequence is:
 7.  Design Recurring Tasks before implementation.
 8.  Observe AI spend optimizations in normal use for a few days; revisit
     **AI usage / credit efficiency** next opportunities if needed.
-9.  Continue **UX polish and feedback consistency** — focus context loading
-    feedback and empty-state copy fixes are next after task save feedback.
+9.  Continue **UX polish and feedback consistency** — empty-state copy fixes are
+    next after focus context loading feedback.
 10. Consider SSE (Phase 3) only if polling validation shows latency or
     load problems worth solving, or processor event emission is ready.
 11. Choose subsequent improvements based on actual AIOS usage rather
